@@ -1,0 +1,393 @@
+@import url('https://fonts.googleapis.com/css2?family=Ubuntu:wght@300;400;500;700&family=Inter:wght@300;400;500;600;700&display=swap');
+@import "tailwindcss";
+@import "tw-animate-css";
+
+
+
+/* ============================================================
+   BLOB DRIFT ANIMATIONS (hero background)
+   ============================================================ */
+@keyframes blob-drift-1 {
+  0%, 100% { transform: translate(0px, 0px) scale(1); }
+  25%       { transform: translate(22px, -16px) scale(1.03); }
+  50%       { transform: translate(38px, 12px) scale(0.97); }
+  75%       { transform: translate(12px, 28px) scale(1.02); }
+}
+@keyframes blob-drift-2 {
+  0%, 100% { transform: translate(0px, 0px) scale(1); }
+  33%       { transform: translate(-32px, 20px) scale(1.04); }
+  66%       { transform: translate(20px, -28px) scale(0.96); }
+}
+@keyframes blob-drift-3 {
+  0%, 100% { transform: translate(0px, 0px) scale(1); }
+  50%       { transform: translate(-22px, -20px) scale(1.05); }
+}
+
+.blob-anim-1 { animation: blob-drift-1 16s ease-in-out infinite; }
+.blob-anim-2 { animation: blob-drift-2 20s ease-in-out infinite; animation-delay: -5s; }
+.blob-anim-3 { animation: blob-drift-3 18s ease-in-out infinite; animation-delay: -9s; }
+
+/* ============================================================
+   SCROLL REVEAL ANIMATIONS
+   ============================================================ */
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(36px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes fadeInLeft {
+  from { opacity: 0; transform: translateX(-40px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+@keyframes fadeInRight {
+  from { opacity: 0; transform: translateX(40px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+@keyframes scaleIn {
+  from { opacity: 0; transform: scale(0.88); }
+  to   { opacity: 1; transform: scale(1); }
+}
+
+/* Base state: hidden */
+.scroll-reveal {
+  opacity: 0;
+  transform: translateY(36px);
+  transition: opacity 0.7s cubic-bezier(0.22, 1, 0.36, 1),
+              transform 0.7s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.scroll-reveal.from-left {
+  transform: translateX(-40px);
+}
+.scroll-reveal.from-right {
+  transform: translateX(40px);
+}
+.scroll-reveal.scale {
+  transform: scale(0.88);
+  opacity: 0;
+}
+
+/* Visible state: added by IntersectionObserver */
+.scroll-reveal.is-visible {
+  opacity: 1;
+  transform: translateY(0) translateX(0) scale(1);
+}
+
+/* Stagger delays */
+.delay-100 { transition-delay: 0.1s; }
+.delay-200 { transition-delay: 0.2s; }
+.delay-300 { transition-delay: 0.3s; }
+.delay-400 { transition-delay: 0.4s; }
+.delay-500 { transition-delay: 0.5s; }
+.delay-600 { transition-delay: 0.6s; }
+
+/* ============================================================
+   HERO: FLOATING MOCKUP
+   ============================================================ */
+@keyframes float {
+  0%, 100% { transform: translateY(0px); }
+  50%       { transform: translateY(-12px); }
+}
+.floating {
+  animation: float 5s ease-in-out infinite;
+}
+
+/* ============================================================
+   HERO: SHIMMER ON BUTTONS
+   ============================================================ */
+@keyframes shimmer {
+  0%   { background-position: -200% center; }
+  100% { background-position: 200% center; }
+}
+.shimmer-btn {
+  position: relative;
+  overflow: hidden;
+}
+.shimmer-btn::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    105deg,
+    transparent 40%,
+    rgba(255,255,255,0.28) 50%,
+    transparent 60%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 2.4s linear infinite;
+  border-radius: inherit;
+  pointer-events: none;
+}
+
+/* ============================================================
+   GLOW PULSE (AI section icons)
+   ============================================================ */
+@keyframes glowPulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(36, 97, 255, 0); }
+  50%       { box-shadow: 0 0 20px 4px rgba(36, 97, 255, 0.35); }
+}
+.glow-pulse {
+  animation: glowPulse 2.5s ease-in-out infinite;
+}
+.glow-pulse-violet {
+  animation: glowPulse 2.5s ease-in-out infinite;
+}
+
+/* ============================================================
+   ANIMATED GRADIENT BACKGROUND (CTA section)
+   ============================================================ */
+@keyframes gradientShift {
+  0%   { background-position: 0% 50%; }
+  50%  { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+.animated-gradient-bg {
+  background-size: 300% 300%;
+  animation: gradientShift 8s ease infinite;
+}
+
+/* ============================================================
+   NAVBAR: scroll-aware shadow
+   ============================================================ */
+.navbar-scrolled {
+  box-shadow: 0 4px 24px rgba(10, 22, 40, 0.10);
+  background: rgba(255, 255, 255, 0.95) !important;
+}
+
+/* ============================================================
+   CARD HOVER LIFT
+   ============================================================ */
+.card-hover-lift {
+  transition: transform 0.3s cubic-bezier(0.22, 1, 0.36, 1),
+              box-shadow 0.3s cubic-bezier(0.22, 1, 0.36, 1),
+              border-color 0.3s ease;
+}
+.card-hover-lift:hover {
+  transform: translateY(-6px);
+  box-shadow: 0 20px 48px -12px rgba(36, 97, 255, 0.18);
+}
+
+/* ============================================================
+   ICON BOUNCE ON HOVER
+   ============================================================ */
+.icon-bounce {
+  transition: transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.card-hover-lift:hover .icon-bounce {
+  transform: scale(1.18) rotate(-4deg);
+}
+
+/* ============================================================
+   CONNECTOR LINE (HowItWorks) — animated dash
+   ============================================================ */
+@keyframes dashMove {
+  to { stroke-dashoffset: -80; }
+}
+.animated-dash {
+  stroke-dasharray: 12 8;
+  animation: dashMove 1.4s linear infinite;
+}
+
+/* ============================================================
+   STAT COUNTER — pop in
+   ============================================================ */
+@keyframes popIn {
+  from { transform: scale(0.7); opacity: 0; }
+  to   { transform: scale(1); opacity: 1; }
+}
+.stat-pop {
+  opacity: 0;
+  transition: opacity 0.01s;
+}
+.stat-pop.is-visible {
+  animation: popIn 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+}
+
+/* ============================================================
+   BADGE PULSE (hero badge)
+   ============================================================ */
+@keyframes badgePulse {
+  0%, 100% { transform: scale(1); }
+  50%       { transform: scale(1.04); }
+}
+.badge-pulse {
+  animation: badgePulse 3s ease-in-out infinite;
+}
+
+/* ============================================================
+   INDUSTRY CARD: inner blob parallax on hover
+   ============================================================ */
+.industry-card .inner-blob {
+  transition: transform 0.5s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.4s ease;
+}
+.industry-card:hover .inner-blob {
+  transform: scale(1.4) translate(-10px, 10px);
+  opacity: 0.9;
+}
+
+/* ============================================================
+   ACTIVE DOT (sidebar in mockup)
+   ============================================================ */
+@keyframes activePing {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.4; }
+}
+.active-dot {
+  animation: activePing 2s ease-in-out infinite;
+}
+
+/* ============================================================
+   HERO TYPING CURSOR
+   ============================================================ */
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0; }
+}
+.cursor-blink {
+  display: inline-block;
+  width: 3px;
+  height: 1em;
+  background: currentColor;
+  margin-left: 2px;
+  vertical-align: text-bottom;
+  animation: blink 1s step-end infinite;
+}
+
+/* ============================================================
+   FOOTER GRADIENT DIVIDER
+   ============================================================ */
+.footer-divider {
+  background: linear-gradient(90deg, transparent, rgba(36,97,255,0.4), rgba(124,58,237,0.4), transparent);
+  height: 1px;
+}
+
+/* ============================================================
+   BASE STYLES
+   ============================================================ */
+@custom-variant dark (&:is(.dark *));
+
+body {
+  font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
+    Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+}
+
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --radius-2xl: calc(var(--radius) + 8px);
+  --radius-3xl: calc(var(--radius) + 12px);
+  --radius-4xl: calc(var(--radius) + 16px);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+}
+
+:root {
+  --radius: 0.625rem;
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.145 0 0);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.145 0 0);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.145 0 0);
+  --primary: oklch(0.205 0 0);
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.97 0 0);
+  --secondary-foreground: oklch(0.205 0 0);
+  --muted: oklch(0.97 0 0);
+  --muted-foreground: oklch(0.556 0 0);
+  --accent: oklch(0.97 0 0);
+  --accent-foreground: oklch(0.205 0 0);
+  --destructive: oklch(0.577 0.245 27.325);
+  --border: oklch(0.922 0 0);
+  --input: oklch(0.922 0 0);
+  --ring: oklch(0.708 0 0);
+  --chart-1: oklch(0.646 0.222 41.116);
+  --chart-2: oklch(0.6 0.118 184.704);
+  --chart-3: oklch(0.398 0.07 227.392);
+  --chart-4: oklch(0.828 0.189 84.429);
+  --chart-5: oklch(0.769 0.188 70.08);
+  --sidebar: oklch(0.985 0 0);
+  --sidebar-foreground: oklch(0.145 0 0);
+  --sidebar-primary: oklch(0.205 0 0);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.97 0 0);
+  --sidebar-accent-foreground: oklch(0.205 0 0);
+  --sidebar-border: oklch(0.922 0 0);
+  --sidebar-ring: oklch(0.708 0 0);
+}
+
+.dark {
+  --background: oklch(0.145 0 0);
+  --foreground: oklch(0.985 0 0);
+  --card: oklch(0.205 0 0);
+  --card-foreground: oklch(0.985 0 0);
+  --popover: oklch(0.205 0 0);
+  --popover-foreground: oklch(0.985 0 0);
+  --primary: oklch(0.922 0 0);
+  --primary-foreground: oklch(0.205 0 0);
+  --secondary: oklch(0.269 0 0);
+  --secondary-foreground: oklch(0.985 0 0);
+  --muted: oklch(0.269 0 0);
+  --muted-foreground: oklch(0.708 0 0);
+  --accent: oklch(0.269 0 0);
+  --accent-foreground: oklch(0.985 0 0);
+  --destructive: oklch(0.704 0.191 22.216);
+  --border: oklch(1 0 0 / 10%);
+  --input: oklch(1 0 0 / 15%);
+  --ring: oklch(0.556 0 0);
+  --chart-1: oklch(0.488 0.243 264.376);
+  --chart-2: oklch(0.696 0.17 162.48);
+  --chart-3: oklch(0.769 0.188 70.08);
+  --chart-4: oklch(0.627 0.265 303.9);
+  --chart-5: oklch(0.645 0.246 16.439);
+  --sidebar: oklch(0.205 0 0);
+  --sidebar-foreground: oklch(0.985 0 0);
+  --sidebar-primary: oklch(0.488 0.243 264.376);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.269 0 0);
+  --sidebar-accent-foreground: oklch(0.985 0 0);
+  --sidebar-border: oklch(1 0 0 / 10%);
+  --sidebar-ring: oklch(0.556 0 0);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+}

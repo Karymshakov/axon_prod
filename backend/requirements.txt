@@ -1,0 +1,35 @@
+# Django 5.2 LTS + DRF
+django>=5.2,<5.3
+djangorestframework>=3.16.1
+djangorestframework-simplejwt>=5.3
+django-cors-headers>=4.6
+django-filter>=25.2
+drf-spectacular>=0.29
+django-environ>=0.12
+psycopg[binary]>=3.2
+whitenoise>=6.8
+
+# Production server (WSGI via Gunicorn + ASGI via Uvicorn)
+gunicorn>=21.2.0
+uvicorn[standard]>=0.32
+
+# Background task processing
+celery>=5.4
+redis>=5.0
+
+# Telegram bot integration
+python-telegram-bot>=21.0
+requests>=2.32
+
+# AI integration
+openai>=1.58
+langgraph>=0.2.70
+numpy>=2.2
+google-genai>=1.0
+
+# Audit logging
+django-auditlog>=3.0
+Pillow
+
+# Excel parsing
+openpyxl>=3.1
