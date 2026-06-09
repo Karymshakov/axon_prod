@@ -20,7 +20,8 @@ jobs:
           script: |
             cd /home/Axon_prod/Axon_prod/axon_prod
 
-            git pull origin master
+            git fetch origin
+            git reset --hard origin/master
 
             docker compose down
             docker compose up -d --build
