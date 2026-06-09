@@ -1,257 +1,172 @@
-# CAYU CRM — Автоматизация Продаж и Бронирования Отелей с ИИ
+# CAYU CRM — Автоматизация бронирования отелей и продаж с использованием ИИ
 
-Добро пожаловать в репозиторий **CAYU CRM** — современной мультиарендной (Multi-tenant) CRM-системы, спроектированной для автоматизации коммуникаций, бронирования номеров и управления лидами в отельном бизнесе.
-
-Система интегрирует возможности больших языковых моделей (LLM) через специализированных ИИ-ассистентов, которые могут вести диалог с гостями в WhatsApp, Telegram и Instagram, автоматически рассчитывать стоимость проживания на основе гибких тарифов, отвечать на вопросы и передавать управление человеку при необходимости.
+CAYU CRM — это мультиарендная (Multi-tenant) CRM-система, разработанная для отельного бизнеса с целью автоматизации общения с гостями, управления лидами и обработки бронирований с помощью специализированных ИИ-агентов на базе LLM в таких каналах связи, как WhatsApp, Telegram и Instagram.
 
 ---
 
-## 🏗️ Архитектура Системы
+## 🏗️ Архитектура
 
-Проект разделен на три основных компонента:
-1. **Frontend (Web)**: Панель администратора и менеджера, построенная на React + Vite + TypeScript.
-2. **Backend (Django API)**: Мощный REST API на Django & Django REST Framework, управляющий бизнес-логикой, базой данных и роутингом AI.
-3. **Celery Worker**: Асинхронный обработчик задач для отправки сообщений, планирования последующих контактов (follow-ups) и фоновых запусков AI-агентов.
-
-### Схема взаимодействия компонентов
-
-```text
-                  +-----------------------------------+
-                  |          Клиент (React)           |
-                  +-----------------+-----------------+
-                                    | HTTP / WebSockets
-                                    v
-                  +-----------------+-----------------+
-                  |      Django REST Framework API    |
-                  +--------+--------+--------+--------+
-                           |        |        |
-         +-----------------+        |        +-----------------+
-         | PostgreSQL               | Redis                    | LLM API
-         v                          v                          v
-+--------+--------+       +---------+--------+       +---------+--------+
-| База Данных (DB)|       | Celery Task Queue|       |  Gemini / OpenAI |
-+-----------------+       +---------+--------+       +-----------------+
-                                    |
-                                    v
-                          +---------+--------+
-                          | Celery Worker    |
-                          +------------------+
+```mermaid
+graph TD
+    Client["Панель управления (React / Vite)"] <-->|HTTP / WebSockets| API["Backend API (Django REST Framework)"]
+    Mobile["Мобильное приложение (React Native / Expo)"] <-->|HTTP / WebSockets| API
+    API <-->|Чтение / Запись| DB[("PostgreSQL")]
+    API <-->|Очередь задач / Кэш| Redis[("Redis")]
+    CeleryWorker["Celery-воркер"] <-->|Обработка задач| Redis
+    CeleryBeat["Celery Beat (Планировщик)"] -->|Запуск задач| Redis
+    CeleryWorker <-->|Чтение / Запись| DB
+    CeleryWorker <-->|Запросы API| AIProviders["ИИ-провайдеры (Gemini / OpenAI / Groq / DeepSeek)"]
+    API <-->|Запросы API| AIProviders
 ```
 
 ---
 
-## 🤖 Специализированные ИИ-Агенты
+## 🛠️ Стек технологий
 
-В CAYU CRM реализована мультиагентная архитектура на базе LLM:
-* **Router Agent (`router`)** — Входная точка. Анализирует сообщение гостя и определяет его намерение, перенаправляя контекст соответствующему специализированному агенту.
-* **Booking Agent (`booking`)** — Отвечает за сбор параметров бронирования (даты заезда/выезда, количество человек, тип номера) и рассчитывает итоговую цену проживания на основе загруженной сетки тарифов.
-* **Consultant Agent (`consultant`)** — Отвечает на любые часто задаваемые вопросы (FAQ) об отеле (правила отмены, питание, парковка, Wi-Fi, локация, дополнительные услуги).
-* **Customer Service Agent (`cs`)** — Обрабатывает жалобы, отзывы и решает послепродажные вопросы гостей.
-
-> [!TIP]
-> **Перехват управления (Manual Takeover)**: В любой момент менеджер может приостановить работу ИИ для конкретного лида (`ai_paused=True` в карточке лида) и ответить клиенту напрямую через чат.
-
----
-
-## 📋 Системные Требования
-
-Для локального запуска и разработки вам понадобятся:
-
-| Компонент | Минимальная версия | Рекомендуется |
+| Компонент | Технология | Версия |
 | :--- | :--- | :--- |
-| **Python** | 3.10 | 3.12+ |
-| **Node.js** | 18.0 | 20.0+ |
-| **PostgreSQL** | 14.0 | 16.0+ |
-| **Redis** | 6.0 | 7.0+ |
+| **Backend API** | Django REST Framework | Django ^5.2 (LTS), DRF ^3.16.1 |
+| **Очередь задач / Кэш** | Redis | Redis ^7.0 |
+| **База данных** | PostgreSQL | PostgreSQL ^17.0 |
+| **Асинхронные задачи** | Celery | Celery ^5.4 |
+| **Frontend Web** | React + TypeScript + Vite | React ^19.0, Vite ^6.0, TypeScript ~5.7.2 |
+| **Мобильное приложение** | React Native (Expo) | React Native ^0.81.5, Expo ^54.0.31 |
+| **Стилизация** | Tailwind CSS | Tailwind ^4.1.18 |
+| **Интеграция ИИ** | LangGraph & SDKs | LangGraph ^0.2.70, OpenAI ^1.58, Google GenAI ^1.0 |
 
 ---
 
-## ⚙️ Конфигурация Окружения (`.env`)
+## 🚀 Быстрый старт
 
-Создайте файл `.env` в корневой директории бэкенда (`backend/.env`). Пример файла:
+Запустите весь стек локально с помощью Docker Compose всего за несколько команд:
 
-| Переменная | Описание | Пример значения |
-| :--- | :--- | :--- |
-| `DATABASE_URL` | Строка подключения к PostgreSQL | `postgres://postgres:admin@localhost:5432/app_dev` |
-| `REDIS_URL` | Строка подключения к Redis | `redis://localhost:6379/0` |
-| `AI_PROVIDER` | Выбранный провайдер ИИ (`deepseek`, `gemini`, `openai`, `groq`) | `groq` |
-| `GROQ_API_KEY` | API-ключ Groq (начинается с `gsk_`) | `gsk_xxxxxx...` |
-| `GROQ_MODEL` | Модель Groq для общения (по умолчанию `llama-3.3-70b-versatile`) | `llama-3.3-70b-versatile` |
-| `OPENAI_API_KEY` | API-ключ OpenAI или Gemini API (OpenAI-совместимый) | `sk-or-v1-xxxxxx...` |
-| `OPENAI_API_BASE` | Базовый URL для AI-сервиса (если используется Gemini/OpenRouter) | `https://generativelanguage.googleapis.com/v1beta/openai/` |
-| `APP_DOMAIN` | Публичный HTTPS-домен (для Telegram Webhook) | `https://my-tunnel.cf` |
-| `SECRET_KEY` | Секретный ключ Django | `django-insecure-xxxx...` |
-
----
-
-## 🗄️ Инициализация Базы Данных
-
-Если вы запускаете проект впервые или на пустой базе данных:
-
-1. Убедитесь, что PostgreSQL запущен и создана БД `app_dev`.
-2. Выполните импорт структуры данных и предустановленных плейбуков/настроек:
-   ```bash
-   psql -h localhost -p 5432 -U postgres -d app_dev -f backend/import_data.sql
-   ```
-3. Примените недостающие миграции Django:
-   ```bash
-   cd backend
-   python manage.py migrate
-   ```
-
----
-
-## 🚀 Пошаговый Запуск Проекта
-
-В зависимости от вашей операционной системы выберите соответствующую инструкцию.
-
-### 💻 Windows (PowerShell)
-
-> [!WARNING]
-> Celery по умолчанию использует пул `prefork`, который некорректно работает на платформе Windows. Для Windows необходимо обязательно запускать Celery с пулом `eventlet`.
-
-1. **Настройка бэкенда**:
-   ```powershell
-   cd backend
-   python -m venv .venv
-   .venv\Scripts\Activate.ps1
-   pip install -r requirements.txt
-   ```
-2. **Запуск Django API сервера**:
-   ```powershell
-   python manage.py runserver
-   ```
-3. **Запуск Celery Worker** (в отдельном терминале PowerShell с активированным `.venv`):
-   ```powershell
-   pip install eventlet
-   celery -A config worker --loglevel=info -P eventlet
-   ```
-4. **Запуск фронтенда** (в отдельном терминале):
-   ```powershell
-   cd web
-   npm install
-   npm run dev
-   ```
-
----
-
-### 🐧 Linux (Bash)
-
-1. **Настройка бэкенда**:
-   ```bash
-   cd backend
-   python3 -m venv .venv
-   source .venv/bin/activate
-   pip install -r requirements.txt
-   ```
-2. **Запуск Django API сервера**:
-   ```bash
-   python manage.py runserver
-   ```
-3. **Запуск Celery Worker** (в отдельном терминале с активированным `.venv`):
-   ```bash
-   celery -A config worker --loglevel=info
-   ```
-4. **Запуск фронтенда**:
-   ```bash
-   cd web
-   npm install
-   npm run dev
-   ```
-
----
-
-### 🍏 macOS (Zsh)
-
-1. **Настройка бэкенда**:
-   ```zsh
-   cd backend
-   python3 -m venv .venv
-   source .venv/bin/activate
-   pip install -r requirements.txt
-   ```
-2. **Запуск Django API сервера**:
-   ```zsh
-   python manage.py runserver
-   ```
-3. **Запуск Celery Worker** (в отдельном терминале с активированным `.venv`):
-   ```zsh
-   celery -A config worker --loglevel=info
-He has, after a year of his job. I. Set of computer brush so. Because my mother says.   ```
-4. **Запуск фронтенда**:
-   ```zsh
-   cd web
-   npm install
-   npm run dev
-   ```
-
----
-
-## 🔗 Интеграция и Настройка Telegram Webhook
-
-Чтобы бот CAYU CRM получал сообщения от пользователей Telegram в реальном времени, необходимо настроить публичный HTTPS-туннель:
-
-1. **Создайте бота**: Перейдите в Telegram к `@BotFather`, создайте бота и скопируйте полученный токен (Bot Token).
-2. **Запустите локальный туннель**:
-   * С помощью **Cloudflare Tunnel** (рекомендуется):
-     ```bash
-     cloudflared tunnel --url http://localhost:8000
-     ```
-   * Или с помощью **ngrok**:
-     ```bash
-     ngrok http 8000
-     ```
-3. **Обновите домен в бэкенде**: Скопируйте публичный HTTPS-адрес туннеля (например, `https://random-subdomain.trycloudflare.com`) и вставьте его в `.env` бэкенда в переменную `APP_DOMAIN`. Перезапустите Django-сервер.
-4. **Зарегистрируйте токен и вебхук**:
-   * Перейдите в CRM в раздел **Settings (Настройки) -> Интеграции -> Telegram**.
-   * Введите ваш **Bot Token** и сохраните его. Нажмите кнопку **Регистрация Webhook**. Фронтенд отправит запрос к Django, который автоматически зарегистрирует вебхук на серверах Telegram.
-
----
-
-## 🛠️ Тестирование и Разработка
-
-Перед отправкой изменений в репозиторий обязательно проверяйте код на наличие ошибок.
-
-### Тестирование Бэкенда
-Для запуска тестов Django используйте команду:
 ```bash
-python manage.py test
+git clone <repository-url>
+cp .env.example .env
+# Откройте .env и заполните AI_PROVIDER и соответствующие API-ключи
+docker compose up --build
 ```
 
-### Проверка типов Фронтенда
-Чтобы проверить корректность TypeScript-типов во фронтенде и запустить сборку:
+---
+
+## ⚙️ Переменные окружения
+
+Система использует переменные, загружаемые из файла `.env` в корне проекта. В таблице ниже описаны ключевые переменные конфигурации, определенные в [settings.py](file:///c:/Users/user/Desktop/axon_prod-1/backend/config/settings.py):
+
+| Имя переменной | Описание | Пример значения | Обязательная? |
+| :--- | :--- | :--- | :--- |
+| `DJANGO_SECRET_KEY` | Секретный ключ Django, используемый для обеспечения безопасности и шифрования. | `django-insecure-xxx...` | Да (для продакшена) |
+| `DJANGO_DEBUG` | Флаг для запуска Django в режиме отладки. | `False` | Нет (по умолчанию: `False`) |
+| `DJANGO_ALLOWED_HOSTS` | Список разрешенных хостов/доменов через запятую. | `localhost,127.0.0.1,backend` | Нет |
+| `CORS_ALLOWED_ORIGINS` | Список разрешенных адресов для CORS-запросов через запятую. | `http://localhost:5173,http://localhost:8081` | Нет |
+| `ENVIRONMENT` | Тип окружения запуска. | `production` или `development` | Нет (по умолчанию: `development`) |
+| `ENABLE_PRODUCTION_SECURITY` | Включение настроек безопасности HTTPS для продакшена. | `True` | Нет (по умолчанию: `False`, если environment не production) |
+| `DB_NAME` | Имя базы данных PostgreSQL (используется в Docker Compose). | `axon_prod` | Нет (по умолчанию: `axon_prod`) |
+| `DB_USER` | Пользователь PostgreSQL (используется в Docker Compose). | `postgres` | Нет (по умолчанию: `postgres`) |
+| `DB_PASSWORD` | Пароль от базы данных PostgreSQL. | `secure_password` | Да |
+| `DATABASE_URL` | Строка подключения к PostgreSQL (имеет приоритет над отдельными переменными БД). | `postgresql://postgres:postgres@localhost:5433/app_dev` | Да (если запуск без Docker) |
+| `CELERY_BROKER_URL` | Строка подключения к брокеру Redis для Celery. | `redis://localhost:6379/0` | Нет |
+| `CELERY_RESULT_BACKEND` | Строка подключения к бэкенду результатов Redis для Celery. | `redis://localhost:6379/0` | Нет |
+| `APP_DOMAIN` | Публичный домен HTTPS (критически важен для Telegram Webhook). | `https://my-tunnel.trycloudflare.com` | Да (для работы Telegram Webhook) |
+| `AI_PROVIDER` | Выбранный провайдер ИИ (`gemini`, `openai`, `groq`, `deepseek`). | `gemini` | Да |
+| `GEMINI_API_KEY` | API-ключ Google Gemini. | `AIzaSy...` | Да (если `AI_PROVIDER=gemini`) |
+| `GEMINI_MODEL` | Имя модели Google Gemini. | `gemini-2.5-flash` | Нет (по умолчанию: `gemini-2.5-flash`) |
+| `OPENAI_API_KEY` | API-ключ OpenAI (или совместимый). | `sk-...` | Да (если `AI_PROVIDER=openai`) |
+| `OPENAI_API_BASE` | Кастомный базовый URL для OpenAI-совместимых сервисов. | `https://generativelanguage.googleapis.com/v1beta/openai/` | Нет |
+| `DEEPSEEK_API_KEY` | API-ключ DeepSeek. | `sk-...` | Да (если `AI_PROVIDER=deepseek`) |
+| `GROQ_API_KEY` | API-ключ Groq. | `gsk-...` | Да (если `AI_PROVIDER=groq`) |
+| `GROQ_MODEL` | Имя модели Groq. | `llama-3.3-70b-versatile` | Нет (по умолчанию: `llama-3.3-70b-versatile`) |
+| `SECURE_SSL_REDIRECT` | Перенаправление всех HTTP-запросов на HTTPS. | `True` | Нет (по умолчанию: `False`) |
+
+---
+
+## 🤖 ИИ-агенты
+
+CAYU CRM использует мультиагентную архитектуру для обработки сообщений гостей:
+
+* **Router Agent (`router`)** — Входная точка. Анализирует сообщения гостей, определяет их намерение (intent) и перенаправляет диалог соответствующему агенту.
+* **Booking Agent (`booking`)** — Собирает параметры бронирования (даты, количество человек, тип номера), проверяет доступность номеров и рассчитывает итоговую стоимость проживания по тарифам.
+* **Consultant Agent (`consultant`)** — Отвечает на часто задаваемые вопросы (FAQ) об отеле, правилах отмены, услугах, питании и локации, используя плейбуки базы знаний.
+* **Customer Service Agent (`cs`)** — Обрабатывает жалобы, отзывы и решает послепродажные вопросы клиентов.
+
+---
+
+## 🔗 Интеграции
+
+Подключение внешних каналов коммуникации осуществляется через панель настроек CRM:
+
+* **Telegram**: Создайте бота через `@BotFather` и скопируйте токен. Укажите ваш публичный HTTPS-адрес туннеля в переменной `APP_DOMAIN` в `.env`. Перейдите в раздел **Настройки -> Интеграции -> Telegram**, вставьте токен и нажмите кнопку регистрации вебхука.
+* **WhatsApp и Instagram**: Интегрируются через Meta Business API. Введите необходимые учетные данные в разделе **Настройки -> Интеграции -> WhatsApp / Instagram**. Дополнительную информацию по получению токенов Meta см. во внутренних руководствах.
+
+---
+
+## ⚙️ Разработка без Docker
+
+Инструкция для локального запуска сервисов напрямую на хост-компьютере:
+
+### Требования
+- Python 3.12+
+- Node.js 20+
+- PostgreSQL 16+
+- Redis 7+
+
+### 1. Подготовка базы данных
+Убедитесь, что сервер PostgreSQL запущен, создайте пустую базу данных `app_dev` и импортируйте предустановленные плейбуки и структуру данных:
+```bash
+psql -h localhost -p 5432 -U postgres -d app_dev -f backend/import_data.sql
+```
+
+### 2. Настройка Backend-части
+Создайте виртуальное окружение Python, установите зависимости, примените миграции и запустите сервер разработки Django:
+```bash
+cd backend
+python -m venv .venv
+source .venv/bin/activate  # На Windows: .venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+python manage.py migrate
+python manage.py runserver
+```
+
+### 3. Запуск Celery-воркеров и планировщика
+Запустите обработчик задач в отдельном терминале с активированным виртуальным окружением.
+* **Windows** (требуется библиотека `eventlet`):
+  ```bash
+  pip install eventlet
+  celery -A config worker --loglevel=info -P eventlet
+  celery -A config beat --loglevel=info
+  ```
+* **Linux / macOS**:
+  ```bash
+  celery -A config worker --loglevel=info
+  celery -A config beat --loglevel=info
+  ```
+
+### 4. Настройка Frontend-части
+Установите npm-зависимости и запустите Vite-сервер разработки:
 ```bash
 cd web
-npm run build
+npm install
+npm run dev
 ```
 
 ---
 
-## ⚙️ Продакшен Рекомендации
+## 📂 Структура проекта
 
-При развертывании в боевом окружении (Production):
-* **Сервер приложений**: Используйте ASGI-сервер `uvicorn` или `daphne` для корректной поддержки асинхронных запросов и веб-сокетов.
-* **Обратный прокси**: Рекомендуется развернуть Nginx перед сервером приложений для раздачи статических файлов (`staticfiles/`, `media/`) и настройки SSL (с помощью Let's Encrypt / Certbot).
-* **Celery в Production**: Запускайте Celery в качестве системного демона (systemd) и включите автоматический перезапуск при падениях.
+```text
+├── backend/            # Код Django API (REST endpoints, база данных, задачи Celery и пайплайны ИИ)
+├── web/                # Фронтенд-приложение React + TypeScript на Vite с использованием Tailwind CSS
+├── mobile/             # Мобильное приложение React Native + Expo для менеджеров отеля
+├── shared/             # Общие ресурсы и конфигурационные схемы между приложениями проекта
+├── docs/               # Техническая документация, сравнения и мануалы (например, отличия баз данных)
+├── scratch/            # Временные скрипты автоматизации разработчиков, дампы БД и логи проверок
+├── password_backups/   # Каталог с резервными копиями учетных записей пользователей
+├── nginx.conf          # Конфигурация Nginx для маршрутизации фронтенда и проксирования API
+└── docker-compose.yml  # Файл конфигурации Docker Compose для быстрого локального развертывания
+```
 
 ---
 
-## ❓ Устранение неполадок (Troubleshooting & FAQ)
+## 📄 Лицензия
 
-> [!CAUTION]
-> **Конфликт портов PostgreSQL (Ошибка 5432)**
-> Если вы получаете ошибку при запуске или импорте базы данных, убедитесь, что порт `5432` не занят другой локальной службой PostgreSQL. При необходимости измените порт в `.env` (например, `localhost:5433`) и перезапустите службу.
-
-> [!WARNING]
-> **Не приходят сообщения от Telegram / Вебхук не работает**
-> 1. Проверьте переменную `APP_DOMAIN` в `.env`. Она обязательно должна начинаться с `https://`.
-> 2. Убедитесь, что локальный туннель (cloudflared/ngrok) запущен и указывает на порт `8000` (порт бэкенда Django, а не фронтенда `5173`).
-> 3. Повторно нажмите кнопку регистрации вебхука в интерфейсе настроек CRM.
-
-> [!NOTE]
-> **Ошибка Celery "Eventlet not installed" на Windows**
-> Если Celery worker падает с ошибкой, убедитесь, что вы выполнили `pip install eventlet` и запускаете Celery с флагом `-P eventlet`.
-
-> [!IMPORTANT]
-> **Проблемы с ответами ИИ (Пустые ответы / Ошибки API)**
-> Проверьте, что в `.env` указаны правильные ключи API (в зависимости от `AI_PROVIDER`: `DEEPSEEK_API_KEY`, `GEMINI_API_KEY`, `OPENAI_API_KEY` или `GROQ_API_KEY`), а также корректный `OPENAI_API_BASE` (если используется кастомный OpenAI-совместимый эндпоинт). Убедитесь, что у вашего AI-аккаунта достаточно баланса/квот для выполнения запросов.
+Этот проект распространяется под лицензией [MIT](https://opensource.org/licenses/MIT).
