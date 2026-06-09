@@ -253,7 +253,7 @@ def main():
             return match.group(1).strip()
         return ""
 
-    global_prompt_path = r"c:\Users\User\PycharmProjects\cayu\nomw-my_changes\extracted_knowledge\extracted_knowledge\conversation_flow.md"
+    global_prompt_path = r"c:\Users\User\PycharmProjects\cayu\nomw-my_changes\extracted_knowledge2\extracted_knowledge2\conversation_flow.md"
     global_prompt_text = parse_global_prompt(global_prompt_path)
 
     try:
