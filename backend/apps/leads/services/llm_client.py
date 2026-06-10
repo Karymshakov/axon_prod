@@ -1844,9 +1844,25 @@ Example output:
             if getattr(self, 'provider', None) != 'gemini':
                 kwargs['max_tokens'] = 300
 
-            response = self.client.chat.completions.create(**kwargs)
+            last_error = None
+            response_text = None
+            for attempt in range(4):
+                if attempt > 0:
+                    wait_time = (2 ** attempt) + 0.5
+                    logger.warning(
+                        f"Gemini API attempt {attempt}/4 failed ({last_error}), "
+                        f"retrying in {wait_time}s..."
+                    )
+                    time.sleep(wait_time)
+                try:
+                    response = self.client.chat.completions.create(timeout=30, **kwargs)
+                    response_text = response.choices[0].message.content
+                    break
+                except Exception as e:
+                    last_error = e
 
-            response_text = response.choices[0].message.content
+            if response_text is None:
+                raise last_error
             logger.info(f"Generated agent response (length: {len(response_text)})")
             return response_text
 
