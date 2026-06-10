@@ -26,6 +26,7 @@ import {
   disconnectTelegram,
   fetchInstagramStatus,
   disconnectInstagram,
+  saveInstagramAppCredentials,
   fetchWhatsAppIntegrationStatus,
   disconnectWhatsApp,
   connectWhatsAppManual,
@@ -137,6 +138,11 @@ function SettingsPage() {
   const [isSavingToken, setIsSavingToken] = useState(false)
   const [webhookBaseUrl, setWebhookBaseUrl] = useState('')
   const [isDisconnectingInstagram, setIsDisconnectingInstagram] = useState(false)
+  const [igAppId, setIgAppId] = useState('')
+  const [igAppSecret, setIgAppSecret] = useState('')
+  const [igVerifyToken, setIgVerifyToken] = useState('')
+  const [showIgAppSecret, setShowIgAppSecret] = useState(false)
+  const [isSavingInstagramCredentials, setIsSavingInstagramCredentials] = useState(false)
   // When the OAuth popup is open, poll status every 2s so the UI updates even
   // if postMessage fails (cross-origin iframe timing, CSP, or popup dismissed)
   const [isInstagramConnecting, setIsInstagramConnecting] = useState(false)
@@ -199,6 +205,15 @@ function SettingsPage() {
     refetchInterval: isInstagramConnecting ? 2000 : false,
     enabled: !!user,
   })
+
+  useEffect(() => {
+    if (instagramStatus?.app_id) {
+      setIgAppId((current) => current || instagramStatus.app_id || '')
+    }
+    if (instagramStatus?.verify_token) {
+      setIgVerifyToken((current) => current || instagramStatus.verify_token || '')
+    }
+  }, [instagramStatus?.app_id, instagramStatus?.verify_token])
 
   const clearInstagramOAuthResult = useCallback(() => {
     if (typeof window === 'undefined') {
@@ -899,7 +914,46 @@ function SettingsPage() {
     }
   }
 
+  const handleSaveInstagramCredentials = async () => {
+    if (!igAppId.trim()) {
+      toast.error('Введите App ID приложения Meta')
+      return
+    }
+    if (!igAppSecret.trim() && !instagramStatus?.app_secret_set) {
+      toast.error('Введите App Secret приложения Meta')
+      return
+    }
+
+    setIsSavingInstagramCredentials(true)
+    try {
+      await saveInstagramAppCredentials({
+        app_id: igAppId.trim(),
+        app_secret: igAppSecret.trim(),
+        webhook_verify_token: igVerifyToken.trim() || undefined,
+      })
+      toast.success('Данные приложения Meta сохранены')
+      setIgAppSecret('')
+      await refetchInstagramStatus()
+    } catch (error: any) {
+      const message = error?.data?.error ?? error?.message ?? 'Не удалось сохранить данные приложения Meta'
+      toast.error(message)
+    } finally {
+      setIsSavingInstagramCredentials(false)
+    }
+  }
+
   const handleConnectInstagram = useCallback(() => {
+    if (!instagramStatus?.app_id) {
+      toast.error('Сначала сохраните App ID приложения Meta')
+      updateInstagramConnectStage('failed', 'Meta App ID is missing. Save your Instagram app credentials first.')
+      return
+    }
+    if (!instagramStatus?.app_secret_set) {
+      toast.error('Сначала сохраните App Secret приложения Meta')
+      updateInstagramConnectStage('failed', 'Meta App Secret is missing. Save your Instagram app credentials first.')
+      return
+    }
+
     // Clean up any previous popup/listeners before opening a new one
     if (instagramPopupCleanupRef.current) {
       instagramPopupCleanupRef.current()
@@ -983,7 +1037,7 @@ function SettingsPage() {
       finishInstagramConnect()
       popup.close()
     }
-  }, [clearInstagramOAuthResult, consumeInstagramOAuthResult, finishInstagramConnect, instagramStatus?.embed_url, orgSlug, queryClient, syncInstagramStatusAfterOAuth, updateInstagramConnectStage])
+  }, [clearInstagramOAuthResult, consumeInstagramOAuthResult, finishInstagramConnect, instagramStatus?.app_id, instagramStatus?.app_secret_set, instagramStatus?.embed_url, orgSlug, queryClient, syncInstagramStatusAfterOAuth, updateInstagramConnectStage])
 
   const handleDisconnectInstagram = async () => {
     setIsDisconnectingInstagram(true)
@@ -1046,6 +1100,8 @@ function SettingsPage() {
     : isInstagramConnecting || instagramConnectStage === 'waiting_for_login' || instagramConnectStage === 'authorization_in_progress'
       ? { label: instagramConnectStage === 'waiting_for_login' ? 'Ожидание подтверждения' : 'Авторизация', variant: 'secondary' as const, className: 'bg-amber-100 text-amber-900 hover:bg-amber-100 dark:bg-amber-900/40 dark:text-amber-100' }
       : { label: 'Не подключено', variant: 'secondary' as const, className: '' }
+
+  const instagramCredentialsReady = Boolean(instagramStatus?.app_id && instagramStatus?.app_secret_set)
 
   const instagramConnectButtonLabel = instagramConnectStage === 'waiting_for_login'
     ? 'Ожидание Instagram...'
@@ -1479,6 +1535,104 @@ function SettingsPage() {
                               \u0412\u0430\u0448 \u0430\u043a\u043a\u0430\u0443\u043d\u0442 \u0434\u043e\u043b\u0436\u0435\u043d \u0431\u044b\u0442\u044c <strong>Instagram \u0411\u0438\u0437\u043d\u0435\u0441 \u0438\u043b\u0438 Creator</strong>, \u043f\u0440\u0438\u0432\u044f\u0437\u0430\u043d\u043d\u044b\u043c \u043a Facebook Page. \u041b\u0438\u0447\u043d\u044b\u0435 \u0430\u043a\u043a\u0430\u0443\u043d\u0442\u044b \u043d\u0435 \u043c\u043e\u0433\u0443\u0442 \u043f\u043e\u043b\u0443\u0447\u0430\u0442\u044c DM \u0447\u0435\u0440\u0435\u0437 API.
                             </p>
                           </div>
+                          <div className="rounded-lg bg-muted/50 border border-border p-4 space-y-4">
+                            <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+                              <div>
+                                <p className="text-sm font-medium">Учетные данные Meta App</p>
+                                <p className="text-xs text-muted-foreground">
+                                  Сохраните App ID и App Secret из Meta App Dashboard перед подключением Instagram.
+                                </p>
+                              </div>
+                              <Badge variant={instagramCredentialsReady ? 'default' : 'secondary'} className={instagramCredentialsReady ? 'bg-green-600 hover:bg-green-700' : ''}>
+                                {instagramCredentialsReady ? 'Готово' : 'Требуется настройка'}
+                              </Badge>
+                            </div>
+
+                            <div className="grid gap-3 md:grid-cols-2">
+                              <div className="space-y-1.5">
+                                <Label htmlFor="ig-app-id">App ID</Label>
+                                <Input
+                                  id="ig-app-id"
+                                  name="ig-app-id"
+                                  value={igAppId}
+                                  onChange={(e) => setIgAppId(e.target.value)}
+                                  placeholder="Например, 123456789012345"
+                                  disabled={isSavingInstagramCredentials}
+                                />
+                              </div>
+                              <div className="space-y-1.5">
+                                <Label htmlFor="ig-app-secret">
+                                  App Secret{instagramStatus?.app_secret_set ? ' сохранен' : ''}
+                                </Label>
+                                <div className="relative">
+                                  <Input
+                                    id="ig-app-secret"
+                                    name="ig-app-secret"
+                                    type={showIgAppSecret ? 'text' : 'password'}
+                                    value={igAppSecret}
+                                    onChange={(e) => setIgAppSecret(e.target.value)}
+                                    placeholder={instagramStatus?.app_secret_set ? 'Оставьте пустым, чтобы не менять' : 'Вставьте App Secret'}
+                                    disabled={isSavingInstagramCredentials}
+                                    className="pr-10"
+                                  />
+                                  <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="icon"
+                                    aria-label={showIgAppSecret ? 'Hide secret' : 'Show secret'}
+                                    className="absolute right-1 top-1/2 -translate-y-1/2 h-7 w-7"
+                                    onClick={() => setShowIgAppSecret((v) => !v)}
+                                  >
+                                    {showIgAppSecret ? (
+                                      <EyeOffIcon className="h-4 w-4" />
+                                    ) : (
+                                      <EyeIcon className="h-4 w-4" />
+                                    )}
+                                  </Button>
+                                </div>
+                              </div>
+                            </div>
+
+                            <div className="space-y-1.5">
+                              <Label htmlFor="ig-verify-token">Verify Token для вебхука</Label>
+                              <Input
+                                id="ig-verify-token"
+                                name="ig-verify-token"
+                                value={igVerifyToken}
+                                onChange={(e) => setIgVerifyToken(e.target.value)}
+                                placeholder="Например, cayu_instagram_webhook_2024"
+                                disabled={isSavingInstagramCredentials}
+                              />
+                            </div>
+
+                            <div className="grid gap-2 text-xs">
+                              {instagramStatus?.webhook_url && (
+                                <div className="space-y-1">
+                                  <p className="font-medium text-muted-foreground uppercase tracking-wide">Callback URL вебхука</p>
+                                  <code className="block rounded bg-background border px-2 py-1.5 font-mono break-all">
+                                    {instagramStatus.webhook_url}
+                                  </code>
+                                </div>
+                              )}
+                              {instagramStatus?.callback_url && (
+                                <div className="space-y-1">
+                                  <p className="font-medium text-muted-foreground uppercase tracking-wide">OAuth Redirect URI</p>
+                                  <code className="block rounded bg-background border px-2 py-1.5 font-mono break-all">
+                                    {instagramStatus.callback_url}
+                                  </code>
+                                </div>
+                              )}
+                            </div>
+
+                            <Button
+                              type="button"
+                              variant="outline"
+                              onClick={handleSaveInstagramCredentials}
+                              disabled={isSavingInstagramCredentials || !igAppId.trim() || (!igAppSecret.trim() && !instagramStatus?.app_secret_set)}
+                            >
+                              {isSavingInstagramCredentials ? 'Сохранение...' : 'Сохранить данные Meta App'}
+                            </Button>
+                          </div>
                           {instagramStatus?.callback_warning && (
                             <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-4 space-y-2">
                               <p className="text-xs font-medium text-destructive">Обнаружена проблема настройки подключения</p>
@@ -1525,13 +1679,13 @@ function SettingsPage() {
                           <Button
                             onClick={handleConnectInstagram}
                             className="w-full sm:w-auto"
-                            disabled={!instagramStatus?.embed_url || isInstagramConnecting}
+                            disabled={!instagramStatus?.embed_url || !instagramCredentialsReady || isInstagramConnecting}
                           >
                             {isInstagramConnecting
                               ? instagramConnectButtonLabel
-                              : instagramStatus?.embed_url
+                              : instagramStatus?.embed_url && instagramCredentialsReady
                                 ? 'Подключить Instagram'
-                                : 'Подготовка...'}
+                                : 'Сначала сохраните Meta App'}
                           </Button>
                           {(instagramConnectStage === 'failed' || instagramConnectStage === 'cancelled') && instagramConnectionNotice && !instagramProgressTitle && (
                             <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">

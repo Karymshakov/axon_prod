@@ -3,6 +3,7 @@ import requests
 from typing import Optional
 
 logger = logging.getLogger(__name__)
+GRAPH_API_VERSION = 'v25.0'
 
 
 class WhatsAppService:
@@ -50,7 +51,7 @@ class WhatsAppService:
 
         try:
             # WhatsApp Cloud API endpoint
-            url = f"https://graph.facebook.com/v23.0/{self.phone_number_id}/messages"
+            url = f"https://graph.facebook.com/{GRAPH_API_VERSION}/{self.phone_number_id}/messages"
 
             headers = {
                 'Authorization': f'Bearer {self.access_token}',
@@ -105,7 +106,7 @@ class WhatsAppService:
         if not self.is_configured(org) or not message_id:
             return
         try:
-            url = f"https://graph.facebook.com/v23.0/{self.phone_number_id}/messages"
+            url = f"https://graph.facebook.com/{GRAPH_API_VERSION}/{self.phone_number_id}/messages"
             headers = {
                 'Authorization': f'Bearer {self.access_token}',
                 'Content-Type': 'application/json',
@@ -125,7 +126,7 @@ class WhatsAppService:
             return None
 
         try:
-            url = f"https://graph.facebook.com/v23.0/{self.phone_number_id}"
+            url = f"https://graph.facebook.com/{GRAPH_API_VERSION}/{self.phone_number_id}"
             params = {
                 'fields': 'display_phone_number,verified_name,quality_rating',
                 'access_token': self.access_token

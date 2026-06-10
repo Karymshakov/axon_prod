@@ -19,6 +19,7 @@ from .agent_dispatcher import agent_dispatcher
 from .channel_ai_control import is_channel_ai_globally_paused
 
 logger = logging.getLogger(__name__)
+INSTAGRAM_GRAPH_API_VERSION = 'v25.0'
 
 
 def _get_verify_token() -> str:
@@ -208,7 +209,7 @@ def _delayed_instagram_ai_response(
             if conn and conn.access_token:
                 try:
                     u_resp = requests.get(
-                        f'https://graph.instagram.com/v21.0/{sender_id}',
+                        f'https://graph.instagram.com/{INSTAGRAM_GRAPH_API_VERSION}/{sender_id}',
                         params={'fields': 'username', 'access_token': conn.access_token},
                         timeout=5,
                     )
@@ -672,7 +673,7 @@ def instagram_webhook(request):
                 if conn and conn.access_token:
                     try:
                         user_response = requests.get(
-                            f'https://graph.instagram.com/v21.0/{sender_id}',
+                            f'https://graph.instagram.com/{INSTAGRAM_GRAPH_API_VERSION}/{sender_id}',
                             params={'fields': 'username', 'access_token': conn.access_token},
                             timeout=5,
                         )

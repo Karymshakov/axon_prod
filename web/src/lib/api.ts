@@ -434,6 +434,9 @@ export function refreshInstagramToken() {
   return api.post<InstagramRefreshTokenResponse>('/integrations/instagram/refresh-token/', {})
 }
 
+export function saveInstagramAppCredentials(data: { app_id?: string; app_secret: string; webhook_verify_token?: string }) {
+  return api.post<{ success: boolean }>('/integrations/instagram/save-app-credentials/', data)
+}
 
 export function resubscribeInstagramWebhook() {
   return api.post<{ success: boolean }>('/integrations/instagram/resubscribe-webhook/', {})

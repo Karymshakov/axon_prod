@@ -474,6 +474,9 @@ class InstagramOAuthFlowTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertFalse(response.data['connected'])
         self.assertIn('/api/integrations/instagram/authorize/?state=', response.data['embed_url'])
+        self.assertEqual(response.data['app_id'], 'ig-app-id')
+        self.assertTrue(response.data['app_secret_set'])
+        self.assertEqual(response.data['verify_token'], 'verify-me')
 
     def test_authorize_uses_saved_app_credentials_without_env_vars(self):
         status_response = instagram_status(self._authed_status_request())
@@ -3236,4 +3239,3 @@ class AIConnectionAndIntentClassifierTests(TestCase):
             self.assertIn("менеджер", res.lower())
             self.assertIn("свяжется", res.lower())
             mock_exec.assert_called_once_with({'reason': 'sports_camp'}, lead=lead)
-

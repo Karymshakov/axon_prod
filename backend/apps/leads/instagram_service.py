@@ -5,7 +5,7 @@ from typing import Optional
 logger = logging.getLogger(__name__)
 
 # Instagram Login API always uses graph.instagram.com
-INSTAGRAM_MESSAGES_URL = 'https://graph.instagram.com/v21.0/me/messages'
+INSTAGRAM_MESSAGES_URL = 'https://graph.instagram.com/v25.0/me/messages'
 
 
 class InstagramService:

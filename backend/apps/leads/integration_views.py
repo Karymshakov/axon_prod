@@ -380,18 +380,20 @@ def save_instagram_app_credentials(request):
     app_secret = request.data.get('app_secret', '').strip()
     webhook_verify_token = request.data.get('webhook_verify_token', '').strip()
 
-    if not app_secret:
-        return Response({'success': False, 'error': 'App Secret is required'},
-                        status=status.HTTP_400_BAD_REQUEST)
-
     org = _get_org(request)
     if isinstance(org, _OrgNotSet):
         return Response({'success': False, 'error': 'No organization selected.'}, status=status.HTTP_400_BAD_REQUEST)
     config = InstagramAppConfig.get_config(org=org)
+    has_existing_secret = bool((config and config.app_secret) or os.environ.get('INSTAGRAM_APP_SECRET', ''))
+    if not app_secret and not has_existing_secret:
+        return Response({'success': False, 'error': 'App Secret is required'},
+                        status=status.HTTP_400_BAD_REQUEST)
+
     if config:
         if app_id:
             config.app_id = app_id
-        config.app_secret = app_secret
+        if app_secret:
+            config.app_secret = app_secret
         if webhook_verify_token:
             config.webhook_verify_token = webhook_verify_token
         config.save()
@@ -399,7 +401,7 @@ def save_instagram_app_credentials(request):
         InstagramAppConfig.objects.create(
             organization=org,
             app_id=app_id,
-            app_secret=app_secret,
+            app_secret=app_secret or '',
             webhook_verify_token=webhook_verify_token,
         )
 
@@ -435,7 +437,7 @@ def save_whatsapp_app_credentials(request):
     return Response({'success': True})
 
 
-GRAPH_URL = 'https://graph.facebook.com/v18.0'
+GRAPH_URL = 'https://graph.facebook.com/v25.0'
 
 
 @api_view(['POST'])
@@ -573,7 +575,7 @@ def resubscribe_instagram_webhook(request):
 
     try:
         resp = requests.post(
-            'https://graph.instagram.com/v21.0/me/subscribed_apps',
+            'https://graph.instagram.com/v25.0/me/subscribed_apps',
             params={
                 'subscribed_fields': 'messages',
                 'access_token': conn.access_token,

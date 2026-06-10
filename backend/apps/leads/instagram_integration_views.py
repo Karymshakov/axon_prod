@@ -2,9 +2,8 @@
 Instagram integration views — OAuth flow + status + disconnect + token refresh.
 
 Uses the Instagram Login API (instagram.com/oauth/authorize).
-App ID and Secret are read from environment variables:
-  INSTAGRAM_APP_ID      — defaults to the published app ID
-  INSTAGRAM_APP_SECRET  — required
+App ID and Secret are read from InstagramAppConfig saved in CRM Settings.
+Environment variables are only a fallback for deployments that prefer them.
 
 Endpoints (all under /api/integrations/instagram/):
   GET  status/          – current connection status
@@ -62,13 +61,11 @@ logger = logging.getLogger(__name__)
 INSTAGRAM_AUTH_URL = 'https://www.instagram.com/oauth/authorize'
 INSTAGRAM_TOKEN_URL = 'https://api.instagram.com/oauth/access_token'
 INSTAGRAM_GRAPH_URL = 'https://graph.instagram.com'
+GRAPH_API_VERSION = 'v25.0'
 
 OAUTH_SCOPES = [
     'instagram_business_basic',
     'instagram_business_manage_messages',
-    'instagram_business_manage_comments',
-    'instagram_business_content_publish',
-    'instagram_business_manage_insights',
 ]
 
 OAUTH_STATE_SALT = 'instagram-oauth-state'
@@ -372,7 +369,7 @@ def _auto_subscribe_webhook(conn_id: int) -> None:
     try:
         conn = InstagramConnection.objects.get(id=conn_id)
         resp = requests.post(
-            f'{INSTAGRAM_GRAPH_URL}/v21.0/me/subscribed_apps',
+            f'{INSTAGRAM_GRAPH_URL}/{GRAPH_API_VERSION}/me/subscribed_apps',
             params={
                 'subscribed_fields': 'messages',
                 'access_token': conn.access_token,
@@ -449,6 +446,21 @@ def instagram_status(request):
     if oauth_state:
         embed_url = f'{embed_url}?state={urllib.parse.quote(oauth_state)}'
     diagnostics = _read_oauth_diagnostics(org)
+    app_config = _get_app_config(org=org)
+    app_id = (
+        app_config.app_id
+        if app_config and app_config.app_id
+        else os.environ.get('INSTAGRAM_APP_ID', '')
+    ).strip()
+    app_secret_set = bool(
+        (app_config and app_config.app_secret)
+        or os.environ.get('INSTAGRAM_APP_SECRET', '')
+    )
+    verify_token = (
+        app_config.webhook_verify_token
+        if app_config and app_config.webhook_verify_token
+        else os.environ.get('INSTAGRAM_VERIFY_TOKEN', '')
+    ).strip()
     conn = InstagramConnection.get_config(org=org)
     if not conn:
         return Response({
@@ -458,6 +470,9 @@ def instagram_status(request):
             'callback_url': callback_info['redirect_uri'],
             'callback_warning': callback_info['callback_warning'],
             'configured_callback_url': callback_info['configured_redirect_uri'],
+            'app_id': app_id,
+            'app_secret_set': app_secret_set,
+            'verify_token': verify_token,
             'oauth_last_started_at': diagnostics.get('oauth_last_started_at'),
             'oauth_last_callback_at': diagnostics.get('oauth_last_callback_at'),
             'oauth_last_status': diagnostics.get('oauth_last_status', ''),
@@ -493,6 +508,9 @@ def instagram_status(request):
         'callback_url': callback_info['redirect_uri'],
         'callback_warning': callback_info['callback_warning'],
         'configured_callback_url': callback_info['configured_redirect_uri'],
+        'app_id': app_id,
+        'app_secret_set': app_secret_set,
+        'verify_token': verify_token,
         'oauth_last_started_at': diagnostics.get('oauth_last_started_at'),
         'oauth_last_callback_at': diagnostics.get('oauth_last_callback_at'),
         'oauth_last_status': diagnostics.get('oauth_last_status', ''),
@@ -517,8 +535,14 @@ def instagram_authorize(request):
             )
 
     try:
+        app_id = _get_app_id(org=state_org)
         _get_app_secret(org=state_org)
-    except ValueError:
+    except ValueError as exc:
+        if 'APP_ID' in str(exc):
+            return HttpResponse(
+                'Instagram App ID is not configured. Add your Meta app credentials in Settings before reconnecting Instagram.',
+                status=400,
+            )
         return HttpResponse(
             'Instagram App Secret is not configured. Add your Meta app credentials in Settings before reconnecting Instagram.',
             status=400,
@@ -536,7 +560,7 @@ def instagram_authorize(request):
     if callback_info['callback_warning']:
         logger.warning('Instagram OAuth callback URI mismatch detected: %s', callback_info['callback_warning'])
     params = {
-        'client_id': _get_app_id(org=state_org),
+        'client_id': app_id,
         'redirect_uri': redirect_uri,
         'scope': ','.join(OAUTH_SCOPES),
         'response_type': 'code',
@@ -635,7 +659,7 @@ def instagram_callback(request):
         # never delivers DMs for the connected account.
         try:
             sub_resp = requests.post(
-                f'{INSTAGRAM_GRAPH_URL}/v21.0/me/subscribed_apps',
+                f'{INSTAGRAM_GRAPH_URL}/{GRAPH_API_VERSION}/me/subscribed_apps',
                 params={
                     'subscribed_fields': 'messages',
                     'access_token': token_data['access_token'],
@@ -694,7 +718,7 @@ def instagram_disconnect(request):
         if conn.access_token and not conn.is_token_expired:
             try:
                 resp = requests.delete(
-                    f'{INSTAGRAM_GRAPH_URL}/v21.0/me/subscribed_apps',
+                    f'{INSTAGRAM_GRAPH_URL}/{GRAPH_API_VERSION}/me/subscribed_apps',
                     params={'access_token': conn.access_token},
                     timeout=10,
                 )

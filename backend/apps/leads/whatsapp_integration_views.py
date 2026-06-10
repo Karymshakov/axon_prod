@@ -7,9 +7,8 @@ Supports two OAuth paths that share the same backend token exchange:
   2. Popup redirect (fallback): FE opens /authorize/ → Meta redirects to /callback/
      with ?code= → BE exchanges code → popup-close HTML response.
 
-App credentials are read from WhatsAppAppConfig DB first, then env vars:
-  INSTAGRAM_APP_ID      — defaults to the published app ID
-  INSTAGRAM_APP_SECRET  — required (same Meta app as Instagram)
+App credentials are read from WhatsAppAppConfig saved in CRM Settings first,
+then env vars as a fallback for deployments that prefer them.
 
 Endpoints:
   GET  integrations/whatsapp-oauth/authorize/   – redirect to Meta OAuth (popup fallback)
@@ -61,7 +60,7 @@ def _org_guard(request, not_connected_response: dict):
         return org, None
     return None, None  # superadmin: proceed with None org
 
-GRAPH_URL = 'https://graph.facebook.com/v21.0'
+GRAPH_URL = 'https://graph.facebook.com/v25.0'
 DEFAULT_APP_ID = ''
 META_SCOPES = 'whatsapp_business_management,whatsapp_business_messaging'
 
@@ -235,7 +234,7 @@ def whatsapp_authorize(request):
     app_secret = _get_app_secret()
     if not app_secret:
         return HttpResponse(
-            'Meta App Secret not configured. Set INSTAGRAM_APP_SECRET environment variable.',
+            'Meta App Secret not configured. Add your Meta app credentials in Settings before reconnecting WhatsApp.',
             status=400,
         )
 
