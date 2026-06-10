@@ -326,8 +326,8 @@ def _delayed_instagram_ai_response(
 
             # Only respond to booking-intent messages.
             if tier != Lead.INTENT_TIER_BOOKING:
-                logger.info(f"Lead {lead.id}: skipping AI response (tier={tier})")
-                return
+                # We no longer return early to allow responding to greetings and soft interest
+                logger.info(f"Lead {lead.id}: proceeding with AI response despite tier={tier}")
 
         if not will_respond:
             return
