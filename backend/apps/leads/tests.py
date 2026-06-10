@@ -19,6 +19,7 @@ from .instagram_integration_views import (
 from .models import AIConfig, InstagramAppConfig, InstagramConnection, Lead, LeadActivity
 from .views import _reset_lead_ai_memory
 from .telegram_views import _delayed_ai_response, telegram_webhook
+from .instagram_views import instagram_webhook
 from .whatsapp_views import _delayed_whatsapp_ai_response
 
 
@@ -218,6 +219,41 @@ class BlankAutoReplyRetryTests(TestCase):
         ).latest('id')
         self.assertEqual(received_activity.organization, self.org)
 
+    @patch('apps.leads.instagram_views.ai_service.is_configured', return_value=False)
+    @patch('apps.leads.instagram_views.requests.get')
+    def test_instagram_webhook_keeps_received_activity_organization(self, get_mock, _ai_ready_mock):
+        get_response = Mock()
+        get_response.ok = True
+        get_response.json.return_value = {'username': 'guestuser'}
+        get_mock.return_value = get_response
+        InstagramConnection.objects.create(
+            organization=self.org,
+            access_token='ig-token',
+            instagram_user_id='own-user-id',
+            instagram_username='nomadcamp',
+        )
+        payload = {
+            'entry': [{
+                'id': 'business-account-id',
+                'messaging': [{
+                    'sender': {'id': 'guest-user-id'},
+                    'message': {'mid': 'ig-mid-1', 'text': 'Здравствуйте'},
+                }],
+            }],
+        }
+        request = self.factory.post('/api/integrations/instagram/webhook/', payload, format='json')
+
+        response = instagram_webhook(request)
+
+        self.assertEqual(response.status_code, 200)
+        lead = Lead.objects.get(instagram_user_id='guest-user-id', organization=self.org)
+        received_activity = LeadActivity.objects.filter(
+            lead=lead,
+            activity_type=LeadActivity.TYPE_INSTAGRAM_RECEIVED,
+            metadata__message_id='ig-mid-1',
+        ).latest('id')
+        self.assertEqual(received_activity.organization, self.org)
+
 
 class GlobalChannelAiPauseTests(TestCase):
     def setUp(self):
@@ -326,6 +362,12 @@ class GlobalChannelAiPauseTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response.data['success'])
         send_mock.assert_called_once_with(self.lead.instagram_user_id, 'Manual instagram reply')
+        sent_activity = LeadActivity.objects.filter(
+            lead=self.lead,
+            activity_type=LeadActivity.TYPE_INSTAGRAM_SENT,
+            metadata__message_id='ig-mid-1',
+        ).latest('id')
+        self.assertEqual(sent_activity.organization, self.org)
 
     @patch('apps.leads.integration_views.whatsapp_service.is_configured', return_value=True)
     @patch('apps.leads.integration_views.whatsapp_service.send_message', return_value={'message_id': 'wa-mid-1'})

@@ -382,6 +382,7 @@ def execute_get_room_images(args: dict, lead=None) -> dict:
                 try:
                     LeadActivity.objects.create(
                         lead=lead,
+                        organization=lead.organization,
                         activity_type=_activity_type,
                         description=f"AI sent {len(photos_to_send)} photo(s) of {label} rooms",
                         metadata={

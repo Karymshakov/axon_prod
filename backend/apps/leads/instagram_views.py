@@ -126,6 +126,7 @@ def _handle_echo_event(mid: str, echo_text: str, guest_user_id: str, org_id: int
                 if echo_text:
                     LeadActivity.objects.create(
                         lead=echo_lead,
+                        organization=echo_lead.organization,
                         activity_type=LeadActivity.TYPE_INSTAGRAM_SENT,
                         description=f"Sent via Instagram app: {echo_text[:100]}{'...' if len(echo_text) > 100 else ''}",
                         echo_origin=LeadActivity.ECHO_ORIGIN_INSTAGRAM_APP,
@@ -141,6 +142,7 @@ def _handle_echo_event(mid: str, echo_text: str, guest_user_id: str, org_id: int
                     Lead.objects.filter(id=echo_lead.id).update(ai_paused=True)
                     LeadActivity.objects.create(
                         lead=echo_lead,
+                        organization=echo_lead.organization,
                         activity_type=LeadActivity.TYPE_LEAD_UPDATED,
                         description='Manager took over via Instagram app',
                         echo_origin=LeadActivity.ECHO_ORIGIN_INSTAGRAM_APP,
@@ -449,6 +451,7 @@ def _delayed_instagram_ai_response(
             if last_result:
                 sent_activity = LeadActivity.objects.create(
                     lead=lead,
+                    organization=lead.organization,
                     activity_type=LeadActivity.TYPE_INSTAGRAM_SENT,
                     description=f"AI auto-response: {ai_response[:100]}{'...' if len(ai_response) > 100 else ''}",
                     echo_origin=LeadActivity.ECHO_ORIGIN_CRM,
@@ -743,6 +746,7 @@ def instagram_webhook(request):
                 # Create activity for the received message
                 current_activity = LeadActivity.objects.create(
                     lead=lead,
+                    organization=lead.organization,
                     activity_type=LeadActivity.TYPE_INSTAGRAM_RECEIVED,
                     description=f'Received from Instagram: {message_text[:100]}{"..." if len(message_text) > 100 else ""}',
                     metadata={

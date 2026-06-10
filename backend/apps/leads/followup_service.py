@@ -106,6 +106,7 @@ class FollowUpService:
             if result:
                 LeadActivity.objects.create(
                     lead=lead,
+                    organization=lead.organization,
                     activity_type=LeadActivity.TYPE_INSTAGRAM_SENT,
                     description=f"Auto follow-up ({stage_name}): {message[:100]}{'...' if len(message) > 100 else ''}",
                     echo_origin=LeadActivity.ECHO_ORIGIN_CRM,

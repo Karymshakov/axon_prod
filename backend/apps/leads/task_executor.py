@@ -250,6 +250,7 @@ Respond with ONLY the message text, nothing else."""
                     if success:
                         LeadActivity.objects.create(
                             lead=lead,
+                            organization=lead.organization,
                             activity_type=LeadActivity.TYPE_INSTAGRAM_SENT,
                             description="AI sent message via Instagram",
                             echo_origin=LeadActivity.ECHO_ORIGIN_CRM,

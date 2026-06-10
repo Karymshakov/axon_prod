@@ -631,6 +631,7 @@ def send_instagram_message_from_comms(request):
         # this message ID as a CRM send, not a native Instagram app takeover.
         LeadActivity.objects.create(
             lead=lead,
+            organization=lead.organization,
             activity_type=LeadActivity.TYPE_INSTAGRAM_SENT,
             description=f"Sent Instagram message: {message_text[:100]}{'...' if len(message_text) > 100 else ''}",
             echo_origin=LeadActivity.ECHO_ORIGIN_CRM,
@@ -839,6 +840,7 @@ def send_instagram_to_customer(request):
         if customer.lead:
             LeadActivity.objects.create(
                 lead=customer.lead,
+                organization=customer.lead.organization,
                 activity_type=LeadActivity.TYPE_INSTAGRAM_SENT,
                 description=f"Sent Instagram message (as customer): {message_text[:100]}{'...' if len(message_text) > 100 else ''}",
                 echo_origin=LeadActivity.ECHO_ORIGIN_CRM,
