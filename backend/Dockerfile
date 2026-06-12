@@ -31,5 +31,5 @@ USER appuser
 # Expose port
 EXPOSE 8000
 
-# Default CMD is to run Gunicorn (WSGI)
-CMD ["gunicorn", "config.wsgi:application", "--bind", "0.0.0.0:8000", "--workers", "3"]
+# Auto-populate media volume if empty, then start Gunicorn
+CMD ["sh", "-c", "mkdir -p /app/media/hotel_media && cp -rn /app/initial_media/. /app/media/ && gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers 3"]

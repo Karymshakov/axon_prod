@@ -16,7 +16,8 @@ import {
   SearchIcon,
   InfoIcon,
   SlidersHorizontalIcon,
-  ScrollTextIcon
+  ScrollTextIcon,
+  ArrowLeftIcon
 } from 'lucide-react'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Input } from '@/components/ui/input'
@@ -462,10 +463,14 @@ function CommunicationsPage() {
       </div>
 
       {/* Main Unified Workspace */}
-      <div className="flex-1 flex min-h-0 overflow-hidden">
+      <div className="flex-1 flex min-h-0 overflow-hidden relative">
         
-        {/* Left Column: Unified Leads List & Search */}
-        <div className="w-[320px] shrink-0 border-r bg-background flex flex-col h-full min-h-0 overflow-hidden">
+        {/* Left Column: Unified Leads List & Search.
+             On mobile: full-width and hidden when a lead is selected (chat view).
+             On md+: fixed 280px sidebar always visible. */}
+        <div className={`shrink-0 border-r bg-background flex flex-col h-full min-h-0 overflow-hidden ${
+          selectedLead ? 'hidden md:flex md:w-[280px]' : 'flex w-full md:w-[280px]'
+        }`}>
 
           {/* Channel Filters */}
           <div className="p-3 border-b space-y-2.5">
@@ -635,12 +640,19 @@ function CommunicationsPage() {
           </ScrollArea>
         </div>
 
-        {/* Center Column: Chat Window */}
-        <div className="flex-1 bg-muted/20 flex flex-col h-full overflow-hidden">
+        {/* Center Column: Chat Window. Takes all remaining space. */}
+        <div className={`flex-1 min-w-0 bg-muted/20 flex flex-col h-full overflow-hidden ${selectedLead ? 'flex' : 'hidden md:flex'}`}>
           {selectedLead ? (
             <>
               {/* Chat Header */}
               <div className="border-b bg-card px-4 py-3 flex items-center justify-between flex-wrap gap-2">
+                {/* Mobile: back button to return to leads list */}
+                <button
+                  className="md:hidden flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground mr-1 shrink-0"
+                  onClick={() => setSelectedLead(null)}
+                >
+                  <ArrowLeftIcon className="h-4 w-4" />
+                </button>
                 <div className="min-w-0 flex items-center flex-wrap gap-2">
                   <h2 className="text-sm font-bold truncate">{selectedLead.contact_person}</h2>
 
@@ -705,16 +717,24 @@ function CommunicationsPage() {
                   <Button
                     size="sm"
                     disabled={isTogglingAi}
-                    className={`h-8 text-xs gap-1.5 ${selectedLead.ai_paused
+                    className={`h-8 text-xs gap-1.5 px-2 sm:px-3 ${selectedLead.ai_paused
                         ? 'bg-green-600 hover:bg-green-700 text-white'
                         : 'border border-amber-400 bg-transparent text-amber-700 hover:bg-amber-50'
                       }`}
                     onClick={() => handleToggleAiPause(selectedLead)}
                   >
                     {selectedLead.ai_paused ? (
-                      <><PlayIcon className="h-3.5 w-3.5" /> Включить AI</>
+                      <>
+                        <PlayIcon className="h-3.5 w-3.5" />
+                        <span className="hidden sm:inline">Включить AI</span>
+                        <span className="sm:hidden">AI</span>
+                      </>
                     ) : (
-                      <><HandIcon className="h-3.5 w-3.5" /> Перехватить диалог</>
+                      <>
+                        <HandIcon className="h-3.5 w-3.5" />
+                        <span className="hidden sm:inline">Перехватить</span>
+                        <span className="sm:hidden">Ручной</span>
+                      </>
                     )}
                   </Button>
 
@@ -723,11 +743,11 @@ function CommunicationsPage() {
                     <Button
                       variant="outline"
                       size="sm"
-                      className={`h-8 gap-1.5 text-xs ${showAiDiagnosticsOpen ? 'bg-primary/5 text-primary border-primary/20' : ''}`}
+                      className={`h-8 gap-1 text-xs px-2 sm:px-3 ${showAiDiagnosticsOpen ? 'bg-primary/5 text-primary border-primary/20' : ''}`}
                       onClick={() => setShowAiDiagnosticsOpen(!showAiDiagnosticsOpen)}
                     >
                       <ScrollTextIcon className="h-3.5 w-3.5" />
-                      Логи
+                      <span className="hidden sm:inline">Логи</span>
                     </Button>
                   )}
 
@@ -735,11 +755,11 @@ function CommunicationsPage() {
                   <Button
                     variant="outline"
                     size="sm"
-                    className={`h-8 gap-1.5 text-xs ${showRightSidebar ? 'bg-primary/5 text-primary border-primary/20' : ''}`}
+                    className={`h-8 gap-1 text-xs px-2 sm:px-3 ${showRightSidebar ? 'bg-primary/5 text-primary border-primary/20' : ''}`}
                     onClick={() => setShowRightSidebar(!showRightSidebar)}
                   >
                     <SlidersHorizontalIcon className="h-3.5 w-3.5" />
-                    Профиль
+                    <span className="hidden sm:inline">Профиль</span>
                   </Button>
                 </div>
               </div>
@@ -936,9 +956,9 @@ function CommunicationsPage() {
           )}
         </div>
 
-        {/* Right Column: Lead Details Profile (if active) */}
-        {selectedLead && showRightSidebar && (
-          <div className="w-[360px] shrink-0 h-full overflow-hidden bg-card">
+          {/* Right Sidebar: Absolute overlay on mobile, inline flex column on desktop (md+) */}
+          {selectedLead && showRightSidebar && (
+            <div className="absolute right-0 top-0 bottom-0 w-full sm:w-[300px] md:relative md:top-auto md:bottom-auto md:right-auto md:w-[300px] md:shrink-0 bg-card border-l shadow-xl md:shadow-none z-20 h-full">
             <LeadDetailsSidebar
               lead={selectedLead}
               onClose={() => setShowRightSidebar(false)}

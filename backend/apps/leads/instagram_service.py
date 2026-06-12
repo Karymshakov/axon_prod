@@ -15,26 +15,28 @@ class InstagramService:
         self.access_token = None
         self._load_config()
 
-    def _load_config(self):
+    def _load_config(self, org=None):
         """Load configuration from database."""
         self.access_token = None
         try:
             from .models import InstagramConnection
-            config = InstagramConnection.get_config()
+            config = InstagramConnection.get_config(org)
             if config:
                 self.access_token = config.access_token
         except Exception as e:
             logger.error(f"Could not load Instagram config: {e}", exc_info=True)
 
-    def is_configured(self) -> bool:
+    def is_configured(self, org=None) -> bool:
         """Return True if an access token is stored (regardless of expiry)."""
-        self._load_config()
+        self._load_config(org)
         return bool(self.access_token)
 
-    def send_message(self, recipient_id: str, text: str) -> Optional[dict]:
+    def send_message(self, recipient_id: str, text: str, org=None, raise_exception: bool = False) -> Optional[dict]:
         """Send a message to an Instagram user via graph.instagram.com."""
-        if not self.is_configured():
+        if not self.is_configured(org):
             logger.error("Instagram not configured")
+            if raise_exception:
+                raise Exception("Instagram is not connected. Please connect your Instagram Business Account in Settings.")
             return None
 
         try:
@@ -55,10 +57,18 @@ class InstagramService:
                 'text': text,
             }
         except requests.exceptions.RequestException as e:
-            logger.error(f"Failed to send Instagram message to {recipient_id}: {e}")
+            error_detail = ""
+            if hasattr(e, 'response') and e.response is not None:
+                try:
+                    error_detail = f" - Response: {e.response.text}"
+                except Exception:
+                    pass
+            logger.error(f"Failed to send Instagram message to {recipient_id}: {e}{error_detail}")
+            if raise_exception:
+                raise Exception(f"Meta API error: {e.response.text if hasattr(e, 'response') and e.response is not None else str(e)}")
             return None
 
-    def send_image_url(self, recipient_id: str, image_url: str, caption: str = None) -> Optional[dict]:
+    def send_image_url(self, recipient_id: str, image_url: str, caption: str = None, org=None) -> Optional[dict]:
         """Send an image attachment to an Instagram user via graph.instagram.com.
 
         image_url must be a publicly accessible HTTPS URL — Instagram's servers
@@ -66,7 +76,7 @@ class InstagramService:
         caption is accepted for API symmetry but Instagram DM attachments do not
         render captions; the AI should follow up with a text message instead.
         """
-        if not self.is_configured():
+        if not self.is_configured(org):
             logger.error("Instagram not configured")
             return None
 
@@ -103,13 +113,13 @@ class InstagramService:
             logger.error(f"Failed to send Instagram image to {recipient_id}: {e}{error_detail}")
             return None
 
-    def send_typing_indicator(self, recipient_id: str) -> None:
+    def send_typing_indicator(self, recipient_id: str, org=None) -> None:
         """
         Send a typing indicator to an Instagram user.
         Shows for ~20 s; call every 4 s to keep it continuous.
         Never raises — a typing failure must not break the response flow.
         """
-        if not self.is_configured():
+        if not self.is_configured(org):
             return
         try:
             requests.post(

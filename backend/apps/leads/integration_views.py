@@ -618,20 +618,28 @@ def send_instagram_message_from_comms(request):
                 'error': 'This lead does not have an Instagram user ID configured'
             }, status=status.HTTP_400_BAD_REQUEST)
 
+        org = lead.organization
+
+        if not instagram_service.is_configured(org=org):
+            return Response({
+                'success': False,
+                'error': 'Instagram is not configured. Please connect your Instagram Business Account in Settings.'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
         # Send message
-        result = instagram_service.send_message(lead.instagram_user_id, message_text)
+        result = instagram_service.send_message(lead.instagram_user_id, message_text, org=org, raise_exception=True)
 
         if not result:
             return Response({
                 'success': False,
-                'error': 'Failed to send message. Check Instagram configuration.'
+                'error': 'Failed to send message via Instagram'
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
         # Log activity — echo_origin='crm' lets the webhook echo handler identify
         # this message ID as a CRM send, not a native Instagram app takeover.
         LeadActivity.objects.create(
             lead=lead,
-            organization=lead.organization,
+            organization=org,
             activity_type=LeadActivity.TYPE_INSTAGRAM_SENT,
             description=f"Sent Instagram message: {message_text[:100]}{'...' if len(message_text) > 100 else ''}",
             echo_origin=LeadActivity.ECHO_ORIGIN_CRM,
@@ -654,9 +662,10 @@ def send_instagram_message_from_comms(request):
             'error': 'Lead not found'
         }, status=status.HTTP_404_NOT_FOUND)
     except Exception as e:
+        logger.error(f"Error sending Instagram message: {e}", exc_info=True)
         return Response({
             'success': False,
-            'error': str(e)
+            'error': f'Failed to send message: {str(e)}'
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
@@ -828,12 +837,20 @@ def send_instagram_to_customer(request):
                 'error': 'This customer does not have an Instagram user ID configured'
             }, status=status.HTTP_400_BAD_REQUEST)
 
-        result = instagram_service.send_message(customer.instagram_user_id, message_text)
+        org = customer.organization
+
+        if not instagram_service.is_configured(org=org):
+            return Response({
+                'success': False,
+                'error': 'Instagram is not configured. Please connect your Instagram Business Account in Settings.'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        result = instagram_service.send_message(customer.instagram_user_id, message_text, org=org, raise_exception=True)
 
         if not result:
             return Response({
                 'success': False,
-                'error': 'Failed to send message. Check Instagram configuration.'
+                'error': 'Failed to send message via Instagram'
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
         # Log activity on the linked lead if exists
@@ -863,9 +880,10 @@ def send_instagram_to_customer(request):
             'error': 'Customer not found'
         }, status=status.HTTP_404_NOT_FOUND)
     except Exception as e:
+        logger.error(f"Error sending Instagram message to customer: {e}", exc_info=True)
         return Response({
             'success': False,
-            'error': str(e)
+            'error': f'Failed to send message: {str(e)}'
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
