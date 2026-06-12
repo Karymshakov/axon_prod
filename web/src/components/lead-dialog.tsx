@@ -6,13 +6,13 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { TrashIcon } from 'lucide-react'
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog'
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetFooter,
+  SheetHeader,
+  SheetTitle,
+} from '@/components/ui/sheet'
 import {
   Form,
   FormControl,
@@ -236,16 +236,16 @@ export function LeadDialog({ open, onOpenChange, lead, defaultSegment = 'individ
   }
 
   return (
-    <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className="max-w-3xl flex flex-col max-h-[75vh] overflow-hidden">
-        <DialogHeader>
-          <DialogTitle>{isEditing ? t('leads.editLead') : t('leads.addNewLead')}</DialogTitle>
-          <DialogDescription>
+    <Sheet open={open} onOpenChange={handleOpenChange}>
+      <SheetContent className="w-full sm:max-w-2xl flex flex-col h-full overflow-hidden p-6">
+        <SheetHeader>
+          <SheetTitle>{isEditing ? t('leads.editLead') : t('leads.addNewLead')}</SheetTitle>
+          <SheetDescription>
             {isEditing
               ? t('leads.updateLeadInfo')
               : t('leads.addNewLeadDesc')}
-          </DialogDescription>
-        </DialogHeader>
+          </SheetDescription>
+        </SheetHeader>
 
         <Form {...form}>
           <form onSubmit={form.handleSubmit(onSubmit)} className="flex flex-col min-h-0 flex-1">
@@ -867,7 +867,7 @@ export function LeadDialog({ open, onOpenChange, lead, defaultSegment = 'individ
             />
 
           </div>
-            <DialogFooter className="gap-2 pt-4 border-t shrink-0">
+            <SheetFooter className="gap-2 pt-4 border-t shrink-0">
               {isEditing ? (
                 <Button
                   type="button"
@@ -893,10 +893,10 @@ export function LeadDialog({ open, onOpenChange, lead, defaultSegment = 'individ
               >
                 {isEditing ? t('leads.updateLead') : t('leads.createLead')}
               </Button>
-            </DialogFooter>
+            </SheetFooter>
           </form>
         </Form>
-      </DialogContent>
-    </Dialog>
+      </SheetContent>
+    </Sheet>
   )
 }

@@ -4,6 +4,7 @@ import { type Lead } from '@/lib/api'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
+import { LeadSourceBadge } from '@/components/lead-source-badge'
 
 export const INTENT_TIER_CONFIG = {
   booking_intent: { label: 'Намерение забронировать', className: 'bg-green-100 text-green-800 border-green-200' },
@@ -73,11 +74,29 @@ export function LeadCard({ lead }: LeadCardProps) {
           </Button>
         </div>
 
-        {lead.instagram_intent_tier ? (
-          <div className="mt-2">
+        <div className="flex flex-wrap gap-1 mt-2">
+          {lead.instagram_user_id && (
+            <Badge variant="outline" className="text-[9px] px-1 h-4 bg-pink-50 text-pink-700 border-pink-200 dark:bg-pink-950/20 dark:text-pink-400 dark:border-pink-900/50 gap-0.5">
+              Insta
+            </Badge>
+          )}
+          {lead.telegram_chat_id && (
+            <Badge variant="outline" className="text-[9px] px-1 h-4 bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950/20 dark:text-blue-400 dark:border-blue-900/50 gap-0.5">
+              TG
+            </Badge>
+          )}
+          {lead.whatsapp_phone && (
+            <Badge variant="outline" className="text-[9px] px-1 h-4 bg-green-50 text-green-700 border-green-200 dark:bg-green-950/20 dark:text-green-400 dark:border-green-900/50 gap-0.5">
+              WA
+            </Badge>
+          )}
+          {lead.instagram_intent_tier ? (
             <InstagramIntentBadge tier={lead.instagram_intent_tier} />
-          </div>
-        ) : null}
+          ) : null}
+          {lead.source ? (
+            <LeadSourceBadge source={lead.source} />
+          ) : null}
+        </div>
 
         <div className="mt-3 space-y-1.5">
           {lead.email ? (

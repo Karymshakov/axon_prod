@@ -3,7 +3,8 @@ import { useLanguage } from '@/contexts/language-context'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useState, useMemo } from 'react'
 import { PlusIcon, PencilIcon, TrashIcon, LayoutGridIcon, LayoutListIcon, EyeIcon, SearchIcon, XIcon, InstagramIcon, MessageSquareIcon, PhoneIcon } from 'lucide-react'
-import { fetchLeads, fetchLeadStats, fetchPipelineStages, deleteLead, updateLead, createLeadNote, type Lead } from '@/lib/api'
+import { fetchLeads, fetchLeadStats, fetchPipelineStages, deleteLead, updateLead, createLeadNote, SOURCE_OPTIONS, type Lead } from '@/lib/api'
+import { LeadSourceBadge } from '@/components/lead-source-badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
@@ -106,6 +107,7 @@ function LeadsPage() {
   const [view, setView] = useState<'table' | 'kanban'>('table')
   const [searchQuery, setSearchQuery] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
+  const [sourceFilter, setSourceFilter] = useState('')
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editingLead, setEditingLead] = useState<Lead | null>(null)
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
@@ -128,8 +130,9 @@ function LeadsPage() {
     const params: Record<string, string> = {}
     if (searchQuery) params.search = searchQuery
     if (statusFilter && statusFilter !== 'all') params.status = statusFilter
+    if (sourceFilter && sourceFilter !== 'all') params.source = sourceFilter
     return params
-  }, [searchQuery, statusFilter])
+  }, [searchQuery, statusFilter, sourceFilter])
 
   const { data: stats } = useQuery({
     queryKey: ['lead-stats'],
@@ -341,6 +344,21 @@ function LeadsPage() {
                       ))}
                     </SelectContent>
                   </Select>
+
+                  <Select value={sourceFilter} onValueChange={setSourceFilter}>
+                    <SelectTrigger className="w-[150px] h-9">
+                      <SelectValue placeholder="Все источники" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">Все источники</SelectItem>
+                      {SOURCE_OPTIONS.map((opt) => (
+                        <SelectItem key={opt.value} value={opt.value}>
+                          {opt.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+
                   {(Object.keys(fetchParams).length > 0) ? (
                     <Button
                       variant="ghost"
@@ -349,6 +367,7 @@ function LeadsPage() {
                       onClick={() => {
                         setStatusFilter('')
                         setSearchQuery('')
+                        setSourceFilter('')
                       }}
                     >
                       <XIcon className="mr-1 h-3.5 w-3.5" />
@@ -436,26 +455,30 @@ function LeadsPage() {
                               </Select>
                             </TableCell>
                             <TableCell>
-                              {lead.instagram_user_id ? (
-                                <span className="inline-flex items-center gap-1 rounded-full bg-pink-50 px-2 py-0.5 text-[11px] font-medium text-pink-700 ring-1 ring-inset ring-pink-200">
-                                  <InstagramIcon className="h-3 w-3" />
-                                  Instagram
-                                </span>
-                              ) : lead.telegram_chat_id ? (
-                                <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2 py-0.5 text-[11px] font-medium text-blue-700 ring-1 ring-inset ring-blue-200">
-                                  <MessageSquareIcon className="h-3 w-3" />
-                                  Telegram
-                                </span>
-                              ) : lead.whatsapp_phone ? (
-                                <span className="inline-flex items-center gap-1 rounded-full bg-green-50 px-2 py-0.5 text-[11px] font-medium text-green-700 ring-1 ring-inset ring-green-200">
-                                  <PhoneIcon className="h-3 w-3" />
-                                  WhatsApp
-                                </span>
-                              ) : lead.source ? (
-                                <span className="text-xs text-muted-foreground">{lead.source}</span>
-                              ) : (
-                                <span className="text-xs text-muted-foreground">—</span>
-                              )}
+                              <div className="flex flex-col gap-1 items-start">
+                                {lead.instagram_user_id ? (
+                                  <span className="inline-flex items-center gap-1 rounded-full bg-pink-50 px-2 py-0.5 text-[10px] font-medium text-pink-700 ring-1 ring-inset ring-pink-200 dark:bg-pink-950/25 dark:text-pink-400 dark:ring-pink-900/40">
+                                    <InstagramIcon className="h-3 w-3" />
+                                    Instagram
+                                  </span>
+                                ) : lead.telegram_chat_id ? (
+                                  <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-medium text-blue-700 ring-1 ring-inset ring-blue-200 dark:bg-blue-950/25 dark:text-blue-400 dark:ring-blue-900/40">
+                                    <MessageSquareIcon className="h-3 w-3" />
+                                    Telegram
+                                  </span>
+                                ) : lead.whatsapp_phone ? (
+                                  <span className="inline-flex items-center gap-1 rounded-full bg-green-50 px-2 py-0.5 text-[10px] font-medium text-green-700 ring-1 ring-inset ring-green-200 dark:bg-green-950/25 dark:text-green-400 dark:ring-green-900/40">
+                                    <PhoneIcon className="h-3 w-3" />
+                                    WhatsApp
+                                  </span>
+                                ) : null}
+
+                                {lead.source ? (
+                                  <LeadSourceBadge source={lead.source} />
+                                ) : !lead.instagram_user_id && !lead.telegram_chat_id && !lead.whatsapp_phone ? (
+                                  <span className="text-xs text-muted-foreground">—</span>
+                                ) : null}
+                              </div>
                             </TableCell>
                             <TableCell className="align-top overflow-hidden" style={{ wordBreak: 'break-word', whiteSpace: 'normal' }} onClick={(e) => e.stopPropagation()}>
                               <InlineNotesEditor

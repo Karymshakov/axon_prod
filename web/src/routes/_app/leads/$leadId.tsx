@@ -7,6 +7,7 @@ import { fetchLead, sendTelegramMessage, sendInstagramMessageFromComms, updateLe
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { InstagramIntentBadge, INTENT_TIER_CONFIG } from '@/components/lead-card'
+import { LeadSourceBadge } from '@/components/lead-source-badge'
 import {
   Select,
   SelectContent,
@@ -161,7 +162,7 @@ function LeadDetailPage() {
                       {lead.status.charAt(0).toUpperCase() + lead.status.slice(1)}
                     </Badge>
                     {lead.source ? (
-                      <Badge variant="outline">{lead.source}</Badge>
+                      <LeadSourceBadge source={lead.source} />
                     ) : null}
                     {lead.ai_paused ? (
                       <Badge className="gap-1 bg-amber-500 text-white hover:bg-amber-500">

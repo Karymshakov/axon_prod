@@ -289,7 +289,11 @@ function DashboardPage() {
                             formatter={(value: number) => [value, 'Лиды']}
                             contentStyle={{ fontSize: 12, borderRadius: 8 }}
                           />
-                          <Bar dataKey="count" radius={[4, 4, 0, 0]} fill="#8b5cf6" />
+                          <Bar dataKey="count" radius={[4, 4, 0, 0]}>
+                            {barData.map((entry, index) => (
+                              <Cell key={`cell-${index}`} fill={PIE_COLORS[index % PIE_COLORS.length]} />
+                            ))}
+                          </Bar>
                         </BarChart>
                       </ResponsiveContainer>
                     )

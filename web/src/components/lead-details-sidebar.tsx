@@ -1,5 +1,6 @@
 import { Lead, fetchLeadNotes } from '@/lib/api'
 import { useQuery } from '@tanstack/react-query'
+import { LeadSourceBadge } from '@/components/lead-source-badge'
 import {
   Sheet,
   SheetContent,
@@ -229,10 +230,16 @@ export function LeadDetailsSidebar({ lead, open, onClose, onEdit }: LeadDetailsS
                 <span>{instagramDisplay}</span>
               </div>
             ) : null}
-            <div className="flex items-center justify-between px-3 py-2">
-              <span className="font-medium text-muted-foreground">Тип клиента</span>
-              <Badge variant="outline">{lead.segment_display}</Badge>
-            </div>
+             <div className="flex items-center justify-between px-3 py-2">
+               <span className="font-medium text-muted-foreground">Тип клиента</span>
+               <Badge variant="outline">{lead.segment_display}</Badge>
+             </div>
+             {lead.source ? (
+               <div className="flex items-center justify-between px-3 py-2">
+                 <span className="font-medium text-muted-foreground">Источник</span>
+                 <LeadSourceBadge source={lead.source} />
+               </div>
+             ) : null}
             <div className="flex items-center justify-between px-3 py-2">
               <span className="font-medium text-muted-foreground">Статус</span>
               <Badge variant={STATUS_COLORS[lead.status]}>{STATUS_LABELS[lead.status] ?? lead.status}</Badge>

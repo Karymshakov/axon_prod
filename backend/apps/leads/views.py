@@ -301,6 +301,16 @@ class LeadViewSet(OrganizationQuerysetMixin, viewsets.ModelViewSet):
             'reset_summary': reset_summary,
         })
 
+    @action(detail=True, methods=['post'], url_path='generate-copilot-suggestion')
+    def generate_copilot_suggestion(self, request, pk=None):
+        """Generate a suggested response from the AI agent without sending it."""
+        lead = self.get_object()
+        from apps.leads.agent_service import agent_service
+        suggestion = agent_service.generate_response_for_lead(lead)
+        if suggestion:
+            return Response({'suggestion': suggestion})
+        return Response({'suggestion': ''}, status=status.HTTP_400_BAD_REQUEST)
+
     @action(detail=True, methods=['post'], url_path='ai-prompt-preview')
     def ai_prompt_preview(self, request, pk=None):
         """Build a prompt/decision preview without calling the LLM or executing tools."""

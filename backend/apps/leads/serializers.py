@@ -181,6 +181,7 @@ class LeadSerializer(serializers.ModelSerializer):
             'latest_note',
             'last_contact_channel',
             'active_goals_count',
+            'agent_context',
         ]
         read_only_fields = ['id', 'created_at', 'updated_at', 'latest_note', 'last_contact_channel', 'active_goals_count', 'assigned_to_name', 'ai_paused_at', 'ai_paused_by']
 

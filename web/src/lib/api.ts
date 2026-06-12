@@ -250,6 +250,8 @@ export interface Lead {
   // Computed fields
   latest_note: string
   active_goals_count: number
+  agent_context?: Record<string, any>
+  last_contact_channel?: { channel: string; contact: string } | null
 }
 
 export interface LeadStats {
@@ -316,7 +318,7 @@ export function createLead(data: CreateLeadData) {
   return api.post<Lead>('/leads/', data)
 }
 
-export function updateLead(id: number, data: Partial<CreateLeadData>) {
+export function updateLead(id: number, data: Partial<Lead>) {
   return api.patch<Lead>(`/leads/${id}/`, data)
 }
 
@@ -941,6 +943,14 @@ export interface ResetLeadAiMemoryResponse {
 
 export function resetLeadAiMemory(leadId: number) {
   return api.post<ResetLeadAiMemoryResponse>(`/leads/${leadId}/reset-ai-memory/`, {})
+}
+
+export interface CopilotSuggestionResponse {
+  suggestion: string
+}
+
+export function generateCopilotSuggestion(leadId: number) {
+  return api.post<CopilotSuggestionResponse>(`/leads/${leadId}/generate-copilot-suggestion/`, {})
 }
 
 // AI Configuration types

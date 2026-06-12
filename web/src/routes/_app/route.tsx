@@ -221,7 +221,7 @@ function AppLayout() {
 
   return (
     <SidebarProvider>
-      <div className="flex min-h-screen w-full relative">
+      <div className="flex h-screen w-full overflow-hidden">
         <Sidebar collapsible="icon">
           <SidebarHeader className="p-2">
             <div className="flex items-center gap-1 group-data-[collapsible=icon]:justify-center">
@@ -300,13 +300,13 @@ function AppLayout() {
             </SidebarMenu>
           </SidebarFooter>
         </Sidebar>
-        <div className="flex flex-1 flex-col min-w-0">
+        <div className="flex flex-1 flex-col min-w-0 min-h-0 overflow-hidden">
           <header className="flex h-14 shrink-0 items-center gap-2 border-b px-4 md:hidden">
             <SidebarTrigger />
             <Separator orientation="vertical" className="h-4" />
             <span className="font-semibold">{t('nav.crm')}</span>
           </header>
-          <main className="flex flex-1 flex-col min-w-0">
+          <main className="flex flex-1 flex-col min-w-0 min-h-0 overflow-auto">
             <Outlet />
           </main>
         </div>
