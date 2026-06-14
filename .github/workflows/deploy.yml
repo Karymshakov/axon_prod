@@ -24,4 +24,20 @@ jobs:
             git reset --hard origin/master
 
             docker compose down
-            docker compose up -d --build
+            docker compose up -d --build || {
+              echo "===== docker compose ps ====="
+              docker compose ps || true
+
+              echo "===== postgres logs ====="
+              docker logs axon_postgres --tail 200 || true
+
+              echo "===== backend logs ====="
+              docker logs axon_backend --tail 200 || true
+
+              echo "===== frontend logs ====="
+              docker logs axon_frontend --tail 100 || true
+
+              exit 1
+            }
+
+            docker compose ps
