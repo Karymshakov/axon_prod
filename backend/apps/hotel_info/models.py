@@ -156,6 +156,7 @@ class RoomPricing(models.Model):
 
 class RoomCombinationNote(models.Model):
     """Per-combination metadata: notes, type overrides, and custom user-added combinations."""
+    organization = models.ForeignKey(**ORG_FK)
     guest_count = models.IntegerField(help_text='Number of guests (1–10)')
     combination_index = models.IntegerField(help_text='0-based index within the guest count group')
     note = models.TextField(blank=True)
@@ -183,7 +184,7 @@ class RoomCombinationNote(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        unique_together = [('guest_count', 'combination_index')]
+        unique_together = [('organization', 'guest_count', 'combination_index')]
         ordering = ['guest_count', 'combination_index']
         verbose_name = 'Room Combination Note'
         verbose_name_plural = 'Room Combination Notes'

@@ -11,16 +11,18 @@ interface LeadGoalsProps {
 }
 
 const GOAL_LABELS: Record<string, string> = {
-  collect_email: 'Получить email',
+  collect_email: 'Получить email, если удобно',
   collect_phone: 'Получить телефон',
-  schedule_call: 'Назначить звонок',
-  schedule_meeting: 'Назначить встречу',
-  send_proposal: 'Отправить предложение',
+  collect_guest_name: 'Уточнить имя гостя',
+  collect_discovery_source: 'Уточнить, откуда узнал',
+  schedule_call: 'Согласовать следующий контакт',
+  schedule_meeting: 'Согласовать встречу',
+  send_proposal: 'Подготовить предложение',
   send_info: 'Отправить информацию',
-  handle_objection: 'Отработать возражение',
-  close_deal: 'Довести до брони',
-  qualify_lead: 'Квалифицировать лида',
-  get_decision_maker: 'Найти принимающего решение',
+  handle_objection: 'Ответить на сомнение гостя',
+  close_deal: 'Подтвердить бронь',
+  qualify_lead: 'Уточнить детали брони',
+  get_decision_maker: 'Уточнить ответственного',
 }
 
 const PRIORITY_LABELS: Record<number, string> = {
@@ -41,6 +43,7 @@ export function LeadGoals({ leadId }: LeadGoalsProps) {
     mutationFn: (goalId: number) => completeLeadGoal(goalId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['lead-goals', leadId] })
+      queryClient.invalidateQueries({ queryKey: ['lead', leadId] })
       toast.success('Цель выполнена')
     },
     onError: () => {
@@ -130,16 +133,21 @@ export function LeadGoals({ leadId }: LeadGoalsProps) {
                 {activeGoals.map((goal) => (
                   <div
                     key={goal.id}
-                    className="flex items-center gap-3 p-3 rounded-lg border bg-card hover:bg-muted/50 transition-colors"
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => {
+                      if (!completeGoalMutation.isPending) completeGoalMutation.mutate(goal.id)
+                    }}
+                    onKeyDown={(event) => {
+                      if ((event.key === 'Enter' || event.key === ' ') && !completeGoalMutation.isPending) {
+                        event.preventDefault()
+                        completeGoalMutation.mutate(goal.id)
+                      }
+                    }}
+                    className="flex cursor-pointer items-center gap-3 rounded-lg border bg-card p-3 transition-colors hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    title="Нажмите, когда цель выполнена"
                   >
-                    <button
-                      onClick={() => completeGoalMutation.mutate(goal.id)}
-                      className="text-muted-foreground hover:text-primary transition-colors"
-                      disabled={completeGoalMutation.isPending}
-                      aria-label={`Выполнить цель: ${getGoalLabel(goal)}`}
-                    >
-                      <CircleIcon className="h-5 w-5" />
-                    </button>
+                    <CircleIcon className="h-5 w-5 shrink-0 text-muted-foreground" />
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2">
                         <span className="font-medium text-sm">{getGoalLabel(goal)}</span>

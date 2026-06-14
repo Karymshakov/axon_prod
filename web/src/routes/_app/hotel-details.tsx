@@ -131,6 +131,7 @@ import {
   saveCombinationType,
   type RoomCombinationGroup,
   type RoomCategory,
+  type User,
 } from '@/lib/api'
 import { DatePicker } from '@/components/date-picker'
 import { useAuth } from '@/contexts/auth-context'
@@ -138,6 +139,15 @@ import { useAuth } from '@/contexts/auth-context'
 export const Route = createFileRoute('/_app/hotel-details')({
   component: HotelDetailsPage,
 })
+
+function canEditHotelPricing(user: User | null | undefined) {
+  return Boolean(
+    user?.is_superadmin ||
+    user?.is_admin ||
+    user?.current_organization_role === 'owner' ||
+    user?.current_organization_role === 'admin',
+  )
+}
 
 const CATEGORIES = [
   { value: 'rooms', label: 'Номера' },
@@ -1979,15 +1989,18 @@ function CombinationNoteCell({
   guestCount,
   combinationIndex,
   initialNote,
+  canEdit,
 }: {
   guestCount: number
   combinationIndex: number
   initialNote: string
+  canEdit: boolean
 }) {
   const queryClient = useQueryClient()
   const [value, setValue] = useState(initialNote)
 
   async function handleBlur() {
+    if (!canEdit) return
     if (value === initialNote) return
     try {
       await saveRoomCombinationNote(guestCount, combinationIndex, value)
@@ -1998,13 +2011,17 @@ function CombinationNoteCell({
   }
 
   return (
-    <input
-      className="w-full bg-transparent text-sm text-muted-foreground outline-none border-b border-transparent focus:border-border focus:text-foreground placeholder:text-muted-foreground/50 py-0.5"
-      value={value}
-      placeholder="Добавить примечание…"
-      onChange={(e) => setValue(e.target.value)}
-      onBlur={handleBlur}
-    />
+    canEdit ? (
+      <input
+        className="w-full bg-transparent text-sm text-muted-foreground outline-none border-b border-transparent focus:border-border focus:text-foreground placeholder:text-muted-foreground/50 py-0.5"
+        value={value}
+        placeholder="Добавить примечание…"
+        onChange={(e) => setValue(e.target.value)}
+        onBlur={handleBlur}
+      />
+    ) : (
+      <span className="block text-sm text-muted-foreground">{initialNote || '—'}</span>
+    )
   )
 }
 
@@ -2166,6 +2183,8 @@ function AddCombinationDialog({
 
 function RoomCombinationsSection() {
   const queryClient = useQueryClient()
+  const { user } = useAuth()
+  const canEditPricing = canEditHotelPricing(user)
   const [addOpen, setAddOpen] = useState(false)
   const { data, isLoading, refetch, isFetching } = useQuery({
     queryKey: ['room-combinations'],
@@ -2179,6 +2198,7 @@ function RoomCombinationsSection() {
     comboIndex: number,
     newType: 'Основной' | 'Альтернатива' | 'Семейный',
   ) {
+    if (!canEditPricing) return
     queryClient.setQueryData(
       ['room-combinations'],
       (old: { results: RoomCombinationGroup[] } | undefined) => {
@@ -2213,6 +2233,7 @@ function RoomCombinationsSection() {
   }
 
   async function handleDelete(combo: { id: number | null; is_custom: boolean; index: number }, guestCount: number) {
+    if (!canEditPricing) return
     queryClient.setQueryData(
       ['room-combinations'],
       (old: { results: RoomCombinationGroup[] } | undefined) => {
@@ -2262,18 +2283,22 @@ function RoomCombinationsSection() {
               : <RefreshCwIcon className="h-4 w-4 mr-1.5" />}
             Обновить
           </Button>
-          <Button size="sm" onClick={() => setAddOpen(true)}>
-            <PlusIcon className="h-4 w-4 mr-1.5" />
-            Добавить комбинацию
-          </Button>
+          {canEditPricing ? (
+            <Button size="sm" onClick={() => setAddOpen(true)}>
+              <PlusIcon className="h-4 w-4 mr-1.5" />
+              Добавить комбинацию
+            </Button>
+          ) : null}
         </div>
       </div>
 
-      <AddCombinationDialog
-        open={addOpen}
-        onOpenChange={setAddOpen}
-        onSaved={() => queryClient.invalidateQueries({ queryKey: ['room-combinations'] })}
-      />
+      {canEditPricing ? (
+        <AddCombinationDialog
+          open={addOpen}
+          onOpenChange={setAddOpen}
+          onSaved={() => queryClient.invalidateQueries({ queryKey: ['room-combinations'] })}
+        />
+      ) : null}
 
       {isLoading ? (
         <div className="text-sm text-muted-foreground py-4">Загрузка...</div>
@@ -2293,7 +2318,7 @@ function RoomCombinationsSection() {
                 <th className="px-3 py-2 text-right font-medium text-muted-foreground whitespace-nowrap">Полупансион</th>
                 <th className="px-3 py-2 text-right font-medium text-muted-foreground whitespace-nowrap">Полный пансион</th>
                 <th className="px-3 py-2 text-left font-medium text-muted-foreground">Примечания</th>
-                <th className="w-8" />
+                {canEditPricing ? <th className="w-8" /> : null}
               </tr>
             </thead>
             <tbody>
@@ -2336,34 +2361,40 @@ function RoomCombinationsSection() {
                     <td className="px-3 py-2.5 text-center tabular-nums font-medium">{group.guest_count}</td>
                     <td className="px-3 py-2.5 text-center tabular-nums">{combo.room_count}</td>
                     <td className="px-3 py-1.5">
-                      <Select
-                        value={combo.type}
-                        onValueChange={(v) =>
-                          handleTypeChange(
-                            group.guest_count,
-                            combo.index,
-                            v as 'Основной' | 'Альтернатива' | 'Семейный',
-                          )
-                        }
-                      >
-                        <SelectTrigger
-                          className={cn(
-                            'h-7 text-xs w-[140px] font-medium',
-                            combo.type === 'Основной'
-                              ? 'text-blue-600 border-blue-200 bg-blue-50 hover:bg-blue-100'
-                              : combo.type === 'Семейный'
-                              ? 'text-violet-600 border-violet-200 bg-violet-50 hover:bg-violet-100'
-                              : 'text-muted-foreground',
-                          )}
+                      {canEditPricing ? (
+                        <Select
+                          value={combo.type}
+                          onValueChange={(v) =>
+                            handleTypeChange(
+                              group.guest_count,
+                              combo.index,
+                              v as 'Основной' | 'Альтернатива' | 'Семейный',
+                            )
+                          }
                         >
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="Основной" className="text-xs text-blue-600">Основной</SelectItem>
-                          <SelectItem value="Альтернатива" className="text-xs">Альтернатива</SelectItem>
-                          <SelectItem value="Семейный" className="text-xs text-violet-600">Семейный</SelectItem>
-                        </SelectContent>
-                      </Select>
+                          <SelectTrigger
+                            className={cn(
+                              'h-7 text-xs w-[140px] font-medium',
+                              combo.type === 'Основной'
+                                ? 'text-blue-600 border-blue-200 bg-blue-50 hover:bg-blue-100'
+                                : combo.type === 'Семейный'
+                                ? 'text-violet-600 border-violet-200 bg-violet-50 hover:bg-violet-100'
+                                : 'text-muted-foreground',
+                            )}
+                          >
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="Основной" className="text-xs text-blue-600">Основной</SelectItem>
+                            <SelectItem value="Альтернатива" className="text-xs">Альтернатива</SelectItem>
+                            <SelectItem value="Семейный" className="text-xs text-violet-600">Семейный</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      ) : (
+                        <span className="inline-flex h-7 items-center rounded-md border bg-muted/30 px-2.5 text-xs font-medium text-muted-foreground">
+                          {combo.type}
+                        </span>
+                      )}
                     </td>
                     <td className="px-3 py-2.5 text-right tabular-nums">
                       {combo.prices?.standard != null ? combo.prices.standard.toLocaleString('ru-RU') : '—'}
@@ -2382,19 +2413,22 @@ function RoomCombinationsSection() {
                         guestCount={group.guest_count}
                         combinationIndex={combo.index}
                         initialNote={combo.note}
+                        canEdit={canEditPricing}
                       />
                     </td>
-                    <td className="px-2 py-2.5 text-center">
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        aria-label="Удалить"
-                        className="h-7 w-7 text-muted-foreground hover:text-destructive"
-                        onClick={() => handleDelete(combo, group.guest_count)}
-                      >
-                        <Trash2Icon className="h-3.5 w-3.5" />
-                      </Button>
-                    </td>
+                    {canEditPricing ? (
+                      <td className="px-2 py-2.5 text-center">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          aria-label="Удалить"
+                          className="h-7 w-7 text-muted-foreground hover:text-destructive"
+                          onClick={() => handleDelete(combo, group.guest_count)}
+                        >
+                          <Trash2Icon className="h-3.5 w-3.5" />
+                        </Button>
+                      </td>
+                    ) : null}
                   </tr>
                 ))
               )}
@@ -2438,6 +2472,8 @@ function formatPrice(val: string | null): string {
 
 function PricingTab() {
   const queryClient = useQueryClient()
+  const { user } = useAuth()
+  const canEditPricing = canEditHotelPricing(user)
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editingRow, setEditingRow] = useState<RoomPricing | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<RoomPricing | null>(null)
@@ -2455,6 +2491,7 @@ function PricingTab() {
   const [uploadResultOpen, setUploadResultOpen] = useState(false)
 
   async function handleExcelUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    if (!canEditPricing) return
     const file = e.target.files?.[0]
     if (!excelInputRef.current) return
     excelInputRef.current.value = ''
@@ -2545,12 +2582,14 @@ function PricingTab() {
   })
 
   function openAdd() {
+    if (!canEditPricing) return
     setEditingRow(null)
     setForm(EMPTY_PRICING)
     setDialogOpen(true)
   }
 
   function openEdit(row: RoomPricing) {
+    if (!canEditPricing) return
     setEditingRow(row)
     setForm({
       kategoria_nomera: row.kategoria_nomera,
@@ -2568,6 +2607,7 @@ function PricingTab() {
   }
 
   function handleSave() {
+    if (!canEditPricing) return
     if (!form.kategoria_nomera.trim()) {
       toast.error('Укажите категорию номера')
       return
@@ -2616,25 +2656,27 @@ function PricingTab() {
             Валюта: <span className="font-medium text-foreground">KGS</span> (Кыргызский сом)
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => excelInputRef.current?.click()}
-            disabled={isUploading}
-          >
-            {isUploading ? (
-              <Loader2Icon className="h-4 w-4 mr-1.5 animate-spin" />
-            ) : (
-              <UploadCloudIcon className="h-4 w-4 mr-1.5" />
-            )}
-            Загрузить Excel
-          </Button>
-          <Button onClick={openAdd} size="sm">
-            <PlusIcon className="h-4 w-4 mr-1.5" />
-            Добавить строку
-          </Button>
-        </div>
+        {canEditPricing ? (
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => excelInputRef.current?.click()}
+              disabled={isUploading}
+            >
+              {isUploading ? (
+                <Loader2Icon className="h-4 w-4 mr-1.5 animate-spin" />
+              ) : (
+                <UploadCloudIcon className="h-4 w-4 mr-1.5" />
+              )}
+              Загрузить Excel
+            </Button>
+            <Button onClick={openAdd} size="sm">
+              <PlusIcon className="h-4 w-4 mr-1.5" />
+              Добавить строку
+            </Button>
+          </div>
+        ) : null}
       </div>
 
       <div className="overflow-x-auto rounded-lg border">
@@ -2660,20 +2702,22 @@ function PricingTab() {
               <th className="px-3 py-2.5 text-right font-medium text-muted-foreground whitespace-nowrap">С завтраком</th>
               <th className="px-3 py-2.5 text-right font-medium text-muted-foreground whitespace-nowrap">Полупансион</th>
               <th className="px-3 py-2.5 text-right font-medium text-muted-foreground whitespace-nowrap">Полный пансион</th>
-              <th className="px-3 py-2.5 text-center font-medium text-muted-foreground whitespace-nowrap">Действия</th>
+              {canEditPricing ? (
+                <th className="px-3 py-2.5 text-center font-medium text-muted-foreground whitespace-nowrap">Действия</th>
+              ) : null}
             </tr>
           </thead>
           <tbody>
             {isLoading ? (
               <tr>
-                <td colSpan={11} className="px-3 py-8 text-center text-muted-foreground">
+                <td colSpan={canEditPricing ? 11 : 10} className="px-3 py-8 text-center text-muted-foreground">
                   Загрузка...
                 </td>
               </tr>
             ) : rows.length === 0 ? (
               <tr>
-                <td colSpan={11} className="px-3 py-8 text-center text-muted-foreground">
-                  Прайс-лист пуст. Добавьте первую строку.
+                <td colSpan={canEditPricing ? 11 : 10} className="px-3 py-8 text-center text-muted-foreground">
+                  {canEditPricing ? 'Прайс-лист пуст. Добавьте первую строку.' : 'Прайс-лист пуст.'}
                 </td>
               </tr>
             ) : (
@@ -2726,28 +2770,30 @@ function PricingTab() {
                   <td className="px-3 py-2.5 text-right tabular-nums">{formatPrice(row.s_zavtrakom)}</td>
                   <td className="px-3 py-2.5 text-right tabular-nums">{formatPrice(row.polupansion)}</td>
                   <td className="px-3 py-2.5 text-right tabular-nums">{formatPrice(row.polny_pansion)}</td>
-                  <td className="px-3 py-2.5 text-center">
-                    <div className="flex items-center justify-center gap-1">
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-7 w-7"
-                        aria-label="Edit"
-                        onClick={() => openEdit(row)}
-                      >
-                        <PencilIcon className="h-3.5 w-3.5" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-7 w-7 text-destructive hover:text-destructive"
-                        aria-label="Delete"
-                        onClick={() => setDeleteTarget(row)}
-                      >
-                        <Trash2Icon className="h-3.5 w-3.5" />
-                      </Button>
-                    </div>
-                  </td>
+                  {canEditPricing ? (
+                    <td className="px-3 py-2.5 text-center">
+                      <div className="flex items-center justify-center gap-1">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7"
+                          aria-label="Edit"
+                          onClick={() => openEdit(row)}
+                        >
+                          <PencilIcon className="h-3.5 w-3.5" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7 text-destructive hover:text-destructive"
+                          aria-label="Delete"
+                          onClick={() => setDeleteTarget(row)}
+                        >
+                          <Trash2Icon className="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
+                    </td>
+                  ) : null}
                 </tr>
                 )
               })

@@ -919,7 +919,7 @@ export interface Task {
 export interface LeadGoal {
   id: number
   lead: number
-  goal_type: 'collect_email' | 'collect_phone' | 'schedule_call' | 'schedule_meeting' | 'send_proposal' | 'send_info' | 'handle_objection' | 'close_deal' | 'qualify_lead' | 'get_decision_maker'
+  goal_type: 'collect_email' | 'collect_phone' | 'collect_guest_name' | 'collect_discovery_source' | 'schedule_call' | 'schedule_meeting' | 'send_proposal' | 'send_info' | 'handle_objection' | 'close_deal' | 'qualify_lead' | 'get_decision_maker'
   goal_type_display: string
   status: 'active' | 'completed' | 'abandoned'
   status_display: string

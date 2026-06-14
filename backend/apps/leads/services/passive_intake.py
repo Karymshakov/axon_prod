@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any
 
 from apps.leads.ai_memory import filter_activities_since_last_ai_reset
@@ -34,6 +35,95 @@ _RECEIVED_ACTIVITY_TYPES = {
     LeadActivity.TYPE_WHATSAPP_RECEIVED,
 }
 
+_ROOM_SELECTION_WORDS = {
+    'да', 'давайте', 'берем', 'берём', 'подходит', 'ок', 'окей', 'хорошо',
+    'выбираю', 'выберем', 'оставим', 'нормально', 'подтверждаю',
+    'yes', 'ok', 'okay', 'take', 'confirm',
+}
+
+_MEAL_WORDS = {
+    'завтрак', 'завтраком', 'обед', 'ужин', 'питание', 'полупансион',
+    'пансион', 'breakfast', 'lunch', 'dinner', 'meal',
+}
+
+
+def _canonical_text(value: Any) -> str:
+    return re.sub(r'[^0-9a-zа-яёүөң]+', ' ', str(value or '').lower()).strip()
+
+
+def _room_offer_combinations(lead: Lead) -> list[dict[str, Any]]:
+    context = getattr(lead, 'agent_context', None) or {}
+    offer = context.get('last_room_offer') or {}
+    combinations = offer.get('combinations') if isinstance(offer, dict) else None
+    return [combo for combo in combinations or [] if isinstance(combo, dict)]
+
+
+def _room_label_from_combo(combo: dict[str, Any]) -> str:
+    description = str(combo.get('description') or '').strip()
+    if description:
+        return description[:200]
+    rooms = combo.get('rooms')
+    if isinstance(rooms, list) and rooms:
+        return ' + '.join(str(room) for room in rooms if room)[:200]
+    return str(combo.get('room_type_key') or '').strip()[:200]
+
+
+def infer_room_type_from_last_offer(lead: Lead, extracted_data: dict[str, Any] | None, message_text: str = '') -> str:
+    """
+    Persist the room that the AI already offered when the guest confirms the next step.
+
+    The extractor only sees the latest guest text, so a reply like "давайте завтрак"
+    may contain the meal plan but not the room name. The authoritative room options
+    are stored in agent_context['last_room_offer'] by the pricing tool.
+    """
+    if not lead or lead.room_type_preference:
+        return ''
+
+    combinations = _room_offer_combinations(lead)
+    if not combinations:
+        return ''
+
+    text = _canonical_text(message_text)
+    extracted = extracted_data or {}
+    selected_meal = bool(extracted.get('meal_plan') and extracted.get('meal_plan') != 'none')
+    confirms_offer = selected_meal or any(word in text.split() for word in _ROOM_SELECTION_WORDS)
+    mentions_meal = any(word in text for word in _MEAL_WORDS)
+
+    if len(combinations) == 1 and (confirms_offer or mentions_meal):
+        return _room_label_from_combo(combinations[0])
+
+    ordinal_to_index = {
+        '1': 0, 'первый': 0, 'первая': 0, 'первое': 0, 'один': 0,
+        '2': 1, 'второй': 1, 'вторая': 1, 'второе': 1, 'два': 1,
+        '3': 2, 'третий': 2, 'третья': 2, 'третье': 2, 'три': 2,
+    }
+    for token, index in ordinal_to_index.items():
+        if token in text.split() and 0 <= index < len(combinations):
+            return _room_label_from_combo(combinations[index])
+
+    best_label = ''
+    best_score = 0
+    input_tokens = set(text.split())
+    for combo in combinations:
+        label = _room_label_from_combo(combo)
+        candidate = ' '.join(
+            filter(
+                None,
+                [
+                    label,
+                    str(combo.get('room_type_key') or ''),
+                    ' '.join(str(room) for room in combo.get('rooms') or []),
+                ],
+            )
+        )
+        candidate_tokens = {token for token in _canonical_text(candidate).split() if len(token) >= 3}
+        score = len(input_tokens & candidate_tokens)
+        if score > best_score:
+            best_score = score
+            best_label = label
+
+    return best_label if best_score > 0 else ''
+
 def _is_fake_email(email: str) -> bool:
     if not email or '@' not in email:
         return False
@@ -45,7 +135,7 @@ def _is_fake_email(email: str) -> bool:
     return False
 
 
-def _apply_extracted_data(lead: Lead, extracted_data: dict[str, Any]) -> list[str]:
+def _apply_extracted_data(lead: Lead, extracted_data: dict[str, Any], message_text: str = '') -> list[str]:
     updated_fields: list[str] = []
 
     if extracted_data.get('contact_person') and lead.contact_person != extracted_data['contact_person']:
@@ -83,6 +173,11 @@ def _apply_extracted_data(lead: Lead, extracted_data: dict[str, Any]) -> list[st
     if extracted_data.get('room_type_preference') and lead.room_type_preference != extracted_data['room_type_preference']:
         lead.room_type_preference = extracted_data['room_type_preference']
         updated_fields.append('room_type_preference')
+    elif not lead.room_type_preference:
+        inferred_room_type = infer_room_type_from_last_offer(lead, extracted_data, message_text)
+        if inferred_room_type:
+            lead.room_type_preference = inferred_room_type
+            updated_fields.append('room_type_preference')
 
     if extracted_data.get('meal_plan'):
         valid_meal_plans = {'none', 'breakfast', 'lunch', 'dinner', 'half_board_bl', 'half_board_bd', 'full_board'}
@@ -157,7 +252,7 @@ def run_passive_ai_intake(lead: Lead, message_text: str, *, channel: str) -> lis
             lead.organization,
         )
         if extracted_data:
-            updated_fields.extend(_apply_extracted_data(lead, extracted_data))
+            updated_fields.extend(_apply_extracted_data(lead, extracted_data, message_text))
             logger.info("Passive AI intake updated lead %s fields: %s", lead.id, updated_fields)
     except Exception as exc:
         logger.warning("Passive extraction failed for lead %s: %s", lead.id, exc)

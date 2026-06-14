@@ -668,10 +668,10 @@ def execute_pricing_tool(tool_name: str, args: dict, lead=None):
         from apps.hotel_info.pricing_utils import generate_room_combinations, query_meal_plan_pricing
         from apps.hotel_info.models import RoomCombinationNote
         runtime_config = {}
+        org = _org_from_lead(lead)
         try:
             from django.db.models import Q
             from apps.flows.models import AITool
-            org = _org_from_lead(lead)
             tool_qs = AITool.objects.filter(name=tool_name, is_enabled=True)
             if org is not None:
                 tool_qs = tool_qs.filter(Q(organization=org) | Q(organization__isnull=True))
@@ -711,12 +711,15 @@ def execute_pricing_tool(tool_name: str, args: dict, lead=None):
 
             notes_map = {}
             try:
-                for note_obj in RoomCombinationNote.objects.filter(guest_count=guest_count):
+                notes_qs = RoomCombinationNote.objects.filter(guest_count=guest_count)
+                if org is not None:
+                    notes_qs = notes_qs.filter(organization=org)
+                for note_obj in notes_qs:
                     notes_map[note_obj.combination_index] = note_obj.note or ''
             except Exception:
                 pass
 
-            all_groups = generate_room_combinations(target_date=checkin_date)
+            all_groups = generate_room_combinations(target_date=checkin_date, org=org)
             group = next((g for g in all_groups if g['guest_count'] == guest_count), None)
             if not group:
                 return {'guest_count': guest_count, 'combinations': []}
@@ -879,12 +882,15 @@ def execute_pricing_tool(tool_name: str, args: dict, lead=None):
 
             notes_map = {}
             try:
-                for note_obj in RoomCombinationNote.objects.filter(guest_count=guest_count):
+                notes_qs = RoomCombinationNote.objects.filter(guest_count=guest_count)
+                if org is not None:
+                    notes_qs = notes_qs.filter(organization=org)
+                for note_obj in notes_qs:
                     notes_map[note_obj.combination_index] = note_obj.note or ''
             except Exception:
                 pass
 
-            all_groups = generate_room_combinations(target_date=checkin_date)
+            all_groups = generate_room_combinations(target_date=checkin_date, org=org)
             group = next((g for g in all_groups if g['guest_count'] == guest_count), None)
             if not group:
                 return {'guest_count': guest_count, 'combinations': [], '_note': 'No family room options found for this guest count.'}

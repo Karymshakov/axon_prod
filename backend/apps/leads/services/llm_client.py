@@ -66,6 +66,8 @@ _STAGE_FIELD_LABELS_RU = {
     'guest_count': 'количество гостей',
     'room_type_preference': 'пожелания по номеру',
     'meal_plan': 'питание',
+    'discovery_source': 'откуда гость узнал об отеле',
+    'discovery_source_detail': 'деталь источника',
     'preferred_contact_time': 'удобное время для связи',
 }
 
@@ -726,6 +728,7 @@ class AIService:
         known_booking = []
         needed_booking = []
         needed_contact = []
+        needed_context = []
         # Detect if the current flow card is "Meal Plan Selection" — when True, the guest
         # has already picked a room and we must present meal options, NOT call room tools again.
         _on_meal_plan_card = bool(
@@ -780,6 +783,42 @@ class AIService:
                 # On Meal Plan card — room was chosen this session even if not yet persisted.
                 known_booking.append('Room type: chosen in this session (see conversation history)')
 
+            _discovery_source = lead_data.get('discovery_source') or (lead.discovery_source if lead else '')
+            _discovery_detail = lead_data.get('discovery_source_detail') or (lead.discovery_source_detail if lead else '')
+            if _discovery_source:
+                known_booking.append(f"Discovery source: {_discovery_detail or _discovery_source}")
+            else:
+                _has_contact_ready = _has_reliable_name and bool(lead_data.get('phone') or (lead.phone if lead else ''))
+                _has_booking_ready = bool(
+                    (lead_data.get('check_in_date') or (lead.check_in_date if lead else None))
+                    and (lead_data.get('check_out_date') or (lead.check_out_date if lead else None))
+                    and (lead_data.get('guest_count') or (lead.guest_count if lead else None))
+                    and (lead_data.get('room_type_preference') or (lead.room_type_preference if lead else None))
+                    and (lead_data.get('meal_plan') or (lead.meal_plan if lead else None))
+                )
+                if _has_contact_ready and _has_booking_ready:
+                    needed_context.append(
+                        'how the guest learned about the hotel — ask softly once before marking the booking ready'
+                    )
+
+        if lead is not None and not getattr(lead, 'discovery_source', ''):
+            try:
+                from apps.leads.services.discovery_sources import build_discovery_sources_prompt_block
+
+                lc_parts.append(
+                    "\nDISCOVERY SOURCE RULE — do not confuse this with the chat channel:\n"
+                    "Before saying the booking is fully ready, ask one short optional-sounding question: "
+                    "'И еще подскажите, пожалуйста, откуда вы о нас узнали?'. "
+                    "Ask it after guest name and phone are known or provided in the current message. "
+                    "If the guest answers loosely, match by meaning to the configured source list.\n\n"
+                    f"{build_discovery_sources_prompt_block(getattr(lead, 'organization', None))}"
+                )
+            except Exception:
+                lc_parts.append(
+                    "\nDISCOVERY SOURCE RULE — ask where the guest learned about the hotel after name and phone are known. "
+                    "Do not infer it from Telegram, Instagram or WhatsApp."
+                )
+
         if known_contact or known_booking:
             lc_parts.append(
                 "\nALREADY KNOWN — do NOT ask for this information again:"
@@ -798,7 +837,7 @@ class AIService:
             except Exception:
                 pass
 
-        needed = needed_booking + needed_contact
+        needed = needed_booking + needed_contact + needed_context
         if needed:
             lc_parts.append(
                 "\nSTILL NEEDED TO COMPLETE BOOKING — work through these in order:"
@@ -809,6 +848,11 @@ class AIService:
                 lc_parts.append(
                     "Contact collection rule: require guest name and phone. "
                     "Email is optional; phrase it as 'email, если удобно', and continue without it if the guest does not provide one."
+                )
+            if needed_context:
+                lc_parts.append(
+                    "Discovery source collection rule: keep it soft and short. "
+                    "Ask after the main booking details and contact are clear; never treat Instagram/Telegram/WhatsApp as the answer by default."
                 )
         if stage_policy and stage_policy.resolution:
             try:

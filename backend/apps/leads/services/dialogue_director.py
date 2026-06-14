@@ -137,7 +137,15 @@ def _lead_is_final_or_booking_complete(lead, resolution: StageResolution | None 
 
     lead_has_booking = all(
         bool(getattr(lead, field, None))
-        for field in ('phone', 'check_in_date', 'check_out_date', 'guest_count', 'room_type_preference', 'meal_plan')
+        for field in (
+            'phone',
+            'check_in_date',
+            'check_out_date',
+            'guest_count',
+            'room_type_preference',
+            'meal_plan',
+            'discovery_source',
+        )
     )
     if has_reliable_name and lead_has_booking:
         return True
@@ -152,7 +160,8 @@ def _lead_is_final_or_booking_complete(lead, resolution: StageResolution | None 
         has_guest_count = bool(collected.get('guest_count') or getattr(lead, 'guest_count', None))
         has_room = bool(collected.get('room_type_preference') or getattr(lead, 'room_type_preference', None))
         has_meal = bool(collected.get('meal_plan') or getattr(lead, 'meal_plan', None))
-        if has_reliable_name and has_contact and has_dates and has_guest_count and has_room and has_meal:
+        has_discovery_source = bool(collected.get('discovery_source') or getattr(lead, 'discovery_source', None))
+        if has_reliable_name and has_contact and has_dates and has_guest_count and has_room and has_meal and has_discovery_source:
             return True
 
     return False

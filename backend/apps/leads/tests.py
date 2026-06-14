@@ -105,6 +105,27 @@ class LeadChannelApiTests(TestCase):
 
         self.assertEqual([item['id'] for item in data], [instagram_lead.id])
 
+    def test_ready_status_filter_matches_won_and_converted(self):
+        won_lead = Lead.objects.create(
+            organization=self.org,
+            contact_person='Won Guest',
+            status='won',
+        )
+        converted_lead = Lead.objects.create(
+            organization=self.org,
+            contact_person='Converted Guest',
+            status='converted',
+        )
+        Lead.objects.create(
+            organization=self.org,
+            contact_person='Working Guest',
+            status='nurturing',
+        )
+
+        data = self._list_leads({'status': 'won'})
+
+        self.assertEqual({item['id'] for item in data}, {won_lead.id, converted_lead.id})
+
     def test_contact_channel_is_read_only_on_update(self):
         from apps.leads.views import LeadViewSet
 
@@ -182,6 +203,34 @@ class LeadChannelApiTests(TestCase):
                 organization=self.org,
             ).exists()
         )
+
+    def test_goal_complete_action_allows_legacy_goal_without_organization(self):
+        from apps.leads.views import LeadGoalViewSet
+
+        lead = Lead.objects.create(
+            organization=self.org,
+            contact_person='Legacy Goal Guest',
+            contact_channel='telegram',
+            telegram_chat_id='tg-legacy-goal',
+        )
+        goal = LeadGoal.objects.create(
+            organization=None,
+            lead=lead,
+            goal_type='collect_phone',
+            priority=LeadGoal.PRIORITY_HIGH,
+        )
+        request = self.factory.post(
+            f'/api/lead-goals/{goal.id}/complete/',
+            {'current_value': '+996700000001'},
+            format='json',
+        )
+        force_authenticate(request, user=self.owner)
+
+        response = LeadGoalViewSet.as_view({'post': 'complete'})(request, pk=goal.id)
+
+        self.assertEqual(response.status_code, 200)
+        goal.refresh_from_db()
+        self.assertEqual(goal.status, LeadGoal.STATUS_COMPLETED)
 
 
 class BlankAutoReplyRetryTests(TestCase):
@@ -635,6 +684,43 @@ class PassiveAiIntakeTests(TestCase):
             normalize_discovery_source('На забеге в номад спорт говорили про вас', self.org),
             'partner_nomad_sport',
         )
+
+    @patch('apps.leads.services.passive_intake.ai_service.extract_lead_data')
+    @patch('apps.leads.services.passive_intake.ai_service.generate_conversation_summary')
+    @patch('apps.leads.services.passive_intake.ai_service.is_configured', return_value=True)
+    def test_passive_intake_infers_room_type_from_last_single_offer(
+        self,
+        _configured_mock,
+        summary_mock,
+        extract_mock,
+    ):
+        from apps.leads.services.passive_intake import run_passive_ai_intake
+
+        self.lead.agent_context = {
+            'last_room_offer': {
+                'combinations': [
+                    {
+                        'description': 'Стандарт Твин',
+                        'rooms': ['Стандарт Твин'],
+                        'room_type_key': 'Стандарт Твин',
+                    }
+                ]
+            }
+        }
+        self.lead.save(update_fields=['agent_context'])
+        summary_mock.return_value = 'Гость выбрал завтрак'
+        extract_mock.return_value = {'meal_plan': 'breakfast'}
+
+        updated_fields = run_passive_ai_intake(
+            self.lead,
+            'давайте завтрак',
+            channel='telegram',
+        )
+
+        self.lead.refresh_from_db()
+        self.assertIn('room_type_preference', updated_fields)
+        self.assertEqual(self.lead.room_type_preference, 'Стандарт Твин')
+        self.assertEqual(self.lead.meal_plan, 'breakfast')
 
 
 class ResetAiMemoryTests(TestCase):

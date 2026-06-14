@@ -139,7 +139,7 @@ function CommunicationsPage() {
 
   // Workspace layout states
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null)
-  const [showRightSidebar, setShowRightSidebar] = useState(true)
+  const [showRightSidebar, setShowRightSidebar] = useState(false)
   const [showAiDiagnosticsOpen, setShowAiDiagnosticsOpen] = useState(false)
   const [message, setMessage] = useState('')
   const [isSending, setIsSending] = useState(false)

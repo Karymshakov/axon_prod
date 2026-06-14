@@ -11,6 +11,7 @@ import logging
 from typing import Optional
 from django.utils import timezone
 from .models import Lead, LeadGoal, LeadActivity
+from .services.stage_resolver import is_reliable_contact_person
 
 logger = logging.getLogger(__name__)
 
@@ -18,17 +19,13 @@ logger = logging.getLogger(__name__)
 class GoalManager:
     """Manages conversation goals for leads."""
 
-    # Default goals based on missing lead data
-    DATA_COLLECTION_GOALS = {
-        'email': 'collect_email',
-        'phone': 'collect_phone',
-    }
-
-    # Stage-based goals
+    # Stage-based goals for a hotel booking flow. Calls/meetings are not the
+    # default next step for chat sales; they stay available for legacy records.
     STAGE_GOALS = {
         'new': ['qualify_lead'],
-        'contacted': ['qualify_lead', 'schedule_call'],
-        'qualified': ['send_info', 'schedule_meeting'],
+        'contacted': ['qualify_lead'],
+        'nurturing': ['qualify_lead'],
+        'qualified': ['send_info'],
         'proposal': ['send_proposal', 'handle_objection'],
         'negotiation': ['close_deal', 'handle_objection'],
     }
@@ -42,9 +39,19 @@ class GoalManager:
         'send_proposal': LeadGoal.PRIORITY_MEDIUM,
         'qualify_lead': LeadGoal.PRIORITY_MEDIUM,
         'send_info': LeadGoal.PRIORITY_MEDIUM,
+        'collect_guest_name': LeadGoal.PRIORITY_MEDIUM,
+        'collect_discovery_source': LeadGoal.PRIORITY_LOW,
         'collect_email': LeadGoal.PRIORITY_LOW,
-        'collect_phone': LeadGoal.PRIORITY_LOW,
+        'collect_phone': LeadGoal.PRIORITY_HIGH,
         'get_decision_maker': LeadGoal.PRIORITY_LOW,
+    }
+
+    BOOKING_FIELD_LABELS = {
+        'check_in_date': 'дату заезда',
+        'check_out_date': 'дату выезда',
+        'guest_count': 'количество гостей',
+        'room_type_preference': 'категорию номера',
+        'meal_plan': 'питание',
     }
 
     def get_active_goals(self, lead: Lead) -> list:
@@ -62,24 +69,61 @@ class GoalManager:
             lead.goals.filter(status=LeadGoal.STATUS_ACTIVE).values_list('goal_type', flat=True)
         )
 
-        # Data collection goals
-        if not lead.email and 'collect_email' not in existing_goal_types:
-            goal = self._create_goal(lead, 'collect_email', "Collect lead's email address")
+        if not is_reliable_contact_person(lead) and 'collect_guest_name' not in existing_goal_types:
+            goal = self._create_goal(lead, 'collect_guest_name', 'Уточнить имя гостя для оформления брони')
             if goal:
                 created_goals.append(goal)
+                existing_goal_types.add('collect_guest_name')
 
         if not lead.phone and 'collect_phone' not in existing_goal_types:
-            goal = self._create_goal(lead, 'collect_phone', "Collect lead's phone number")
+            goal = self._create_goal(lead, 'collect_phone', 'Получить номер телефона для подтверждения брони')
             if goal:
                 created_goals.append(goal)
+                existing_goal_types.add('collect_phone')
 
-        # Stage-based goals
+        missing_booking_fields = [
+            field
+            for field, label in self.BOOKING_FIELD_LABELS.items()
+            if not getattr(lead, field, None)
+        ]
+        if missing_booking_fields and 'qualify_lead' not in existing_goal_types:
+            missing_labels = ', '.join(self.BOOKING_FIELD_LABELS[field] for field in missing_booking_fields)
+            goal = self._create_goal(lead, 'qualify_lead', f'Уточнить детали бронирования: {missing_labels}')
+            if goal:
+                created_goals.append(goal)
+                existing_goal_types.add('qualify_lead')
+
+        if not lead.discovery_source and 'collect_discovery_source' not in existing_goal_types:
+            goal = self._create_goal(
+                lead,
+                'collect_discovery_source',
+                'Мягко спросить, откуда гость узнал об отеле',
+            )
+            if goal:
+                created_goals.append(goal)
+                existing_goal_types.add('collect_discovery_source')
+
+        ready_for_confirmation = (
+            is_reliable_contact_person(lead)
+            and bool(lead.phone)
+            and not missing_booking_fields
+            and bool(lead.discovery_source)
+        )
         stage_goals = self.STAGE_GOALS.get(lead.status, [])
         for goal_type in stage_goals:
             if goal_type not in existing_goal_types:
+                if goal_type == 'qualify_lead' and not missing_booking_fields:
+                    continue
                 goal = self._create_goal(lead, goal_type)
                 if goal:
                     created_goals.append(goal)
+                    existing_goal_types.add(goal_type)
+
+        if ready_for_confirmation and 'close_deal' not in existing_goal_types:
+            goal = self._create_goal(lead, 'close_deal', 'Подтвердить бронь и передать менеджеру, если нужно')
+            if goal:
+                created_goals.append(goal)
+                existing_goal_types.add('close_deal')
 
         return created_goals
 
@@ -89,6 +133,7 @@ class GoalManager:
             priority = self.GOAL_PRIORITIES.get(goal_type, LeadGoal.PRIORITY_MEDIUM)
 
             goal = LeadGoal.objects.create(
+                organization=lead.organization,
                 lead=lead,
                 goal_type=goal_type,
                 priority=priority,
@@ -99,6 +144,7 @@ class GoalManager:
             # Log activity
             LeadActivity.objects.create(
                 lead=lead,
+                organization=lead.organization,
                 activity_type=LeadActivity.TYPE_GOAL_CREATED,
                 description=f"AI created goal: {goal.get_goal_type_display()}",
                 metadata={
@@ -138,6 +184,7 @@ class GoalManager:
         # Log activity
         LeadActivity.objects.create(
             lead=lead,
+            organization=lead.organization,
             activity_type=LeadActivity.TYPE_GOAL_COMPLETED,
             description=f"Goal achieved: {goal.get_goal_type_display()}",
             metadata={
@@ -210,17 +257,17 @@ class GoalManager:
         Returns list of newly created goals.
         """
         # Mark some goals as completed if stage advanced
-        if new_stage in ['qualified', 'proposal', 'negotiation', 'converted']:
+        if new_stage in ['qualified', 'proposal', 'negotiation', 'converted', 'won']:
             self.complete_goal(lead, 'qualify_lead', f"Lead moved to {new_stage}")
 
-        if new_stage in ['proposal', 'negotiation', 'converted']:
+        if new_stage in ['proposal', 'negotiation', 'converted', 'won']:
             self.complete_goal(lead, 'schedule_call', f"Lead moved to {new_stage}")
             self.complete_goal(lead, 'schedule_meeting', f"Lead moved to {new_stage}")
 
-        if new_stage in ['negotiation', 'converted']:
+        if new_stage in ['negotiation', 'converted', 'won']:
             self.complete_goal(lead, 'send_proposal', f"Lead moved to {new_stage}")
 
-        if new_stage == 'converted':
+        if new_stage in ['converted', 'won']:
             self.complete_goal(lead, 'close_deal', "Deal closed")
             # Mark all remaining active goals as completed
             lead.goals.filter(status=LeadGoal.STATUS_ACTIVE).update(

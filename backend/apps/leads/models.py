@@ -832,6 +832,8 @@ class LeadGoal(models.Model):
     GOAL_TYPES = [
         ('collect_email', 'Collect Email'),
         ('collect_phone', 'Collect Phone'),
+        ('collect_guest_name', 'Collect Guest Name'),
+        ('collect_discovery_source', 'Collect Discovery Source'),
         ('schedule_call', 'Schedule Call'),
         ('schedule_meeting', 'Schedule Meeting'),
         ('send_proposal', 'Send Proposal'),

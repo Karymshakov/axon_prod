@@ -758,7 +758,10 @@ class RoomPricingViewSet(OrganizationQuerysetMixin, viewsets.ModelViewSet):
 
             if row_id:
                 try:
-                    instance = RoomPricing.objects.get(id=row_id)
+                    instance_qs = RoomPricing.objects.all()
+                    if upload_org:
+                        instance_qs = instance_qs.filter(organization=upload_org)
+                    instance = instance_qs.get(id=row_id)
                     for k, v in pricing_fields.items():
                         setattr(instance, k, v)
                     instance.save()
@@ -805,9 +808,11 @@ def room_combinations(request):
     guest_count_param = request.query_params.get('guest_count')
     data = generate_room_combinations(org=org)
 
-    # Attach notes and stored type overrides from DB; mark auto-generated rows
-    # Note: RoomCombinationNote has no organization field — notes are shared globally
+    # Attach notes and stored type overrides from DB; mark auto-generated rows.
+    # These settings are organization-scoped because they affect AI pricing logic.
     notes_qs = RoomCombinationNote.objects.filter(is_custom=False)
+    if org:
+        notes_qs = notes_qs.filter(organization=org)
     hidden_keys = {(n.guest_count, n.combination_index) for n in notes_qs if n.is_hidden}
     notes_map = {
         (n.guest_count, n.combination_index): {'note': n.note, 'type': n.combination_type}
@@ -824,11 +829,12 @@ def room_combinations(request):
             combo['is_custom'] = False
             combo['id'] = None
 
-    # Append custom combinations with live-calculated prices
-    # Note: RoomCombinationNote has no organization field — notes are shared globally
+    # Append custom combinations with live-calculated prices for this organization.
     custom_qs = RoomCombinationNote.objects.filter(is_custom=True)
+    if org:
+        custom_qs = custom_qs.filter(organization=org)
     if custom_qs.exists():
-        lookup = _build_room_lookup()
+        lookup = _build_room_lookup(org=org)
         custom_by_gc: dict = {}
         for c in custom_qs:
             prices_data = calculate_combination_prices(c.rooms or [], room_lookup=lookup)
