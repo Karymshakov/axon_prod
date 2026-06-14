@@ -1,8 +1,8 @@
 import { createFileRoute, useNavigate } from '@tanstack/react-router'
 import { useLanguage } from '@/contexts/language-context'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { useState, useMemo } from 'react'
-import { PlusIcon, PencilIcon, TrashIcon, LayoutGridIcon, LayoutListIcon, SearchIcon, XIcon, InstagramIcon, MessageSquareIcon, PhoneIcon } from 'lucide-react'
+import { useState, useMemo, useEffect } from 'react'
+import { PlusIcon, PencilIcon, TrashIcon, LayoutGridIcon, LayoutListIcon, EyeIcon, SearchIcon, XIcon, InstagramIcon, MessageSquareIcon, PhoneIcon } from 'lucide-react'
 import {
   CONTACT_CHANNEL_OPTIONS,
   fetchLeads,
@@ -13,8 +13,11 @@ import {
   getLeadStatusLabel,
   getContactChannelLabel,
   resolveLeadContactChannel,
+  createLeadNote,
+  fetchAssignableUsers,
   type Lead,
 } from '@/lib/api'
+import { useAuth } from '@/contexts/auth-context'
 import { useLeadDiscoverySources } from '@/hooks/use-lead-discovery-sources'
 import { LeadSourceBadge } from '@/components/lead-source-badge'
 import { Button } from '@/components/ui/button'
@@ -107,23 +110,78 @@ function DraggableLeadCard({
   )
 }
 
+const getStageColorClass = (key: string): { border: string; bg: string; text: string; lightBg: string } => {
+  const colors: Record<string, { border: string; bg: string; text: string; lightBg: string }> = {
+    new: {
+      border: 'border-blue-500',
+      bg: 'bg-blue-500',
+      text: 'text-blue-600 dark:text-blue-400',
+      lightBg: 'bg-blue-50/50 dark:bg-blue-950/10'
+    },
+    attempted: {
+      border: 'border-amber-500',
+      bg: 'bg-amber-500',
+      text: 'text-amber-600 dark:text-amber-400',
+      lightBg: 'bg-amber-50/50 dark:bg-amber-950/10'
+    },
+    contacted: {
+      border: 'border-teal-500',
+      bg: 'bg-teal-500',
+      text: 'text-teal-600 dark:text-teal-400',
+      lightBg: 'bg-teal-50/50 dark:bg-teal-950/10'
+    },
+    nurturing: {
+      border: 'border-indigo-500',
+      bg: 'bg-indigo-500',
+      text: 'text-indigo-600 dark:text-indigo-400',
+      lightBg: 'bg-indigo-50/50 dark:bg-indigo-950/10'
+    },
+    converted: {
+      border: 'border-emerald-500',
+      bg: 'bg-emerald-500',
+      text: 'text-emerald-600 dark:text-emerald-400',
+      lightBg: 'bg-emerald-50/50 dark:bg-emerald-950/10'
+    },
+    unqualified: {
+      border: 'border-rose-500',
+      bg: 'bg-rose-500',
+      text: 'text-rose-600 dark:text-rose-400',
+      lightBg: 'bg-rose-50/50 dark:bg-rose-950/10'
+    },
+  }
+  return colors[key] || {
+    border: 'border-slate-400',
+    bg: 'bg-slate-400',
+    text: 'text-slate-600 dark:text-slate-400',
+    lightBg: 'bg-slate-50/50 dark:bg-slate-950/10'
+  }
+}
+
 function DroppableColumn({
   statusKey,
   children,
+  isDragActive,
 }: {
   statusKey: string
   children: React.ReactNode
+  isDragActive: boolean
 }) {
   const { setNodeRef, isOver } = useDroppable({
     id: `column-${statusKey}`,
     data: { status: statusKey },
   })
 
+  const stageColor = getStageColorClass(statusKey)
+
   return (
     <div
       ref={setNodeRef}
-      className={`flex min-w-0 flex-col gap-3 rounded-lg border-2 border-dashed p-4 min-h-[200px] transition-colors ${
-        isOver ? 'border-primary bg-primary/5' : ''
+      className={`flex min-w-0 flex-col gap-3 rounded-lg border-2 p-3 min-h-[400px] transition-all duration-200 ${
+        isOver
+          ? `border-solid shadow-md scale-[1.01] ${stageColor.border} bg-background`
+          : isDragActive
+          ? `border-dashed border-muted-foreground/30 bg-muted/20`
+          : 'border-transparent bg-muted/40'
       }`}
     >
       {children}
@@ -133,11 +191,34 @@ function DroppableColumn({
 
 function LeadsPage() {
   const { t } = useLanguage()
-  const [view, setView] = useState<'table' | 'kanban'>('table')
+  const { user } = useAuth()
+  const viewStorageKey = user ? `leads_view_preference_${user.id}` : 'leads_view_preference'
+  const [view, setView] = useState<'table' | 'kanban'>(() => {
+    const saved = localStorage.getItem(viewStorageKey)
+    return (saved === 'table' || saved === 'kanban') ? saved : 'table'
+  })
+
+  useEffect(() => {
+    if (user) {
+      const saved = localStorage.getItem(`leads_view_preference_${user.id}`)
+      if (saved === 'table' || saved === 'kanban') {
+        setView(saved)
+      }
+    }
+  }, [user])
+
+  const handleViewChange = (v: string) => {
+    if (v === 'table' || v === 'kanban') {
+      setView(v)
+      localStorage.setItem(viewStorageKey, v)
+    }
+  }
+
   const [searchQuery, setSearchQuery] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
   const [channelFilter, setChannelFilter] = useState('')
   const [discoveryFilter, setDiscoveryFilter] = useState('')
+  const [managerFilter, setManagerFilter] = useState('')
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editingLead, setEditingLead] = useState<Lead | null>(null)
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
@@ -157,14 +238,26 @@ function LeadsPage() {
     })
   )
 
+  const { data: assignableUsers = [] } = useQuery({
+    queryKey: ['assignable-users'],
+    queryFn: () => fetchAssignableUsers(),
+  })
+
   const fetchParams = useMemo(() => {
     const params: Record<string, string> = {}
     if (searchQuery) params.search = searchQuery
     if (statusFilter && statusFilter !== 'all') params.status = statusFilter
     if (channelFilter && channelFilter !== 'all') params.contact_channel = channelFilter
     if (discoveryFilter && discoveryFilter !== 'all') params.discovery_source = discoveryFilter
+    if (managerFilter && managerFilter !== 'all') {
+      if (managerFilter === 'me') {
+        if (user) params.assigned_to = String(user.id)
+      } else {
+        params.assigned_to = managerFilter
+      }
+    }
     return params
-  }, [searchQuery, statusFilter, channelFilter, discoveryFilter])
+  }, [searchQuery, statusFilter, channelFilter, discoveryFilter, managerFilter, user])
 
   const { data: stats } = useQuery({
     queryKey: ['lead-stats'],
@@ -211,13 +304,64 @@ function LeadsPage() {
   const updateLeadMutation = useMutation({
     mutationFn: ({ id, data }: { id: number; data: Record<string, unknown> }) =>
       updateLead(id, data),
+    onMutate: async ({ id, data }) => {
+      await queryClient.cancelQueries({ queryKey: ['leads'] })
+      await queryClient.cancelQueries({ queryKey: ['lead-stats'] })
+
+      const previousLeads = queryClient.getQueryData<Lead[]>(['leads'])
+      const previousStats = queryClient.getQueryData<Record<string, number>>(['lead-stats'])
+
+      if (previousLeads) {
+        queryClient.setQueryData<Lead[]>(
+          ['leads'],
+          previousLeads.map((lead) =>
+            lead.id === id ? ({ ...lead, ...data } as Lead) : lead
+          )
+        )
+      }
+
+      if (previousStats && data.status && previousLeads) {
+        const lead = previousLeads.find((l) => l.id === id)
+        if (lead && lead.status !== data.status) {
+          const nextStats = { ...previousStats }
+          const oldStatus = lead.status
+          const newStatus = data.status as string
+          if (nextStats[oldStatus] !== undefined) nextStats[oldStatus] = Math.max(0, nextStats[oldStatus] - 1)
+          if (nextStats[newStatus] !== undefined) nextStats[newStatus] = (nextStats[newStatus] || 0) + 1
+          queryClient.setQueryData(['lead-stats'], nextStats)
+        }
+      }
+
+      return { previousLeads, previousStats }
+    },
+    onError: (err, newLead, context) => {
+      if (context?.previousLeads) {
+        queryClient.setQueryData(['leads'], context.previousLeads)
+      }
+      if (context?.previousStats) {
+        queryClient.setQueryData(['lead-stats'], context.previousStats)
+      }
+      toast.error('Failed to update lead')
+    },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['leads'] })
-      queryClient.invalidateQueries({ queryKey: ['lead-stats'] })
       toast.success('Лид обновлен')
     },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ['leads'] })
+      queryClient.invalidateQueries({ queryKey: ['lead-stats'] })
+    },
+  })
+
+  const addNoteMutation = useMutation({
+    mutationFn: ({ leadId, content }: { leadId: number; content: string }) =>
+      createLeadNote({ lead: leadId, content }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['leads'] })
+      queryClient.invalidateQueries({ queryKey: ['lead-notes'] })
+      toast.success('Заметка добавлена')
+    },
     onError: () => {
-      toast.error('Не удалось обновить лид')
+      toast.error('Не удалось добавить заметку')
     },
   })
 
@@ -404,7 +548,7 @@ function LeadsPage() {
                     </p>
                   </div>
                   <div className="flex items-center gap-2">
-                    <ToggleGroup type="single" value={view} onValueChange={(v) => v && setView(v as 'table' | 'kanban')}>
+                    <ToggleGroup type="single" value={view} onValueChange={(v) => v && handleViewChange(v)}>
                       <ToggleGroupItem value="table" aria-label="Список">
                         <LayoutListIcon className="h-4 w-4" />
                       </ToggleGroupItem>
@@ -480,6 +624,21 @@ function LeadsPage() {
                     </SelectContent>
                   </Select>
 
+                  <Select value={managerFilter} onValueChange={setManagerFilter}>
+                    <SelectTrigger className="w-[160px] h-9">
+                      <SelectValue placeholder="Менеджер" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">Все менеджеры</SelectItem>
+                      <SelectItem value="me">Мои лиды</SelectItem>
+                      {assignableUsers.map((u) => (
+                        <SelectItem key={u.id} value={String(u.id)}>
+                          {u.name || u.email}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+
                   {(Object.keys(fetchParams).length > 0) ? (
                     <Button
                       variant="ghost"
@@ -490,6 +649,7 @@ function LeadsPage() {
                         setSearchQuery('')
                         setChannelFilter('')
                         setDiscoveryFilter('')
+                        setManagerFilter('')
                       }}
                     >
                       <XIcon className="mr-1 h-3.5 w-3.5" />
@@ -653,14 +813,17 @@ function LeadsPage() {
               <div className="px-4 lg:px-6">
                 <div className="flex gap-3 sm:gap-4 overflow-x-auto pb-2">
                   {leadsByStatus.map((column) => (
-                    <div key={column.key} className="flex min-w-[240px] sm:min-w-[280px] flex-shrink-0 flex-col gap-3">
-                      <div className="flex items-center justify-between">
-                        <h3 className="text-sm sm:text-base font-semibold">{column.label}</h3>
-                        <span className="text-xs sm:text-sm text-muted-foreground">
+                    <div key={column.key} className="flex min-w-[240px] sm:min-w-[280px] flex-shrink-0 flex-col gap-3 rounded-t-lg bg-muted/20 p-1">
+                      <div className="flex items-center justify-between px-2 pt-2">
+                        <div className="flex items-center gap-2">
+                          <span className={`h-2.5 w-2.5 rounded-full ${getStageColorClass(column.key).bg}`} />
+                          <h3 className="text-sm font-semibold text-foreground">{column.label}</h3>
+                        </div>
+                        <span className="text-xs font-semibold bg-muted px-2 py-0.5 rounded-full text-muted-foreground">
                           {column.leads.length}
                         </span>
                       </div>
-                      <DroppableColumn statusKey={column.key}>
+                      <DroppableColumn statusKey={column.key} isDragActive={!!activeLead}>
                         {column.leads.length === 0 ? (
                           <p className="text-center text-sm text-muted-foreground py-8">
                             {t('leads.noLeads')}

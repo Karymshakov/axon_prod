@@ -302,6 +302,9 @@ export interface Lead {
   // Assignment
   assigned_to: number | null
   assigned_to_name: string | null
+  has_active_task: boolean
+  has_overdue_task: boolean
+  has_planned_followup: boolean
   // AI Agent tracking
   ai_followup_count: number
   last_ai_followup_at: string | null

@@ -3,7 +3,6 @@ const LEAD_DISCOVERY_SOURCES_KEY = 'lead_discovery_sources'
 
 export type InternalToolsVisibilitySettings = {
   showAiDiagnostics: boolean
-  showDevDatabaseExport: boolean
   showResetAiMemory: boolean
 }
 
@@ -14,7 +13,6 @@ export type LeadDiscoverySourceOption = {
 
 const DEFAULT_INTERNAL_TOOLS_VISIBILITY: InternalToolsVisibilitySettings = {
   showAiDiagnostics: true,
-  showDevDatabaseExport: true,
   showResetAiMemory: true,
 }
 
@@ -41,7 +39,6 @@ export function getInternalToolsVisibilitySettings(orgSettings: Record<string, u
 
   return {
     showAiDiagnostics: visibility.show_ai_diagnostics !== false,
-    showDevDatabaseExport: visibility.show_dev_database_export !== false,
     showResetAiMemory: visibility.show_reset_ai_memory !== false,
   }
 }
@@ -58,7 +55,6 @@ export function buildInternalToolsVisibilityOrgSettings(
     [INTERNAL_TOOLS_VISIBILITY_KEY]: {
       ...currentVisibility,
       show_ai_diagnostics: visibility.showAiDiagnostics,
-      show_dev_database_export: visibility.showDevDatabaseExport,
       show_reset_ai_memory: visibility.showResetAiMemory,
     },
   }

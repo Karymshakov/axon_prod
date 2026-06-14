@@ -31,6 +31,7 @@ import {
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Button } from '@/components/ui/button'
+import { Checkbox } from '@/components/ui/checkbox'
 import {
   createLead,
   deleteLead,
@@ -38,6 +39,7 @@ import {
   fetchSegments,
   getLeadStatusLabel,
   updateLead,
+  fetchAssignableUsers,
   type Lead,
 } from '@/lib/api'
 import { DatePicker } from '@/components/date-picker'
@@ -72,6 +74,20 @@ const leadSchema = z.object({
   next_steps: z.string().optional(),
   preferred_contact_time: z.string().optional(),
   notes: z.string().optional(),
+  language: z.string().optional(),
+  do_not_contact: z.boolean().optional(),
+  email_bounced: z.boolean().optional(),
+  // Sales Process
+  next_follow_up_date: z.date().nullable().optional(),
+  expected_close_date: z.date().nullable().optional(),
+  lost_reason: z.string().optional(),
+  competitor: z.string().optional(),
+  referral_source: z.string().optional(),
+  campaign_source: z.string().optional(),
+  // Social
+  telegram_chat_id: z.string().optional(),
+  telegram_username: z.string().optional(),
+  assigned_to: z.number().nullable().optional(),
 })
 
 type LeadFormData = z.infer<typeof leadSchema>
@@ -104,6 +120,11 @@ export function LeadDialog({ open, onOpenChange, lead, defaultSegment = 'individ
     queryFn: fetchPipelineStages,
   })
 
+  const { data: assignableUsers = [] } = useQuery({
+    queryKey: ['assignable-users'],
+    queryFn: fetchAssignableUsers,
+  })
+
   const form = useForm<LeadFormData>({
     resolver: zodResolver(leadSchema),
     values: {
@@ -123,6 +144,20 @@ export function LeadDialog({ open, onOpenChange, lead, defaultSegment = 'individ
       next_steps: lead?.next_steps || '',
       preferred_contact_time: lead?.preferred_contact_time || '',
       notes: lead?.notes || '',
+      language: lead?.language || '',
+      do_not_contact: lead?.do_not_contact || false,
+      email_bounced: lead?.email_bounced || false,
+      // Sales Process
+      next_follow_up_date: lead?.next_follow_up_date ? new Date(lead.next_follow_up_date) : null,
+      expected_close_date: lead?.expected_close_date ? new Date(lead.expected_close_date) : null,
+      lost_reason: lead?.lost_reason || '',
+      competitor: lead?.competitor || '',
+      referral_source: lead?.referral_source || '',
+      campaign_source: lead?.campaign_source || '',
+      // Social
+      telegram_chat_id: lead?.telegram_chat_id || '',
+      telegram_username: lead?.telegram_username || '',
+      assigned_to: lead?.assigned_to || null,
     },
   })
 
@@ -488,6 +523,35 @@ export function LeadDialog({ open, onOpenChange, lead, defaultSegment = 'individ
                       <FormControl>
                         <Textarea {...field} placeholder="Что нужно сделать дальше: уточнить даты, отправить цену, подтвердить оплату" rows={2} />
                       </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={form.control}
+                  name="assigned_to"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Ответственный менеджер</FormLabel>
+                      <Select
+                        onValueChange={(val) => field.onChange(val === 'unassigned' ? null : parseInt(val))}
+                        value={field.value ? String(field.value) : 'unassigned'}
+                      >
+                        <FormControl>
+                          <SelectTrigger className="w-full">
+                            <SelectValue placeholder="Выберите ответственного" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          <SelectItem value="unassigned">Не назначен</SelectItem>
+                          {assignableUsers.map((u) => (
+                            <SelectItem key={u.id} value={String(u.id)}>
+                              {u.name || u.email}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                       <FormMessage />
                     </FormItem>
                   )}

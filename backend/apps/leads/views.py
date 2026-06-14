@@ -238,7 +238,7 @@ class LeadViewSet(OrganizationQuerysetMixin, viewsets.ModelViewSet):
 
     def get_queryset(self):
         user = self.request.user
-        base_qs = Lead.objects.select_related('assigned_to', 'organization').prefetch_related('customer').order_by(
+        base_qs = Lead.objects.select_related('assigned_to', 'organization').prefetch_related('customer', 'tasks').order_by(
             F('last_contacted').desc(nulls_last=True)
         )
         if getattr(user, 'is_superadmin', False):

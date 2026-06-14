@@ -1,5 +1,7 @@
-import { Lead, fetchLeadNotes, fetchPipelineStages, fetchSegments, getContactChannelLabel, getLeadStatusLabel, resolveLeadContactChannel } from '@/lib/api'
-import { useQuery } from '@tanstack/react-query'
+import { Lead, fetchLeadNotes, fetchPipelineStages, fetchSegments, getContactChannelLabel, getLeadStatusLabel, resolveLeadContactChannel, updateLead } from '@/lib/api'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useAuth } from '@/contexts/auth-context'
+import { toast } from 'sonner'
 import { LeadSourceBadge } from '@/components/lead-source-badge'
 import { useLeadDiscoverySources } from '@/hooks/use-lead-discovery-sources'
 import {
@@ -38,6 +40,9 @@ export function LeadDetailsSidebar({ lead, open, onClose, onEdit, onOpenFull }: 
     enabled: open && !!lead?.id,
   })
 
+  const { user } = useAuth()
+  const queryClient = useQueryClient()
+
   const { data: stages = [] } = useQuery({
     queryKey: ['pipeline-stages'],
     queryFn: fetchPipelineStages,
@@ -48,6 +53,19 @@ export function LeadDetailsSidebar({ lead, open, onClose, onEdit, onOpenFull }: 
     queryKey: ['segments'],
     queryFn: fetchSegments,
     enabled: open,
+  })
+
+  const assignMutation = useMutation({
+    mutationFn: (assignedTo: number | null) => updateLead(lead!.id, { assigned_to: assignedTo }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['leads'] })
+      queryClient.invalidateQueries({ queryKey: ['lead-stats'] })
+      queryClient.invalidateQueries({ queryKey: ['lead', lead!.id] })
+      toast.success('Ответственный менеджер обновлен')
+    },
+    onError: () => {
+      toast.error('Не удалось назначить менеджера')
+    },
   })
 
   const formatDate = (dateString: string | null) => {
@@ -261,11 +279,27 @@ export function LeadDetailsSidebar({ lead, open, onClose, onEdit, onOpenFull }: 
                  </div>
                </div>
              ) : null}
-            <div className="flex items-center justify-between px-3 py-2">
-              <span className="font-medium text-muted-foreground">Статус</span>
-              <Badge variant={STATUS_COLORS[lead.status]}>{stageName}</Badge>
-            </div>
-          </div>
+             <div className="flex items-center justify-between px-3 py-2">
+               <span className="font-medium text-muted-foreground">Ответственный</span>
+               <span className="font-medium">{lead.assigned_to_name || 'Не назначен'}</span>
+             </div>
+             <div className="flex items-center justify-between px-3 py-2">
+               <span className="font-medium text-muted-foreground">Статус</span>
+               <Badge variant={STATUS_COLORS[lead.status]}>{stageName}</Badge>
+             </div>
+           </div>
+
+           {user && lead.assigned_to !== user.id && (
+             <Button
+               variant="outline"
+               size="sm"
+               className="w-full mt-2"
+               onClick={() => assignMutation.mutate(user.id)}
+               disabled={assignMutation.isPending}
+             >
+               Взять в работу
+             </Button>
+           )}
 
           {/* История заметок */}
           {notes.length > 0 ? (

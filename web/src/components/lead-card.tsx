@@ -39,7 +39,6 @@ export function LeadCard({ lead, onOpen, onOpenChat, discoverySourceLabel }: Lea
     return new Date(dateString).toLocaleDateString('ru-RU', {
       month: 'short',
       day: 'numeric',
-      year: 'numeric',
     })
   }
 
@@ -67,36 +66,55 @@ export function LeadCard({ lead, onOpen, onOpenChat, discoverySourceLabel }: Lea
     }
   }
 
+  const hasOverdue = lead.has_overdue_task
+  const hasActive = lead.has_active_task
+  const hasFollowup = lead.has_planned_followup
+
   return (
-    <Card className="cursor-pointer transition-shadow hover:shadow-md" onClick={handleOpen}>
-      <CardContent className="p-4">
-        <div className="flex items-start justify-between gap-2">
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-1.5">
-              <h4 className="font-semibold truncate">{lead.contact_person || 'Без имени'}</h4>
-              {lead.ai_paused ? (
-                <span className="flex h-5 items-center gap-0.5 rounded-full bg-amber-500 px-1.5 text-[10px] font-semibold text-white shrink-0" title="ИИ приостановлен — ручное управление">
-                  <HandIcon className="h-3 w-3" />
-                </span>
-              ) : null}
-            </div>
+    <Card
+      className="cursor-pointer transition-all duration-200 hover:shadow-md border border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 bg-background"
+      onClick={handleOpen}
+    >
+      <CardContent className="p-3 space-y-2">
+        {/* Top line: Name & Value / AI Paused */}
+        <div className="flex items-start justify-between gap-1.5">
+          <div className="min-w-0 flex-1 flex items-center gap-1.5">
+            <h4 className="font-semibold text-sm truncate text-foreground" title={lead.contact_person || 'Без имени'}>
+              {lead.contact_person || 'Без имени'}
+            </h4>
+            {lead.ai_paused && (
+              <span className="flex h-4 items-center justify-center rounded-full bg-amber-500 px-1 text-[9px] font-bold text-white shrink-0" title="AI на паузе — ручное управление">
+                Ручное
+              </span>
+            )}
           </div>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-8 w-8 shrink-0"
-            onClick={(e) => {
-              e.stopPropagation()
-              navigate({ to: '/leads/$leadId', params: { leadId: lead.id.toString() } })
-            }}
-            aria-label="Открыть карточку лида"
-            title="Открыть карточку"
-          >
-            <FileTextIcon className="h-4 w-4" />
-          </Button>
+          {lead.estimated_value && (
+            <span className="text-xs font-semibold text-emerald-600 dark:text-emerald-400 shrink-0">
+              {formatCurrency(lead.estimated_value)}
+            </span>
+          )}
         </div>
 
-        <div className="flex flex-wrap gap-1 mt-2">
+        {/* Contact info (Phone / Check-in) */}
+        {(lead.phone || lead.check_in_date) && (
+          <div className="flex flex-col gap-1 text-[11px] text-muted-foreground">
+            {lead.phone && (
+              <div className="flex items-center gap-1">
+                <PhoneIcon className="h-3 w-3 shrink-0" />
+                <span className="truncate">{lead.phone}</span>
+              </div>
+            )}
+            {lead.check_in_date && (
+              <div className="flex items-center gap-1 text-blue-600 dark:text-blue-400">
+                <CalendarDaysIcon className="h-3 w-3 shrink-0" />
+                <span>Заезд: {formatDate(lead.check_in_date)}</span>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Channel & Source Badges */}
+        <div className="flex flex-wrap gap-1">
           {channel === 'instagram' && (
             <button
               type="button"
@@ -133,48 +151,42 @@ export function LeadCard({ lead, onOpen, onOpenChat, discoverySourceLabel }: Lea
               WA
             </button>
           )}
-          {lead.instagram_intent_tier ? (
+          {lead.instagram_intent_tier && (
             <InstagramIntentBadge tier={lead.instagram_intent_tier} />
-          ) : null}
-          {lead.discovery_source ? (
+          )}
+          {lead.discovery_source && (
             <LeadSourceBadge source={lead.discovery_source} label={discoverySourceLabel} />
-          ) : null}
+          )}
         </div>
 
-        <div className="mt-3 space-y-1.5">
-          {lead.email ? (
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <MailIcon className="h-3.5 w-3.5 shrink-0" />
-              <span className="truncate">{lead.email}</span>
-            </div>
-          ) : null}
-          {lead.phone ? (
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <PhoneIcon className="h-3.5 w-3.5 shrink-0" />
-              <span className="truncate">{lead.phone}</span>
-            </div>
-          ) : null}
-          {lead.estimated_value ? (
-            <div className="flex items-center gap-2 text-sm font-medium text-green-600">
-              <DollarSignIcon className="h-3.5 w-3.5 shrink-0" />
-              <span>{formatCurrency(lead.estimated_value)}</span>
-            </div>
-          ) : null}
+        {/* Bottom bar: Manager & State Indicators */}
+        <div className="flex items-center justify-between pt-2 border-t border-slate-100 dark:border-slate-800 text-[10px] text-muted-foreground">
+          {/* Manager name */}
+          <div className="flex items-center gap-1 min-w-0 flex-1">
+            <span className="truncate" title={lead.assigned_to_name || 'Ответственный не назначен'}>
+              👤 {lead.assigned_to_name || <span className="italic text-slate-400">Не назначен</span>}
+            </span>
+          </div>
+
+          {/* Task indicators */}
+          <div className="flex items-center gap-1 shrink-0 ml-2">
+            {hasOverdue && (
+              <span className="inline-flex items-center rounded bg-red-50 px-1 py-0.5 text-[9px] font-medium text-red-700 ring-1 ring-inset ring-red-600/10 dark:bg-red-400/10 dark:text-red-400 dark:ring-red-400/20" title="Есть просроченная задача">
+                Просрочено
+              </span>
+            )}
+            {hasActive && !hasOverdue && (
+              <span className="inline-flex items-center rounded bg-blue-50 px-1 py-0.5 text-[9px] font-medium text-blue-700 ring-1 ring-inset ring-blue-700/10 dark:bg-blue-400/10 dark:text-blue-400 dark:ring-blue-400/30" title="Есть активная задача">
+                Задача
+              </span>
+            )}
+            {hasFollowup && (
+              <span className="inline-flex items-center rounded bg-purple-50 px-1 py-0.5 text-[9px] font-medium text-purple-700 ring-1 ring-inset ring-purple-700/10 dark:bg-purple-400/10 dark:text-purple-400 dark:ring-purple-400/30" title="Запланирован Follow-up">
+                Follow-up
+              </span>
+            )}
+          </div>
         </div>
-
-        {lead.check_in_date ? (
-          <div className="flex items-center gap-2 text-sm text-blue-600">
-            <CalendarDaysIcon className="h-3.5 w-3.5 shrink-0" />
-            <span>Заезд: {formatDate(lead.check_in_date)}</span>
-          </div>
-        ) : null}
-
-        {lead.last_contacted ? (
-          <div className="mt-3 pt-3 border-t text-xs text-muted-foreground">
-            Последний контакт: {formatDate(lead.last_contacted)}
-          </div>
-        ) : null}
-
       </CardContent>
     </Card>
   )

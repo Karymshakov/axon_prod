@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { ArrowLeftIcon, MailIcon, PhoneIcon, AlertTriangleIcon, BotIcon, HandIcon, PlayIcon, MessageSquareIcon } from 'lucide-react'
 import { useState } from 'react'
 import { useLanguage } from '@/contexts/language-context'
+import { useAuth } from '@/contexts/auth-context'
 import {
   fetchLead,
   fetchPipelineStages,
@@ -12,6 +13,8 @@ import {
   updateLead,
   triggerInstagramAiResponse,
   toggleAiPause,
+  sendTelegramMessage,
+  sendInstagramMessageFromComms,
 } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -38,6 +41,7 @@ export const Route = createFileRoute('/_app/leads/$leadId')({
 function LeadDetailPage() {
   const { t } = useLanguage()
   const { leadId } = Route.useParams()
+  const { user } = useAuth()
   const leadIdNum = parseInt(leadId, 10)
   const [isTriggeringAi, setIsTriggeringAi] = useState(false)
   const navigate = useNavigate()
@@ -131,6 +135,30 @@ function LeadDetailPage() {
                         <span>{lead.phone}</span>
                       </a>
                     ) : null}
+                  </div>
+
+                  <div className="flex items-center gap-3 mt-1.5 text-sm">
+                    <span className="text-muted-foreground">Ответственный:</span>
+                    <span className="font-medium text-foreground">{lead.assigned_to_name || 'Не назначен'}</span>
+                    {user && lead.assigned_to !== user.id && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-7 px-2 py-0 text-xs gap-1"
+                        onClick={async () => {
+                          try {
+                            await updateLead(lead.id, { assigned_to: user.id })
+                            queryClient.invalidateQueries({ queryKey: ['lead', leadIdNum] })
+                            queryClient.invalidateQueries({ queryKey: ['leads'] })
+                            toast.success('Вы назначены ответственным за этот лид')
+                          } catch {
+                            toast.error('Не удалось назначить ответственного')
+                          }
+                        }}
+                      >
+                        Взять в работу
+                      </Button>
+                    )}
                   </div>
 
                   <div className="flex flex-wrap items-center gap-2 mt-2">

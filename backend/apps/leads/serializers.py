@@ -42,6 +42,9 @@ class LeadSerializer(serializers.ModelSerializer):
     active_goals_count = serializers.SerializerMethodField()
     current_objection_display = serializers.CharField(source='get_current_objection_display', read_only=True)
     assigned_to_name = serializers.SerializerMethodField()
+    has_active_task = serializers.SerializerMethodField()
+    has_overdue_task = serializers.SerializerMethodField()
+    has_planned_followup = serializers.SerializerMethodField()
 
     def get_segment_display(self, obj):
         if obj.segment:
@@ -64,6 +67,18 @@ class LeadSerializer(serializers.ModelSerializer):
         if obj.assigned_to:
             return obj.assigned_to.name or obj.assigned_to.email
         return None
+
+    def get_has_active_task(self, obj) -> bool:
+        return obj.tasks.filter(status__in=['pending', 'in_progress']).exists()
+
+    def get_has_overdue_task(self, obj) -> bool:
+        from datetime import date
+        return obj.tasks.filter(status__in=['pending', 'in_progress'], due_date__lt=date.today()).exists()
+
+    def get_has_planned_followup(self, obj) -> bool:
+        if obj.next_follow_up_date or obj.next_follow_up_at:
+            return True
+        return obj.tasks.filter(status__in=['pending', 'in_progress'], task_type='follow_up').exists()
 
     def get_last_contact_channel(self, obj):
         """Get the channel used for the most recent communication."""
@@ -169,6 +184,9 @@ class LeadSerializer(serializers.ModelSerializer):
             # Assignment
             'assigned_to',
             'assigned_to_name',
+            'has_active_task',
+            'has_overdue_task',
+            'has_planned_followup',
             # AI Agent tracking
             'ai_followup_count',
             'last_ai_followup_at',
@@ -197,6 +215,9 @@ class LeadSerializer(serializers.ModelSerializer):
             'contact_channel',
             'ai_paused_at',
             'ai_paused_by',
+            'has_active_task',
+            'has_overdue_task',
+            'has_planned_followup',
         ]
 
     def create(self, validated_data):

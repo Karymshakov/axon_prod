@@ -574,7 +574,7 @@ function SettingsPage() {
   }, [currentOrg?.org_settings])
 
   const canManageInternalToolsVisibility = isOwnerOrAdmin
-  const canAccessDevDatabaseExport = isOwnerOrAdmin && internalToolsVisibility.showDevDatabaseExport
+  const canAccessDevDatabaseExport = false
   const activeTab = !isOwnerOrAdmin
     ? 'preferences'
     : tab === 'team'
@@ -2670,25 +2670,6 @@ function SettingsPage() {
                           />
                         </div>
 
-                        <div className="flex flex-col gap-4 rounded-xl border p-4 sm:flex-row sm:items-center sm:justify-between">
-                          <div className="space-y-1">
-                            <div className="flex flex-wrap items-center gap-2">
-                              <Label htmlFor="show-dev-database-export" className="text-sm font-medium">Показывать экспорт БД разработчика</Label>
-                              <Badge variant={internalToolsVisibility.showDevDatabaseExport ? 'default' : 'secondary'}>
-                                {internalToolsVisibility.showDevDatabaseExport ? 'Вкл' : 'Выкл'}
-                              </Badge>
-                            </div>
-                            <p className="text-sm text-muted-foreground">
-                              Показывает или скрывает страницу экспорта базы данных разработчика в меню Настроек.
-                            </p>
-                          </div>
-                          <Switch
-                            id="show-dev-database-export"
-                            checked={internalToolsVisibility.showDevDatabaseExport}
-                            disabled={updateInternalToolsVisibilityMutation.isPending}
-                            onCheckedChange={(checked) => handleInternalToolsVisibilityChange('showDevDatabaseExport', checked)}
-                          />
-                        </div>
 
                         <div className="flex flex-col gap-4 rounded-xl border p-4 sm:flex-row sm:items-center sm:justify-between">
                           <div className="space-y-1">
