@@ -366,6 +366,11 @@ function AdminUsersPage() {
                         </div>
                       </TableCell>
                       <TableCell>
+                        <Badge variant={roleBadgeVariant(user.role)}>
+                          {USER_ROLE_LABELS[user.role] ?? user.role}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>
                         <div className="text-sm">
                           <div className="font-medium">{user.organization_name ?? 'Без организации'}</div>
                           <div className="text-xs text-muted-foreground">
@@ -374,11 +379,6 @@ function AdminUsersPage() {
                               : user.organization_role === 'admin' ? 'Администратор' : 'Участник'}
                           </div>
                         </div>
-                      </TableCell>
-                      <TableCell>
-                        <Badge variant={roleBadgeVariant(user.role)}>
-                          {USER_ROLE_LABELS[user.role] ?? user.role}
-                        </Badge>
                       </TableCell>
                       <TableCell>
                         <Badge

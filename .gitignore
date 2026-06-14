@@ -33,6 +33,7 @@ scratch/
 password_backups/
 proverkaprivat.txt
 /package-lock.json
+*.backup
 
 # ── Environment variables ─────────────────────────────────────────
 .env
