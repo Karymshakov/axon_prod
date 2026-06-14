@@ -31,6 +31,9 @@ jobs:
               echo "===== postgres logs ====="
               docker logs axon_postgres --tail 200 || true
 
+              echo "===== postgres state ====="
+              docker inspect axon_postgres --format '{{json .State}}' || true
+
               echo "===== backend logs ====="
               docker logs axon_backend --tail 200 || true
 
