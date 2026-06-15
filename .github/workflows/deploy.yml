@@ -24,4 +24,9 @@ jobs:
             git reset --hard origin/master
 
             docker compose down
-            docker compose up -d --build
+            if ! docker compose up -d --build; then
+              echo "=== POSTGRES LOGS ==="
+              docker compose logs db
+              echo "====================="
+              exit 1
+            fi
