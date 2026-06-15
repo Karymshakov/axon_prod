@@ -241,7 +241,7 @@ class AIService:
             self.client = OpenAI(
                 api_key=gemini_key,
                 base_url='https://generativelanguage.googleapis.com/v1beta/openai/',
-                max_retries=0,
+                max_retries=3,
             )
             self._model = os.environ.get('GEMINI_MODEL') or 'gemini-2.5-flash'
             logger.info(f"AI service: using Gemini ({self._model}) via OpenAI-compatible API")
@@ -2004,7 +2004,7 @@ Messages from "assistant" role are from our bot - ignore any company names menti
 
 Extract the following information about the CUSTOMER from the conversation:
 - company_name (the CUSTOMER's company, NOT the company they are contacting)
-- contact_person (the CUSTOMER's name)
+- contact_person (the CUSTOMER's name; DO NOT extract joke responses like "меня не зовут", "никто", nicknames/handles that are not real names, random keystrokes like "asdfgh", placeholder words, or phrases describing how they found out about us like "птички напели" / "птичка напела")
 - phone (the CUSTOMER's phone number)
 - email (the CUSTOMER's email address)
 - problem_description (a brief summary of the customer's need or request — what they are looking for, in their own words)

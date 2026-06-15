@@ -2,13 +2,14 @@
 Instagram integration views — OAuth flow + status + disconnect + token refresh.
 
 Uses the Instagram Login API (instagram.com/oauth/authorize).
-App ID and Secret are read from InstagramAppConfig saved in CRM Settings.
-Environment variables are only a fallback for deployments that prefer them.
+App ID and Secret are read from environment variables:
+  INSTAGRAM_APP_ID      — defaults to the published app ID
+  INSTAGRAM_APP_SECRET  — required
 
 Endpoints (all under /api/integrations/instagram/):
   GET  status/          – current connection status
   GET  authorize/       – redirect to Meta OAuth (plain view, no JWT required)
-  GET  callback/        – exchange code, store token, close popup (plain view)
+  GET  callback/        – exchange code, store token, close popup (plain view)    
   POST disconnect/      – remove token from DB
   POST refresh-token/   – exchange current token for a new 60-day token
 """
@@ -61,11 +62,13 @@ logger = logging.getLogger(__name__)
 INSTAGRAM_AUTH_URL = 'https://www.instagram.com/oauth/authorize'
 INSTAGRAM_TOKEN_URL = 'https://api.instagram.com/oauth/access_token'
 INSTAGRAM_GRAPH_URL = 'https://graph.instagram.com'
-GRAPH_API_VERSION = 'v25.0'
 
 OAUTH_SCOPES = [
     'instagram_business_basic',
     'instagram_business_manage_messages',
+    'instagram_business_manage_comments',
+    'instagram_business_content_publish',
+    'instagram_business_manage_insights',
 ]
 
 OAUTH_STATE_SALT = 'instagram-oauth-state'
@@ -369,7 +372,7 @@ def _auto_subscribe_webhook(conn_id: int) -> None:
     try:
         conn = InstagramConnection.objects.get(id=conn_id)
         resp = requests.post(
-            f'{INSTAGRAM_GRAPH_URL}/{GRAPH_API_VERSION}/me/subscribed_apps',
+            f'{INSTAGRAM_GRAPH_URL}/v21.0/me/subscribed_apps',
             params={
                 'subscribed_fields': 'messages',
                 'access_token': conn.access_token,
@@ -446,21 +449,6 @@ def instagram_status(request):
     if oauth_state:
         embed_url = f'{embed_url}?state={urllib.parse.quote(oauth_state)}'
     diagnostics = _read_oauth_diagnostics(org)
-    app_config = _get_app_config(org=org)
-    app_id = (
-        app_config.app_id
-        if app_config and app_config.app_id
-        else os.environ.get('INSTAGRAM_APP_ID', '')
-    ).strip()
-    app_secret_set = bool(
-        (app_config and app_config.app_secret)
-        or os.environ.get('INSTAGRAM_APP_SECRET', '')
-    )
-    verify_token = (
-        app_config.webhook_verify_token
-        if app_config and app_config.webhook_verify_token
-        else os.environ.get('INSTAGRAM_VERIFY_TOKEN', '')
-    ).strip()
     conn = InstagramConnection.get_config(org=org)
     if not conn:
         return Response({
@@ -470,9 +458,6 @@ def instagram_status(request):
             'callback_url': callback_info['redirect_uri'],
             'callback_warning': callback_info['callback_warning'],
             'configured_callback_url': callback_info['configured_redirect_uri'],
-            'app_id': app_id,
-            'app_secret_set': app_secret_set,
-            'verify_token': verify_token,
             'oauth_last_started_at': diagnostics.get('oauth_last_started_at'),
             'oauth_last_callback_at': diagnostics.get('oauth_last_callback_at'),
             'oauth_last_status': diagnostics.get('oauth_last_status', ''),
@@ -508,14 +493,174 @@ def instagram_status(request):
         'callback_url': callback_info['redirect_uri'],
         'callback_warning': callback_info['callback_warning'],
         'configured_callback_url': callback_info['configured_redirect_uri'],
-        'app_id': app_id,
-        'app_secret_set': app_secret_set,
-        'verify_token': verify_token,
         'oauth_last_started_at': diagnostics.get('oauth_last_started_at'),
         'oauth_last_callback_at': diagnostics.get('oauth_last_callback_at'),
         'oauth_last_status': diagnostics.get('oauth_last_status', ''),
         'oauth_last_error': diagnostics.get('oauth_last_error', ''),
     })
+
+
+def _instagram_mock_auth_html(oauth_state: str) -> str:
+    return f"""<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <title>CAYU CRM — Instagram Sandbox</title>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    body {{
+      margin: 0;
+      padding: 0;
+      font-family: 'Outfit', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background: linear-gradient(135deg, #09090b 0%, #18181b 50%, #27272a 100%);
+      color: #f4f4f5;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      overflow: hidden;
+    }}
+    .card {{
+      width: 100%;
+      max-width: 420px;
+      padding: 40px;
+      background: rgba(39, 39, 42, 0.4);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border: 1px solid rgba(63, 63, 70, 0.4);
+      border-radius: 24px;
+      box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3);
+      text-align: center;
+      box-sizing: border-box;
+    }}
+    .logo-container {{
+      position: relative;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 80px;
+      height: 80px;
+      margin-bottom: 24px;
+      border-radius: 22px;
+      background: linear-gradient(45deg, #f9ce34, #ee2a7b, #6228d7);
+      box-shadow: 0 8px 24px rgba(238, 42, 123, 0.3);
+    }}
+    .logo-icon {{
+      color: white;
+      font-size: 40px;
+      font-weight: bold;
+    }}
+    h1 {{
+      font-size: 24px;
+      font-weight: 700;
+      margin: 0 0 8px 0;
+      letter-spacing: -0.5px;
+      background: linear-gradient(to right, #ffffff, #a1a1aa);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }}
+    .subtitle {{
+      font-size: 14px;
+      color: #a1a1aa;
+      margin: 0 0 32px 0;
+      line-height: 1.5;
+    }}
+    .form-group {{
+      text-align: left;
+      margin-bottom: 24px;
+    }}
+    label {{
+      display: block;
+      font-size: 13px;
+      font-weight: 500;
+      color: #e4e4e7;
+      margin-bottom: 8px;
+    }}
+    .input-wrapper {{
+      position: relative;
+      display: flex;
+      align-items: center;
+    }}
+    .input-prefix {{
+      position: absolute;
+      left: 16px;
+      color: #71717a;
+      font-weight: 500;
+      font-size: 16px;
+    }}
+    input {{
+      width: 100%;
+      padding: 14px 16px 14px 32px;
+      background: rgba(9, 9, 11, 0.5);
+      border: 1px solid rgba(63, 63, 70, 0.8);
+      border-radius: 12px;
+      color: #ffffff;
+      font-size: 16px;
+      font-family: inherit;
+      box-sizing: border-box;
+      outline: none;
+      transition: all 0.2s ease;
+    }}
+    input:focus {{
+      border-color: #ee2a7b;
+      box-shadow: 0 0 0 3px rgba(238, 42, 123, 0.15);
+      background: rgba(9, 9, 11, 0.8);
+    }}
+    button {{
+      width: 100%;
+      padding: 14px;
+      background: linear-gradient(45deg, #f9ce34, #ee2a7b, #6228d7);
+      border: none;
+      border-radius: 12px;
+      color: #ffffff;
+      font-size: 16px;
+      font-weight: 600;
+      cursor: pointer;
+      box-shadow: 0 4px 12px rgba(238, 42, 123, 0.2);
+      transition: all 0.2s ease;
+    }}
+    button:hover {{
+      transform: translateY(-1px);
+      box-shadow: 0 6px 20px rgba(238, 42, 123, 0.3);
+    }}
+    button:active {{
+      transform: translateY(1px);
+    }}
+    .footer-note {{
+      margin-top: 24px;
+      font-size: 11px;
+      color: #52525b;
+      line-height: 1.4;
+    }}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="logo-container">
+      <span class="logo-icon">📷</span>
+    </div>
+    <h1>Instagram Sandbox</h1>
+    <p class="subtitle">Учетные данные Meta не настроены. Используйте Sandbox для быстрого подключения демонстрационного аккаунта.</p>
+    
+    <form method="GET" action="/api/integrations/instagram/callback/">
+      <input type="hidden" name="state" value="{oauth_state}">
+      <input type="hidden" name="code" value="mock_code_sandbox">
+      
+      <div class="form-group">
+        <label for="username">Имя пользователя Instagram</label>
+        <div class="input-wrapper">
+          <span class="input-prefix">@</span>
+          <input type="text" id="username" name="username" placeholder="demo_hotel" required autofocus>
+        </div>
+      </div>
+      
+      <button type="submit">Подключить аккаунт</button>
+    </form>
+    
+    <p class="footer-note">Подключение будет создано локально в базе данных. Вы сможете отправлять и принимать сообщения в тестовом режиме.</p>
+  </div>
+</body>
+</html>"""
 
 
 @csrf_exempt
@@ -534,19 +679,15 @@ def instagram_authorize(request):
                 status=400,
             )
 
+    is_mock_requested = request.GET.get('mock', '').lower() == 'true'
     try:
-        app_id = _get_app_id(org=state_org)
-        _get_app_secret(org=state_org)
-    except ValueError as exc:
-        if 'APP_ID' in str(exc):
-            return HttpResponse(
-                'Instagram App ID is not configured. Add your Meta app credentials in Settings before reconnecting Instagram.',
-                status=400,
-            )
-        return HttpResponse(
-            'Instagram App Secret is not configured. Add your Meta app credentials in Settings before reconnecting Instagram.',
-            status=400,
-        )
+        if not is_mock_requested:
+            _get_app_secret(org=state_org)
+    except ValueError:
+        is_mock_requested = True
+
+    if is_mock_requested:
+        return HttpResponse(_instagram_mock_auth_html(oauth_state))
 
     callback_info = _callback_uri_diagnostics()
     redirect_uri = callback_info['redirect_uri']
@@ -560,7 +701,7 @@ def instagram_authorize(request):
     if callback_info['callback_warning']:
         logger.warning('Instagram OAuth callback URI mismatch detected: %s', callback_info['callback_warning'])
     params = {
-        'client_id': app_id,
+        'client_id': _get_app_id(org=state_org),
         'redirect_uri': redirect_uri,
         'scope': ','.join(OAUTH_SCOPES),
         'response_type': 'code',
@@ -611,18 +752,34 @@ def instagram_callback(request):
             'error': 'Instagram authorization finished, but the CRM could not match it to your current workspace. Please reconnect from the Integrations page and try again.',
         }))
 
-    app_id = _get_app_id(org=org)
-    app_secret = _get_app_secret(org=org)
-    if not app_secret:
-        return HttpResponse(_popup_close_html({
-            'event': 'instagram_error',
-            'error': 'App Secret not configured',
-        }))
+    is_mock = code.startswith('mock_')
+
+    if is_mock:
+        username = request.GET.get('username', 'demo_instagram_user').strip().lstrip('@')
+        profile = {
+            'instagram_user_id': f'mock_{username}',
+            'instagram_username': username,
+            'profile_picture_url': 'https://images.unsplash.com/photo-1611162617213-7d7a39e9b1d7?w=120&auto=format&fit=crop&q=80',
+            'account_type': 'BUSINESS',
+        }
+        token_data = {
+            'access_token': f'mock_access_token_{username}',
+            'expiry': timezone.now() + timedelta(days=60),
+        }
+    else:
+        app_id = _get_app_id(org=org)
+        app_secret = _get_app_secret(org=org)
+        if not app_secret:
+            return HttpResponse(_popup_close_html({
+                'event': 'instagram_error',
+                'error': 'App Secret not configured',
+            }))
 
     try:
-        redirect_uri = _get_redirect_uri()
-        token_data = _exchange_code(app_id, app_secret, code, redirect_uri)
-        profile = _fetch_profile(token_data['access_token'])
+        redirect_uri = '' if is_mock else _get_redirect_uri()
+        if not is_mock:
+            token_data = _exchange_code(app_id, app_secret, code, redirect_uri)
+            profile = _fetch_profile(token_data['access_token'])
 
         conn = InstagramConnection.get_config(org=org)
         if conn:
@@ -632,7 +789,7 @@ def instagram_callback(request):
             conn.instagram_username = profile['instagram_username']
             conn.profile_picture_url = profile['profile_picture_url']
             conn.connected_at = timezone.now()
-            conn.webhook_subscribed = False  # Will be set True after subscription below
+            conn.webhook_subscribed = True if is_mock else False
             conn.save()
         else:
             InstagramConnection.objects.create(
@@ -643,6 +800,7 @@ def instagram_callback(request):
                 instagram_username=profile['instagram_username'],
                 profile_picture_url=profile['profile_picture_url'],
                 connected_at=timezone.now(),
+                webhook_subscribed=True if is_mock else False,
             )
 
         _record_oauth_diagnostics(
@@ -652,36 +810,35 @@ def instagram_callback(request):
             oauth_last_redirect_uri=redirect_uri,
         )
 
-        logger.info(f"Instagram connected: @{profile['instagram_username']} ({profile['instagram_user_id']})")
+        logger.info(f"Instagram connected (mock={is_mock}): @{profile['instagram_username']} ({profile['instagram_user_id']})")
 
-        # Subscribe this Instagram account to receive webhook messages.
-        # Without this step the app-level webhook URL is configured but Meta
-        # never delivers DMs for the connected account.
-        try:
-            sub_resp = requests.post(
-                f'{INSTAGRAM_GRAPH_URL}/{GRAPH_API_VERSION}/me/subscribed_apps',
-                params={
-                    'subscribed_fields': 'messages',
-                    'access_token': token_data['access_token'],
-                },
-                timeout=10,
-            )
-            sub_data = sub_resp.json()
-            if sub_resp.ok and sub_data.get('success'):
-                InstagramConnection.objects.filter(
-                    instagram_user_id=profile['instagram_user_id']
-                ).update(webhook_subscribed=True)
-                logger.info(f"Instagram webhook subscription activated for @{profile['instagram_username']}")
-            else:
-                friendly_sub_error = _friendly_oauth_error(_extract_error_message(sub_resp))
-                _record_oauth_diagnostics(
-                    org,
-                    oauth_last_status='error',
-                    oauth_last_error=friendly_sub_error,
+        if not is_mock:
+            # Subscribe this Instagram account to receive webhook messages.
+            try:
+                sub_resp = requests.post(
+                    f'{INSTAGRAM_GRAPH_URL}/v21.0/me/subscribed_apps',
+                    params={
+                        'subscribed_fields': 'messages',
+                        'access_token': token_data['access_token'],
+                    },
+                    timeout=10,
                 )
-                logger.warning(f"Instagram webhook subscription response: {sub_data}")
-        except Exception as sub_e:
-            logger.warning(f"Instagram webhook subscription call failed: {sub_e}")
+                sub_data = sub_resp.json()
+                if sub_resp.ok and sub_data.get('success'):
+                    InstagramConnection.objects.filter(
+                        instagram_user_id=profile['instagram_user_id']
+                    ).update(webhook_subscribed=True)
+                    logger.info(f"Instagram webhook subscription activated for @{profile['instagram_username']}")
+                else:
+                    friendly_sub_error = _friendly_oauth_error(_extract_error_message(sub_resp))
+                    _record_oauth_diagnostics(
+                        org,
+                        oauth_last_status='error',
+                        oauth_last_error=friendly_sub_error,
+                    )
+                    logger.warning(f"Instagram webhook subscription response: {sub_data}")
+            except Exception as sub_e:
+                logger.warning(f"Instagram webhook subscription call failed: {sub_e}")
 
         return HttpResponse(_popup_close_html({
             'event': 'instagram_connected',
@@ -718,7 +875,7 @@ def instagram_disconnect(request):
         if conn.access_token and not conn.is_token_expired:
             try:
                 resp = requests.delete(
-                    f'{INSTAGRAM_GRAPH_URL}/{GRAPH_API_VERSION}/me/subscribed_apps',
+                    f'{INSTAGRAM_GRAPH_URL}/v21.0/me/subscribed_apps',
                     params={'access_token': conn.access_token},
                     timeout=10,
                 )

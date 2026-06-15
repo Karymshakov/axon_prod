@@ -1161,9 +1161,45 @@ INSTRUCTIONS:
 
 Return ONLY the message text, nothing else."""
 
-        # Use conversation history for context
-        messages = [{"role": "system", "content": config.system_prompt}]
-        messages.extend(context['conversation_history'][-10:])  # Last 10 messages
+        # Try to assemble booking prompt to get rich system instructions and active card requirements
+        try:
+            from apps.leads.services.llm_client import build_activity_history
+            activity_history = build_activity_history(lead)
+        except Exception:
+            activity_history = ""
+
+        lead_data = {
+            'contact_person': lead.contact_person,
+            'phone': lead.phone,
+            'email': lead.email,
+            'check_in_date': str(lead.check_in_date) if lead.check_in_date else None,
+            'check_out_date': str(lead.check_out_date) if lead.check_out_date else None,
+            'guest_count': lead.guest_count,
+            'room_type_preference': lead.room_type_preference,
+            'meal_plan': lead.meal_plan,
+            'source': lead.source,
+            'company_name': lead.company_name,
+        }
+
+        try:
+            prompt_res = ai_service._assemble_booking_prompt(
+                message="",
+                lead_data=lead_data,
+                conversation_history=context['conversation_history'],
+                selected_media=None,
+                is_pooled=False,
+                activity_history=activity_history,
+                lead=lead,
+            )
+            from apps.leads.services.prompt_assembly import consolidate_system_messages
+            messages = consolidate_system_messages(prompt_res.messages)
+            while messages and messages[-1].get('role') == 'user' and not messages[-1].get('content', '').strip():
+                messages.pop()
+        except Exception as e:
+            logger.warning(f"Failed to assemble booking prompt for follow-up, falling back: {e}")
+            messages = [{"role": "system", "content": config.system_prompt}]
+            messages.extend(context['conversation_history'][-10:])
+
         messages.append({"role": "user", "content": prompt})
 
         try:

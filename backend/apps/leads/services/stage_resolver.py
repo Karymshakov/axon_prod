@@ -44,10 +44,13 @@ def is_reliable_contact_person(lead, value: Any | None = None) -> bool:
     compact_instagram = re.sub(r'[\s._-]+', '', instagram_username)
     if compact_name and compact_name in {compact_telegram, compact_instagram}:
         return False
-    if re.search(r'[@_\d]', name):
+    if re.search(r'[@\d]', name):
         return False
 
-    words = re.findall(r'[A-Za-zА-Яа-яЁёӨөҮүҢңҚқҺһІі-]+', name)
+    if len(re.findall(r'[A-Za-zА-Яа-яЁёӨөҮүҢңҚқҺһІі]', name)) < 2:
+        return False
+
+    words = re.findall(r'[A-Za-zА-Яа-яЁёӨөҮүҢңҚқҺһІі_-]+', name)
     if not (1 <= len(words) <= 4):
         return False
 

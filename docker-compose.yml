@@ -21,7 +21,7 @@ services:
 
   # ─── Redis Broker / Cache ───────────────────────────────────────────────────
   redis:
-    image: redis:7-alpine
+    image: redis:7
     container_name: axon_redis
     restart: always
     volumes:

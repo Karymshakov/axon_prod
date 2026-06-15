@@ -254,7 +254,7 @@ CELERY_TIMEZONE = TIME_ZONE
 CELERY_BEAT_SCHEDULE = {
     'ai-agent-check': {
         'task': 'leads.run_agent_check',
-        'schedule': 1800.0,  # Every 30 min — catches short promises ("через пару часов")
+        'schedule': 60.0,  # Every 1 min — catches short promises ("через пару часов")
     },
 }
 
