@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as RegisterRouteImport } from './routes/register'
 import { Route as LoginRouteImport } from './routes/login'
+import { Route as AdminkaRouteImport } from './routes/adminka'
 import { Route as SuperAdminRouteRouteImport } from './routes/super-admin/route'
 import { Route as AppRouteRouteImport } from './routes/_app/route'
 import { Route as IndexRouteImport } from './routes/index'
@@ -40,6 +41,11 @@ const RegisterRoute = RegisterRouteImport.update({
 const LoginRoute = LoginRouteImport.update({
   id: '/login',
   path: '/login',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AdminkaRoute = AdminkaRouteImport.update({
+  id: '/adminka',
+  path: '/adminka',
   getParentRoute: () => rootRouteImport,
 } as any)
 const SuperAdminRouteRoute = SuperAdminRouteRouteImport.update({
@@ -145,6 +151,7 @@ const AppPortalUsersIndexRoute = AppPortalUsersIndexRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/super-admin': typeof SuperAdminRouteRouteWithChildren
+  '/adminka': typeof AdminkaRoute
   '/login': typeof LoginRoute
   '/register': typeof RegisterRoute
   '/portal': typeof AppPortalRouteRouteWithChildren
@@ -167,6 +174,7 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/adminka': typeof AdminkaRoute
   '/login': typeof LoginRoute
   '/register': typeof RegisterRoute
   '/portal': typeof AppPortalRouteRouteWithChildren
@@ -191,6 +199,7 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/_app': typeof AppRouteRouteWithChildren
   '/super-admin': typeof SuperAdminRouteRouteWithChildren
+  '/adminka': typeof AdminkaRoute
   '/login': typeof LoginRoute
   '/register': typeof RegisterRoute
   '/_app/portal': typeof AppPortalRouteRouteWithChildren
@@ -216,6 +225,7 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/super-admin'
+    | '/adminka'
     | '/login'
     | '/register'
     | '/portal'
@@ -238,6 +248,7 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/adminka'
     | '/login'
     | '/register'
     | '/portal'
@@ -261,6 +272,7 @@ export interface FileRouteTypes {
     | '/'
     | '/_app'
     | '/super-admin'
+    | '/adminka'
     | '/login'
     | '/register'
     | '/_app/portal'
@@ -286,6 +298,7 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AppRouteRoute: typeof AppRouteRouteWithChildren
   SuperAdminRouteRoute: typeof SuperAdminRouteRouteWithChildren
+  AdminkaRoute: typeof AdminkaRoute
   LoginRoute: typeof LoginRoute
   RegisterRoute: typeof RegisterRoute
 }
@@ -304,6 +317,13 @@ declare module '@tanstack/react-router' {
       path: '/login'
       fullPath: '/login'
       preLoaderRoute: typeof LoginRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/adminka': {
+      id: '/adminka'
+      path: '/adminka'
+      fullPath: '/adminka'
+      preLoaderRoute: typeof AdminkaRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/super-admin': {
@@ -527,6 +547,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AppRouteRoute: AppRouteRouteWithChildren,
   SuperAdminRouteRoute: SuperAdminRouteRouteWithChildren,
+  AdminkaRoute: AdminkaRoute,
   LoginRoute: LoginRoute,
   RegisterRoute: RegisterRoute,
 }
