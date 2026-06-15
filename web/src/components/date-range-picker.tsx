@@ -20,7 +20,7 @@ const parseLocalDate = (dateStr: string) => new Date(dateStr + 'T00:00:00')
 const isCompleteRange = (range?: DateRange) =>
   range?.from && range?.to && range.from.getTime() !== range.to.getTime()
 
-export function DateRangePicker({ value, onChange, placeholder = 'Выберите период', disabled }: DateRangePickerProps) {
+export function DateRangePicker({ value, onChange, placeholder = 'Pick a date range', disabled }: DateRangePickerProps) {
   const [open, setOpen] = useState(false)
   const [dateRange, setDateRange] = useState<DateRange | undefined>()
 
@@ -74,7 +74,7 @@ export function DateRangePicker({ value, onChange, placeholder = 'Выберит
         {(dateRange || value?.from) && (
           <div className="flex justify-end border-t p-3">
             <Button variant="ghost" size="sm" onClick={handleClear}>
-              Очистить
+              Clear
             </Button>
           </div>
         )}

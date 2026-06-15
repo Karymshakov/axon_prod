@@ -16,7 +16,6 @@ from .serializers import (
     AgentConfigSerializer,
 )
 from apps.organizations.mixins import OrganizationQuerysetMixin
-from apps.organizations.permissions import IsOrganizationAdmin
 
 
 def _get_org(request):
@@ -31,7 +30,7 @@ def _get_org(request):
 
 
 class ConversationFlowViewSet(OrganizationQuerysetMixin, viewsets.ModelViewSet):
-    permission_classes = [IsOrganizationAdmin]
+    permission_classes = [IsAuthenticated]
     queryset = ConversationFlow.objects.all()
 
     def get_serializer_class(self):
@@ -53,7 +52,7 @@ class ConversationFlowViewSet(OrganizationQuerysetMixin, viewsets.ModelViewSet):
 
 
 class FlowCardViewSet(OrganizationQuerysetMixin, viewsets.ModelViewSet):
-    permission_classes = [IsOrganizationAdmin]
+    permission_classes = [IsAuthenticated]
     queryset = FlowCard.objects.all()
     serializer_class = FlowCardSerializer
 
@@ -172,7 +171,7 @@ class FlowCardViewSet(OrganizationQuerysetMixin, viewsets.ModelViewSet):
 
 
 class FlowConnectionViewSet(OrganizationQuerysetMixin, viewsets.ModelViewSet):
-    permission_classes = [IsOrganizationAdmin]
+    permission_classes = [IsAuthenticated]
     queryset = FlowConnection.objects.all()
     serializer_class = FlowConnectionSerializer
 
@@ -198,7 +197,7 @@ class FlowConnectionViewSet(OrganizationQuerysetMixin, viewsets.ModelViewSet):
 
 
 @api_view(['GET', 'PUT'])
-@permission_classes([IsOrganizationAdmin])
+@permission_classes([IsAuthenticated])
 def ai_flow_mode(request):
     org = _get_org(request)
     obj = AIFlowMode.get_mode(org=org)
@@ -211,14 +210,14 @@ def ai_flow_mode(request):
 
 
 class AIToolViewSet(OrganizationQuerysetMixin, viewsets.ModelViewSet):
-    permission_classes = [IsOrganizationAdmin]
+    permission_classes = [IsAuthenticated]
     serializer_class = AIToolSerializer
     queryset = AITool.objects.all()
     http_method_names = ['get', 'post', 'patch', 'delete', 'head', 'options']
 
 
 @api_view(['GET', 'PUT'])
-@permission_classes([IsOrganizationAdmin])
+@permission_classes([IsAuthenticated])
 def ai_model_config(request):
     org = _get_org(request)
     obj = AIModelConfig.get_config(org=org)
@@ -231,7 +230,7 @@ def ai_model_config(request):
 
 
 class AgentConfigViewSet(OrganizationQuerysetMixin, viewsets.ModelViewSet):
-    permission_classes = [IsOrganizationAdmin]
+    permission_classes = [IsAuthenticated]
     serializer_class = AgentConfigSerializer
     queryset = AgentConfig.objects.all()
     http_method_names = ['get', 'patch', 'head', 'options']
@@ -248,7 +247,7 @@ class AgentConfigViewSet(OrganizationQuerysetMixin, viewsets.ModelViewSet):
 
 
 @api_view(['GET', 'PUT'])
-@permission_classes([IsOrganizationAdmin])
+@permission_classes([IsAuthenticated])
 def transfer_config(request):
     org = _get_org(request)
     obj = ManagerTransferConfig.get_config(org=org)

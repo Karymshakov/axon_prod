@@ -22,8 +22,9 @@ class UserManager(BaseUserManager):
 
 class User(AbstractBaseUser, PermissionsMixin):
     class Role(models.TextChoices):
-        ADMIN = 'admin', 'Admin'
+        ADMIN = 'admin', 'Admin / Manager'
         SUPPORT = 'support', 'Support'
+        TAX_ACCOUNTANT = 'tax_accountant', 'Tax Accountant'
 
     class Language(models.TextChoices):
         EN = 'en', 'English'

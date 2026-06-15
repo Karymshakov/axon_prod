@@ -16,13 +16,6 @@ from .serializers import (
 User = get_user_model()
 
 
-def _is_platform_admin(user):
-    return bool(
-        getattr(user, 'is_superadmin', False) or
-        getattr(user, 'is_admin', False)
-    )
-
-
 @api_view(['GET', 'POST'])
 @permission_classes([IsAuthenticated])
 def organization_list_create(request):
@@ -56,8 +49,8 @@ def organization_detail(request, slug):
         return Response({'error': 'Organization not found'}, status=404)
 
     # Check membership
-    is_platform_admin = _is_platform_admin(request.user)
-    if not is_platform_admin:
+    is_super = getattr(request.user, 'is_superadmin', False)
+    if not is_super:
         member = OrganizationMember.objects.filter(
             organization=org, user=request.user, is_active=True
         ).first()
@@ -68,7 +61,7 @@ def organization_detail(request, slug):
         return Response(OrganizationSerializer(org, context={'request': request}).data)
 
     # PATCH - admin/owner only
-    if not is_platform_admin:
+    if not is_super:
         if member.role not in [OrganizationMember.Role.OWNER, OrganizationMember.Role.ADMIN]:
             return Response({'error': 'Admin or owner required'}, status=403)
     serializer = OrganizationSerializer(org, data=request.data, partial=True,
@@ -110,8 +103,8 @@ def organization_members(request, slug):
     except Organization.DoesNotExist:
         return Response({'error': 'Organization not found'}, status=404)
 
-    is_platform_admin = _is_platform_admin(request.user)
-    if not is_platform_admin and not OrganizationMember.objects.filter(
+    is_super = getattr(request.user, 'is_superadmin', False)
+    if not is_super and not OrganizationMember.objects.filter(
         organization=org, user=request.user, is_active=True
     ).exists():
         return Response({'error': 'Not a member'}, status=403)
@@ -128,8 +121,8 @@ def organization_member_detail(request, slug, user_id):
     except Organization.DoesNotExist:
         return Response({'error': 'Organization not found'}, status=404)
 
-    is_platform_admin = _is_platform_admin(request.user)
-    if not is_platform_admin:
+    is_super = getattr(request.user, 'is_superadmin', False)
+    if not is_super:
         actor = OrganizationMember.objects.filter(
             organization=org, user=request.user, is_active=True
         ).first()
@@ -166,8 +159,8 @@ def invite_member(request, slug):
     except Organization.DoesNotExist:
         return Response({'error': 'Organization not found'}, status=404)
 
-    is_platform_admin = _is_platform_admin(request.user)
-    if not is_platform_admin:
+    is_super = getattr(request.user, 'is_superadmin', False)
+    if not is_super:
         actor = OrganizationMember.objects.filter(
             organization=org, user=request.user, is_active=True
         ).first()
@@ -193,8 +186,8 @@ def invite_member(request, slug):
         member.role = role
         member.save(update_fields=['is_active', 'role'])
 
-    # Joining from an organization's team screen should open that same org on next login.
-    if user.current_organization_id != org.id:
+    # Set current_organization if the invited user doesn't have one set yet
+    if not user.current_organization:
         user.current_organization = org
         user.save(update_fields=['current_organization'])
 

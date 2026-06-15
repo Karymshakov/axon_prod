@@ -53,32 +53,6 @@ AI_ACTIVITY_TYPES_TO_CLEAR = [
     LeadActivity.TYPE_GOAL_COMPLETED,
 ]
 
-READY_STATUS_VALUES = {
-    'won',
-    'converted',
-    'ready',
-    'done',
-    'closed',
-    'gotovo',
-    'gotovyy',
-    'готово',
-    'готов',
-    'готовый',
-    'готовая',
-    'подтверждено',
-    'подтверждена',
-    'бронь подтверждена',
-    'успешно',
-}
-
-
-def _normalize_status_text(value: str | None) -> str:
-    return (value or '').strip().lower().replace('ё', 'е')
-
-
-def _is_ready_status_value(value: str | None) -> bool:
-    return _normalize_status_text(value) in READY_STATUS_VALUES
-
 
 def _reset_lead_ai_memory(lead: Lead, user_name: str) -> tuple[Lead, dict]:
     """Clear per-lead AI memory/state while preserving lead record and message history."""
@@ -149,92 +123,10 @@ class LeadViewSet(OrganizationQuerysetMixin, viewsets.ModelViewSet):
     queryset = Lead.objects.select_related('assigned_to').all()
     serializer_class = LeadSerializer
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
-    filterset_fields = ['segment', 'source', 'discovery_source', 'assigned_to']
+    filterset_fields = ['status', 'segment', 'source', 'assigned_to']
     search_fields = ['contact_person', 'email', 'notes']
     ordering_fields = ['last_contacted', 'created_at', 'contact_person']
     ordering = ['-last_contacted']
-
-    def _filter_by_contact_channel(self, queryset):
-        channel = self.request.query_params.get('contact_channel', '').strip().lower()
-        if not channel or channel == 'all':
-            return queryset
-
-        if channel == 'telegram':
-            return queryset.filter(
-                Q(contact_channel__iexact='telegram')
-                | (Q(contact_channel='') & Q(telegram_chat_id__gt=''))
-                | (Q(contact_channel='') & Q(telegram_user_id__gt=''))
-                | (Q(contact_channel='') & Q(source__iexact='telegram'))
-            )
-
-        if channel == 'instagram':
-            return queryset.filter(
-                Q(contact_channel__iexact='instagram')
-                | (Q(contact_channel='') & Q(instagram_user_id__gt=''))
-                | (Q(contact_channel='') & Q(source__iexact='instagram'))
-            )
-
-        if channel == 'whatsapp':
-            return queryset.filter(
-                Q(contact_channel__iexact='whatsapp')
-                | (Q(contact_channel='') & Q(whatsapp_phone__gt=''))
-                | (Q(contact_channel='') & Q(source__iexact='whatsapp'))
-            )
-
-        if channel == 'manual':
-            return queryset.filter(
-                Q(contact_channel__iexact='manual')
-                | (
-                    Q(contact_channel='')
-                    & Q(telegram_chat_id='')
-                    & Q(telegram_user_id='')
-                    & Q(instagram_user_id='')
-                    & Q(whatsapp_phone='')
-                    & (Q(source='') | Q(source__iexact='manual'))
-                )
-            )
-
-        return queryset.none()
-
-    def _status_aliases(self, status_value: str, org=None) -> set[str]:
-        selected = (status_value or '').strip()
-        if not selected:
-            return set()
-
-        aliases = {selected}
-        selected_norm = _normalize_status_text(selected)
-        if _is_ready_status_value(selected):
-            aliases.update({'won', 'converted'})
-
-        stages_qs = PipelineStage.objects.all()
-        if org is not None:
-            stages_qs = stages_qs.filter(organization=org)
-
-        ready_stage_keys: set[str] = set()
-        matched_ready_stage = False
-        for stage in stages_qs.only('key', 'name'):
-            key_norm = _normalize_status_text(stage.key)
-            name_norm = _normalize_status_text(stage.name)
-            is_ready_stage = _is_ready_status_value(stage.key) or _is_ready_status_value(stage.name)
-            if is_ready_stage:
-                ready_stage_keys.add(stage.key)
-
-            if selected_norm in {key_norm, name_norm}:
-                aliases.add(stage.key)
-                if is_ready_stage:
-                    matched_ready_stage = True
-
-        if matched_ready_stage or _is_ready_status_value(selected):
-            aliases.update(ready_stage_keys)
-            aliases.update({'won', 'converted'})
-
-        return aliases
-
-    def _filter_by_status(self, queryset, org=None):
-        status_value = self.request.query_params.get('status', '').strip()
-        if not status_value or status_value == 'all':
-            return queryset
-        return queryset.filter(status__in=self._status_aliases(status_value, org))
 
     def get_queryset(self):
         user = self.request.user
@@ -242,10 +134,9 @@ class LeadViewSet(OrganizationQuerysetMixin, viewsets.ModelViewSet):
             F('last_contacted').desc(nulls_last=True)
         )
         if getattr(user, 'is_superadmin', False):
-            return self._filter_by_status(self._filter_by_contact_channel(base_qs), None)
+            return base_qs
         org = self._get_organization()
-        queryset = self._filter_by_contact_channel(base_qs.filter(organization=org))
-        return self._filter_by_status(queryset, org)
+        return base_qs.filter(organization=org)
 
     @action(detail=False, methods=['get'])
     def stats(self, request):
@@ -255,41 +146,26 @@ class LeadViewSet(OrganizationQuerysetMixin, viewsets.ModelViewSet):
         stages_qs = PipelineStage.objects.all().order_by('order', 'id')
         if org:
             stages_qs = stages_qs.filter(organization=org)
-        stages = list(stages_qs)
-        result = {stage.key: 0 for stage in stages}
-        ready_stage_key = next(
-            (
-                stage.key
-                for stage in stages
-                if _is_ready_status_value(stage.key) or _is_ready_status_value(stage.name)
-            ),
-            'won' if 'won' in result else None,
-        )
+        result = {stage.key: 0 for stage in stages_qs}
 
         lead_qs = Lead.objects.values('status').annotate(count=Count('id'))
         if org:
             lead_qs = lead_qs.filter(organization=org)
         for stat in lead_qs:
-            status_key = stat['status']
-            if status_key in result:
-                result[status_key] += stat['count']
-            elif ready_stage_key and _is_ready_status_value(status_key):
-                result[ready_stage_key] += stat['count']
-            else:
-                result[status_key] = stat['count']
+            result[stat['status']] = stat['count']
 
         result['total'] = sum(result.values())
         return Response(result)
 
     @action(detail=False, methods=['get'])
     def source_stats(self, request):
-        """Get lead counts grouped by discovery source."""
+        """Get lead counts grouped by source."""
         user = request.user
         org = None if getattr(user, 'is_superadmin', False) else self._get_organization()
-        queryset = Lead.objects.exclude(discovery_source='').values('discovery_source').annotate(count=Count('id')).order_by('-count')
+        queryset = Lead.objects.exclude(source='').values('source').annotate(count=Count('id')).order_by('-count')
         if org:
             queryset = queryset.filter(organization=org)
-        return Response([{'source': s['discovery_source'], 'count': s['count']} for s in queryset])
+        return Response([{'source': s['source'], 'count': s['count']} for s in queryset])
 
     @action(detail=True, methods=['post'])
     def convert_to_customer(self, request, pk=None):
@@ -708,21 +584,13 @@ class LeadGoalViewSet(OrganizationQuerysetMixin, viewsets.ModelViewSet):
     serializer_class = LeadGoalSerializer
     filterset_fields = ['lead', 'status', 'goal_type', 'priority']
 
-    def get_queryset(self):
-        user = self.request.user
-        base_qs = LeadGoal.objects.select_related('lead', 'organization', 'lead__organization').all()
-        if getattr(user, 'is_superadmin', False):
-            return base_qs
-        org = self._get_organization()
-        return base_qs.filter(Q(organization=org) | Q(lead__organization=org))
-
     def perform_create(self, serializer):
         user = self.request.user
         org = None if getattr(user, 'is_superadmin', False) else self._get_organization()
-        goal = serializer.save(organization=org or serializer.validated_data['lead'].organization)
+        goal = serializer.save(organization=org)
         LeadActivity.objects.create(
             lead=goal.lead,
-            organization=goal.lead.organization,
+            organization=org,
             activity_type=LeadActivity.TYPE_GOAL_CREATED,
             description=f'Goal created: {goal.get_goal_type_display()}',
             metadata={
@@ -739,23 +607,7 @@ class LeadGoalViewSet(OrganizationQuerysetMixin, viewsets.ModelViewSet):
         if goal.status == LeadGoal.STATUS_COMPLETED:
             return Response({'error': 'Goal is already completed'}, status=status.HTTP_400_BAD_REQUEST)
 
-        achieved_value = request.data.get('achieved_value') or request.data.get('current_value') or ''
-        goal.status = LeadGoal.STATUS_COMPLETED
-        goal.completed_at = timezone.now()
-        goal.achieved_value = achieved_value
-        goal.save(update_fields=['status', 'completed_at', 'achieved_value'])
-
-        LeadActivity.objects.create(
-            lead=goal.lead,
-            organization=goal.lead.organization,
-            activity_type=LeadActivity.TYPE_GOAL_COMPLETED,
-            description=f'Goal achieved: {goal.get_goal_type_display()}',
-            metadata={
-                'goal_id': goal.id,
-                'goal_type': goal.goal_type,
-                'achieved_value': achieved_value,
-            },
-        )
+        goal_manager.complete_goal(goal, request.data.get('current_value'))
 
         return Response(LeadGoalSerializer(goal).data)
 
@@ -767,11 +619,7 @@ class LeadGoalViewSet(OrganizationQuerysetMixin, viewsets.ModelViewSet):
             return Response({'error': 'lead_id is required'}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
-            lead_qs = Lead.objects.all()
-            if not getattr(request.user, 'is_superadmin', False):
-                org = self._get_organization()
-                lead_qs = lead_qs.filter(organization=org)
-            lead = lead_qs.get(pk=lead_id)
+            lead = Lead.objects.get(pk=lead_id)
         except Lead.DoesNotExist:
             return Response({'error': 'Lead not found'}, status=status.HTTP_404_NOT_FOUND)
 

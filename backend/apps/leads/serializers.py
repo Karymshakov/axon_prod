@@ -124,9 +124,6 @@ class LeadSerializer(serializers.ModelSerializer):
             'segment_display',
             'status',
             'source',
-            'contact_channel',
-            'discovery_source',
-            'discovery_source_detail',
             'estimated_value',
             'notes',
             'last_contacted',
@@ -186,31 +183,7 @@ class LeadSerializer(serializers.ModelSerializer):
             'active_goals_count',
             'agent_context',
         ]
-        read_only_fields = [
-            'id',
-            'created_at',
-            'updated_at',
-            'latest_note',
-            'last_contact_channel',
-            'active_goals_count',
-            'assigned_to_name',
-            'contact_channel',
-            'ai_paused_at',
-            'ai_paused_by',
-        ]
-
-    def create(self, validated_data):
-        if not validated_data.get('contact_channel'):
-            source = (validated_data.get('source') or '').strip().lower()
-            if source in {'telegram', 'instagram', 'whatsapp'}:
-                validated_data['contact_channel'] = source
-            elif not any(
-                validated_data.get(field)
-                for field in ('telegram_chat_id', 'telegram_user_id', 'instagram_user_id', 'whatsapp_phone')
-            ):
-                validated_data['contact_channel'] = 'manual'
-
-        return super().create(validated_data)
+        read_only_fields = ['id', 'created_at', 'updated_at', 'latest_note', 'last_contact_channel', 'active_goals_count', 'assigned_to_name', 'ai_paused_at', 'ai_paused_by']
 
 
 class LeadNoteSerializer(serializers.ModelSerializer):
@@ -394,3 +367,4 @@ class AIConfigSerializer(serializers.ModelSerializer):
             'updated_at',
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']
+

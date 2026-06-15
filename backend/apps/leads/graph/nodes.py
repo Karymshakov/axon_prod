@@ -378,7 +378,6 @@ def extract_stage_data_node(state: AgentState) -> dict[str, Any]:
             message,
             state.get('conversation_history') or [],
             company_name,
-            getattr(lead, 'organization', None),
         )
     except Exception as exc:
         logger.warning('extract_stage_data_node: extract_lead_data failed: %s', exc)
@@ -391,15 +390,9 @@ def extract_stage_data_node(state: AgentState) -> dict[str, Any]:
     # the pipeline (stage_resolver, generate_response) sees up-to-date data.
     update_fields: list[str] = []
     date_fields = {'check_in_date', 'check_out_date'}
-    from apps.leads.services.discovery_sources import normalize_discovery_source
-
     for field, value in extracted.items():
         if not hasattr(lead, field) or value is None:
             continue
-        if field == 'discovery_source':
-            value = normalize_discovery_source(value, getattr(lead, 'organization', None))
-            if not value:
-                continue
         if field in date_fields:
             if str(getattr(lead, field, '') or '') != str(value):
                 setattr(lead, field, value)

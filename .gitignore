@@ -24,16 +24,8 @@ db.sqlite3
 db.sqlite3-journal
 backend/media/
 backend/logs/
-backend/staticfiles/
 backend/scratch/
 backend/import_data.sql
-
-# Local diagnostics / private exports
-scratch/
-password_backups/
-proverkaprivat.txt
-/package-lock.json
-*.backup
 
 # ── Environment variables ─────────────────────────────────────────
 .env

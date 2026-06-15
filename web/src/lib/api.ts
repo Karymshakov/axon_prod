@@ -1,82 +1,19 @@
 const API_BASE = import.meta.env.VITE_API_BASE_URL || '/api'
 
 export const SOURCE_OPTIONS = [
-  { value: 'telegram', label: 'Telegram' },
-  { value: 'instagram', label: 'Instagram' },
-  { value: 'whatsapp', label: 'WhatsApp' },
+  { value: 'Website', label: 'Сайт' },
+  { value: 'Referral', label: 'Рекомендация' },
+  { value: 'Social Media', label: 'Социальные сети' },
+  { value: 'Email Campaign', label: 'Email-кампания' },
+  { value: 'Cold Call', label: 'Холодный звонок' },
+  { value: 'Trade Show', label: 'Выставка' },
+  { value: 'Telegram', label: 'Telegram' },
+  { value: 'Instagram', label: 'Instagram' },
+  { value: 'WhatsApp', label: 'WhatsApp' },
+  { value: 'Advertisement', label: 'Реклама' },
+  { value: 'Partner', label: 'Партнёр' },
+  { value: 'Other', label: 'Другое' },
 ]
-
-export const CONTACT_CHANNEL_OPTIONS = [
-  { value: 'telegram', label: 'Telegram' },
-  { value: 'instagram', label: 'Instagram' },
-  { value: 'whatsapp', label: 'WhatsApp' },
-  { value: 'manual', label: 'Ручной ввод' },
-]
-
-export const DISCOVERY_SOURCE_OPTIONS = [
-  { value: 'friends', label: 'Друзья / рекомендация' },
-  { value: 'ads', label: 'Реклама' },
-  { value: 'instagram', label: 'Instagram' },
-  { value: 'google', label: 'Google / поиск' },
-  { value: 'website', label: 'Сайт' },
-  { value: 'partner', label: 'Партнер' },
-  { value: 'repeat_guest', label: 'Уже был гостем' },
-  { value: 'other', label: 'Другое' },
-]
-
-export type ContactChannel = 'telegram' | 'instagram' | 'whatsapp' | 'manual' | ''
-export type DiscoverySource = string
-
-export const DEFAULT_LEAD_STATUS_LABELS: Record<string, string> = {
-  new: 'Новый',
-  attempted: 'Попытка связи',
-  contacted: 'Связались',
-  nurturing: 'В работе',
-  converted: 'Готовый',
-  won: 'Готовый',
-  lost: 'Потерян',
-  unqualified: 'Не подходит',
-  manual: 'Ручной',
-  active: 'Активен',
-  pending: 'Ожидает',
-}
-
-export function getLeadStatusLabel(
-  status: string | null | undefined,
-  stages?: Array<{ key: string; name: string }>,
-): string {
-  if (!status) return 'Не указан'
-  const normalizedStatus = status.trim().toLowerCase()
-  const stageName = stages?.find((stage) => stage.key === status)?.name?.trim()
-  const normalizedStageName = stageName?.toLowerCase()
-  if (normalizedStageName && DEFAULT_LEAD_STATUS_LABELS[normalizedStageName]) {
-    return DEFAULT_LEAD_STATUS_LABELS[normalizedStageName]
-  }
-  return stageName || DEFAULT_LEAD_STATUS_LABELS[normalizedStatus] || status
-}
-
-export function getContactChannelLabel(value: string | null | undefined): string {
-  if (!value) return 'Не указан'
-  const normalized = value.toLowerCase()
-  return CONTACT_CHANNEL_OPTIONS.find((option) => option.value === normalized)?.label ?? value
-}
-
-export function getDiscoverySourceLabel(value: string | null | undefined): string {
-  if (!value) return 'Не указан'
-  const normalized = value.toLowerCase()
-  return DISCOVERY_SOURCE_OPTIONS.find((option) => option.value === normalized)?.label ?? value
-}
-
-export function resolveLeadContactChannel(lead: Pick<Lead, 'contact_channel' | 'telegram_chat_id' | 'telegram_user_id' | 'instagram_user_id' | 'whatsapp_phone' | 'source'>): ContactChannel {
-  const channel = (lead.contact_channel || '').toLowerCase()
-  if (channel === 'telegram' || channel === 'instagram' || channel === 'whatsapp' || channel === 'manual') {
-    return channel
-  }
-  if (lead.telegram_chat_id || lead.telegram_user_id || lead.source?.toLowerCase() === 'telegram') return 'telegram'
-  if (lead.instagram_user_id || lead.source?.toLowerCase() === 'instagram') return 'instagram'
-  if (lead.whatsapp_phone || lead.source?.toLowerCase() === 'whatsapp') return 'whatsapp'
-  return ''
-}
 
 // Token storage keys
 const ACCESS_TOKEN_KEY = 'access_token'
@@ -257,9 +194,6 @@ export interface Lead {
   segment_display: string
   status: string
   source: string
-  contact_channel: ContactChannel
-  discovery_source: DiscoverySource
-  discovery_source_detail: string
   estimated_value: string | null
   notes: string
   last_contacted: string | null
@@ -332,14 +266,6 @@ export interface CreateLeadData {
   segment?: string
   status?: string
   source?: string
-  contact_channel?: string
-  discovery_source?: string
-  discovery_source_detail?: string
-  check_in_date?: string | null
-  check_out_date?: string | null
-  guest_count?: number | null
-  room_type_preference?: string
-  meal_plan?: Lead['meal_plan']
   estimated_value?: string | null
   notes?: string
   last_contacted?: string | null
@@ -361,8 +287,6 @@ export interface FetchLeadsParams {
   status?: string
   segment?: string
   source?: string
-  contact_channel?: string
-  discovery_source?: string
   assigned_to?: string
   search?: string
 }
@@ -372,8 +296,6 @@ export function fetchLeads(params?: FetchLeadsParams) {
   if (params?.status) qs.append('status', params.status)
   if (params?.segment) qs.append('segment', params.segment)
   if (params?.source) qs.append('source', params.source)
-  if (params?.contact_channel) qs.append('contact_channel', params.contact_channel)
-  if (params?.discovery_source) qs.append('discovery_source', params.discovery_source)
   if (params?.assigned_to) qs.append('assigned_to', params.assigned_to)
   if (params?.search) qs.append('search', params.search)
   const queryString = qs.toString()
@@ -919,19 +841,18 @@ export interface Task {
 export interface LeadGoal {
   id: number
   lead: number
-  goal_type: 'collect_email' | 'collect_phone' | 'collect_guest_name' | 'collect_discovery_source' | 'schedule_call' | 'schedule_meeting' | 'send_proposal' | 'send_info' | 'handle_objection' | 'close_deal' | 'qualify_lead' | 'get_decision_maker'
+  goal_type: 'collect_email' | 'collect_phone' | 'schedule_call' | 'schedule_meeting' | 'send_proposal' | 'send_info' | 'handle_objection' | 'close_deal' | 'qualify_lead' | 'get_decision_maker'
   goal_type_display: string
-  status: 'active' | 'completed' | 'abandoned'
+  status: 'active' | 'completed' | 'cancelled'
   status_display: string
   priority: 1 | 2 | 3
   priority_display: string
-  description: string
   target_value: string
-  achieved_value: string
-  attempts: number
-  is_ai_generated: boolean
+  current_value: string
+  notes: string
   completed_at: string | null
   created_at: string
+  updated_at: string
 }
 
 export interface CreateTaskData {
@@ -1105,12 +1026,12 @@ export function updateAIConfig(data: UpdateAIConfigData) {
 }
 
 // Auth types
-export type UserRole = 'admin' | 'manager'
-export type OrganizationRole = 'owner' | 'admin' | 'member'
+export type UserRole = 'admin' | 'support' | 'tax_accountant'
 
 export const USER_ROLE_LABELS: Record<UserRole, string> = {
-  admin: 'Администратор',
-  manager: 'Менеджер',
+  admin: 'Admin / Manager',
+  support: 'Support',
+  tax_accountant: 'Tax Accountant',
 }
 
 export interface User {
@@ -1121,12 +1042,10 @@ export interface User {
   is_superadmin: boolean
   is_active: boolean
   role: UserRole
-  role_display: string
   language: 'en' | 'ru'
   current_organization_id: number | null
   current_organization_slug: string | null
   current_organization_name: string | null
-  current_organization_role: OrganizationRole | null
   created_at: string
   updated_at: string
 }
@@ -1140,10 +1059,6 @@ export interface AdminUser {
   role_display: string
   is_active: boolean
   is_admin: boolean
-  organization_id: number | null
-  organization_slug: string | null
-  organization_name: string | null
-  organization_role: OrganizationRole | null
   last_login: string | null
   created_at: string
 }
@@ -1152,7 +1067,7 @@ export interface AdminStats {
   total_users: number
   active_users: number
   new_this_month: number
-  role_breakdown: Partial<Record<UserRole, number>>
+  role_breakdown: Record<UserRole, number>
 }
 
 export interface AdminUsersParams {
@@ -1493,69 +1408,6 @@ export function updatePlaybook(id: number, data: Partial<Omit<Playbook, 'id' | '
 
 export function deletePlaybook(id: number) {
   return api.delete(`/playbooks/${id}/`)
-}
-
-// ── Reply Templates ───────────────────────────────────────────────────────────
-
-export type ReplyTemplateChannel = 'all' | 'telegram' | 'instagram' | 'whatsapp'
-
-export interface ReplyTemplate {
-  id: number
-  category: number
-  category_name: string
-  title: string
-  text: string
-  channel: ReplyTemplateChannel
-  tags: string[]
-  order: number
-  is_active: boolean
-  created_at: string
-  updated_at: string
-}
-
-export interface ReplyTemplateCategory {
-  id: number
-  name: string
-  order: number
-  is_active: boolean
-  templates: ReplyTemplate[]
-  created_at: string
-  updated_at: string
-}
-
-export type ReplyTemplateInput = Partial<Pick<ReplyTemplate, 'category' | 'title' | 'text' | 'channel' | 'tags' | 'order' | 'is_active'>>
-
-export function fetchReplyTemplateCategories() {
-  return api.get<ReplyTemplateCategory[]>('/reply-template-categories/')
-}
-
-export function createReplyTemplateCategory(data: { name: string; order?: number; is_active?: boolean }) {
-  return api.post<ReplyTemplateCategory>('/reply-template-categories/', data)
-}
-
-export function updateReplyTemplateCategory(id: number, data: Partial<Pick<ReplyTemplateCategory, 'name' | 'order' | 'is_active'>>) {
-  return api.patch<ReplyTemplateCategory>(`/reply-template-categories/${id}/`, data)
-}
-
-export function deleteReplyTemplateCategory(id: number) {
-  return api.delete(`/reply-template-categories/${id}/`)
-}
-
-export function fetchReplyTemplates(channel?: ReplyTemplateChannel | 'all') {
-  const qs = channel ? `?channel=${channel}` : ''
-  return api.get<ReplyTemplate[]>(`/reply-templates/${qs}`)
-}
-
-export function createReplyTemplate(data: Required<Pick<ReplyTemplate, 'category' | 'title' | 'text'>> & Partial<Pick<ReplyTemplate, 'channel' | 'tags' | 'order' | 'is_active'>>) {
-  return api.post<ReplyTemplate>('/reply-templates/', data)
-}
-
-export function updateReplyTemplate(id: number, data: ReplyTemplateInput) {
-  return api.patch<ReplyTemplate>(`/reply-templates/${id}/`, data)
-}
-
-export function deleteReplyTemplate(id: number) {
-  return api.delete(`/reply-templates/${id}/`)
 }
 
 // Must use raw fetch — api.post() calls JSON.stringify which corrupts FormData

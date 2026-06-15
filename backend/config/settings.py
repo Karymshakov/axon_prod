@@ -256,7 +256,11 @@ AI_AGENT_BEAT_SECONDS = env.float('AI_AGENT_BEAT_SECONDS', default=60.0)
 CELERY_BEAT_SCHEDULE = {
     'ai-agent-check': {
         'task': 'leads.run_agent_check',
+<<<<<<< HEAD
         'schedule': AI_AGENT_BEAT_SECONDS,
+=======
+        'schedule': 60.0,  # Every 1 min — catches short promises ("через пару часов")
+>>>>>>> 4834611ce65171b0f637ae0dc4e5b0d6b0ba1e07
     },
 }
 

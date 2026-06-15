@@ -6,7 +6,7 @@ from .views import (
     room_combination_room_types, create_custom_combination, delete_custom_combination,
     hide_auto_combination,
     HotelProfileLinkViewSet, HotelPolicyViewSet, HotelFAQViewSet, HandoverContactViewSet,
-    PlaybookViewSet, ReplyTemplateCategoryViewSet, ReplyTemplateViewSet, RoomPricingViewSet,
+    PlaybookViewSet, RoomPricingViewSet,
 )
 
 router = DefaultRouter()
@@ -15,8 +15,6 @@ router.register(r'hotel-policies', HotelPolicyViewSet, basename='hotel-policy')
 router.register(r'hotel-faqs', HotelFAQViewSet, basename='hotel-faq')
 router.register(r'handover-contacts', HandoverContactViewSet, basename='handover-contact')
 router.register(r'playbooks', PlaybookViewSet, basename='playbook')
-router.register(r'reply-template-categories', ReplyTemplateCategoryViewSet, basename='reply-template-category')
-router.register(r'reply-templates', ReplyTemplateViewSet, basename='reply-template')
 router.register(r'room-pricing', RoomPricingViewSet, basename='room-pricing')
 
 urlpatterns = [

@@ -2,7 +2,7 @@ import asyncio
 import os
 import logging
 import requests
-from rest_framework.decorators import api_view, permission_classes
+from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from rest_framework import status
 from .telegram_service import telegram_service
@@ -11,7 +11,6 @@ from .whatsapp_service import whatsapp_service
 from .ringcentral_service import ringcentral_service
 from .models import TelegramConfig, RingCentralConfig, AIConfig, InstagramAppConfig, WhatsAppAppConfig
 from .serializers import AIConfigSerializer
-from apps.organizations.permissions import IsOrganizationAdmin
 
 
 class _OrgNotSet:
@@ -41,47 +40,6 @@ def _no_org_response(connected_key='configured'):
     return R({connected_key: False})
 
 logger = logging.getLogger(__name__)
-
-
-def _user_display_name(user) -> str:
-    if not user or not getattr(user, 'is_authenticated', False):
-        return 'Менеджер'
-    return user.name or user.email or 'Менеджер'
-
-
-def _user_initials(user) -> str:
-    name = _user_display_name(user).strip()
-    if '@' in name:
-        name = name.split('@', 1)[0].replace('.', ' ').replace('_', ' ')
-    parts = [part for part in name.split() if part]
-    if not parts:
-        return 'М'
-    if len(parts) == 1:
-        return parts[0][:2].upper()
-    return f'{parts[0][0]}{parts[1][0]}'.upper()
-
-
-def _manual_sender_metadata(request) -> dict:
-    user = request.user
-    if not user or not getattr(user, 'is_authenticated', False):
-        return {'is_manager_manual': True}
-    return {
-        'is_manager_manual': True,
-        'sent_by_user_id': user.id,
-        'sent_by_name': _user_display_name(user),
-        'sent_by_email': user.email,
-        'sent_by_initials': _user_initials(user),
-    }
-
-
-def _get_lead_for_current_org(Lead, request, lead_id):
-    qs = Lead.objects.all()
-    if not getattr(request.user, 'is_superadmin', False):
-        org = getattr(request.user, 'current_organization', None)
-        if org is None:
-            return None
-        qs = qs.filter(organization=org)
-    return qs.filter(id=lead_id).first()
 
 
 def _get_webhook_base_url():
@@ -178,7 +136,6 @@ def telegram_integration_status(request):
 
 
 @api_view(['POST'])
-@permission_classes([IsOrganizationAdmin])
 def save_telegram_token(request):
     """Save Telegram bot token to database."""
     bot_token = request.data.get('bot_token', '').strip()
@@ -272,7 +229,6 @@ def save_telegram_token(request):
 
 
 @api_view(['POST'])
-@permission_classes([IsOrganizationAdmin])
 def register_telegram_webhook(request):
     """Re-register the Telegram webhook URL for an already-connected bot."""
     org = _get_org(request)
@@ -293,7 +249,6 @@ def register_telegram_webhook(request):
 
 
 @api_view(['POST'])
-@permission_classes([IsOrganizationAdmin])
 def disconnect_telegram(request):
     """Disconnect Telegram bot by deleting the configuration."""
     try:
@@ -330,12 +285,8 @@ def send_telegram_message_from_comms(request):
     try:
         from .models import Lead, LeadActivity
 
-        lead = _get_lead_for_current_org(Lead, request, lead_id)
-        if not lead:
-            return Response({
-                'success': False,
-                'error': 'Lead not found'
-            }, status=status.HTTP_404_NOT_FOUND)
+        # Get the lead
+        lead = Lead.objects.get(id=lead_id)
 
         if not lead.telegram_chat_id:
             return Response({
@@ -366,7 +317,7 @@ def send_telegram_message_from_comms(request):
             metadata={
                 'message_id': result.get('message_id'),
                 'text': message_text,
-                **_manual_sender_metadata(request),
+                'is_manager_manual': True,
             }
         )
 
@@ -375,6 +326,11 @@ def send_telegram_message_from_comms(request):
             'message_id': result.get('message_id'),
         })
 
+    except Lead.DoesNotExist:
+        return Response({
+            'success': False,
+            'error': 'Lead not found'
+        }, status=status.HTTP_404_NOT_FOUND)
     except Exception as e:
         return Response({
             'success': False,
@@ -395,7 +351,6 @@ def get_ai_config(request):
 
 
 @api_view(['PATCH'])
-@permission_classes([IsOrganizationAdmin])
 def update_ai_config(request):
     """Update AI configuration settings."""
     org = _get_org(request)
@@ -419,7 +374,6 @@ def save_instagram_token(request):
 
 
 @api_view(['POST'])
-@permission_classes([IsOrganizationAdmin])
 def save_instagram_app_credentials(request):
     """Save Meta App credentials (App ID, App Secret, Webhook Verify Token) to DB."""
     app_id = request.data.get('app_id', '').strip()
@@ -455,7 +409,6 @@ def save_instagram_app_credentials(request):
 
 
 @api_view(['POST'])
-@permission_classes([IsOrganizationAdmin])
 def save_whatsapp_app_credentials(request):
     """Save Meta App credentials (App ID, App Secret) for WhatsApp OAuth to DB."""
     app_id = request.data.get('app_id', '').strip()
@@ -488,7 +441,6 @@ GRAPH_URL = 'https://graph.facebook.com/v25.0'
 
 
 @api_view(['POST'])
-@permission_classes([IsOrganizationAdmin])
 def save_whatsapp_direct_config(request):
     """Connect WhatsApp by directly entering Phone Number ID, WABA ID, and Access Token.
 
@@ -607,7 +559,6 @@ def save_whatsapp_direct_config(request):
 
 
 @api_view(['POST'])
-@permission_classes([IsOrganizationAdmin])
 def resubscribe_instagram_webhook(request):
     """Subscribe (or re-subscribe) the connected Instagram account to receive webhook events.
 
@@ -658,12 +609,8 @@ def send_instagram_message_from_comms(request):
     try:
         from .models import Lead, LeadActivity
 
-        lead = _get_lead_for_current_org(Lead, request, lead_id)
-        if not lead:
-            return Response({
-                'success': False,
-                'error': 'Lead not found'
-            }, status=status.HTTP_404_NOT_FOUND)
+        # Get the lead
+        lead = Lead.objects.get(id=lead_id)
 
         if not lead.instagram_user_id:
             return Response({
@@ -700,7 +647,7 @@ def send_instagram_message_from_comms(request):
                 'message_id': result.get('message_id'),
                 'text': message_text,
                 'echo_origin': LeadActivity.ECHO_ORIGIN_CRM,
-                **_manual_sender_metadata(request),
+                'is_manager_manual': True,
             }
         )
 
@@ -709,6 +656,11 @@ def send_instagram_message_from_comms(request):
             'message_id': result.get('message_id'),
         })
 
+    except Lead.DoesNotExist:
+        return Response({
+            'success': False,
+            'error': 'Lead not found'
+        }, status=status.HTTP_404_NOT_FOUND)
     except Exception as e:
         logger.error(f"Error sending Instagram message: {e}", exc_info=True)
         return Response({
@@ -732,12 +684,8 @@ def send_whatsapp_message_from_comms(request):
     try:
         from .models import Lead, LeadActivity
 
-        lead = _get_lead_for_current_org(Lead, request, lead_id)
-        if not lead:
-            return Response({
-                'success': False,
-                'error': 'Lead not found'
-            }, status=status.HTTP_404_NOT_FOUND)
+        # Get the lead
+        lead = Lead.objects.get(id=lead_id)
 
         if not lead.whatsapp_phone:
             return Response({
@@ -771,7 +719,7 @@ def send_whatsapp_message_from_comms(request):
             metadata={
                 'message_id': result.get('message_id'),
                 'text': message_text,
-                **_manual_sender_metadata(request),
+                'is_manager_manual': True,
             }
         )
 
@@ -782,6 +730,11 @@ def send_whatsapp_message_from_comms(request):
             'message_id': result.get('message_id'),
         })
 
+    except Lead.DoesNotExist:
+        return Response({
+            'success': False,
+            'error': 'Lead not found'
+        }, status=status.HTTP_404_NOT_FOUND)
     except Exception as e:
         logger.error(f"Error sending WhatsApp message: {e}", exc_info=True)
         return Response({
@@ -1010,7 +963,6 @@ def send_whatsapp_to_customer(request):
 # =============================================================================
 
 @api_view(['POST'])
-@permission_classes([IsOrganizationAdmin])
 def run_agent_now(request):
     """Manually trigger the AI agent to check all leads (force mode - skips timing checks)."""
     from .agent_service import agent_service
@@ -1059,7 +1011,6 @@ def ringcentral_integration_status(request):
 
 
 @api_view(['POST'])
-@permission_classes([IsOrganizationAdmin])
 def save_ringcentral_credentials(request):
     """Save RingCentral credentials and test the connection."""
     client_id = request.data.get('client_id', '').strip()
@@ -1133,7 +1084,6 @@ def save_ringcentral_credentials(request):
 
 
 @api_view(['POST'])
-@permission_classes([IsOrganizationAdmin])
 def disconnect_ringcentral(request):
     """Remove RingCentral credentials and cancel webhook subscription."""
     try:
@@ -1161,7 +1111,6 @@ def disconnect_ringcentral(request):
 
 
 @api_view(['POST'])
-@permission_classes([IsOrganizationAdmin])
 def reregister_ringcentral_webhook(request):
     """Cancel any existing webhook subscription and register a fresh one with the correct URL."""
     try:
@@ -1217,12 +1166,7 @@ def send_ringcentral_sms_from_comms(request):
         }, status=status.HTTP_400_BAD_REQUEST)
 
     try:
-        lead = _get_lead_for_current_org(Lead, request, lead_id)
-        if not lead:
-            return Response({
-                'success': False,
-                'error': 'Lead not found',
-            }, status=status.HTTP_404_NOT_FOUND)
+        lead = Lead.objects.get(id=lead_id)
         to_phone = lead.phone or lead.mobile_phone or lead.office_phone
         if not to_phone:
             return Response({
@@ -1245,12 +1189,16 @@ def send_ringcentral_sms_from_comms(request):
                 'text': message_text,
                 'to': to_phone,
                 'message_id': str(result.get('id', '')),
-                **_manual_sender_metadata(request),
             }
         )
 
         return Response({'success': True, 'message_id': str(result.get('id', ''))})
 
+    except Lead.DoesNotExist:
+        return Response({
+            'success': False,
+            'error': 'Lead not found',
+        }, status=status.HTTP_404_NOT_FOUND)
     except Exception as e:
         logger.error(f'Error sending RingCentral SMS: {e}', exc_info=True)
         return Response({

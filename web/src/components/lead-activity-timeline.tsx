@@ -43,47 +43,6 @@ export function LeadActivityTimeline({ leadId }: LeadActivityTimelineProps) {
     }
   }
 
-  const getActivityTitle = (activity: LeadActivity) => {
-    const labels: Record<string, string> = {
-      status_change: 'Этап изменен',
-      note_added: 'Добавлена заметка',
-      lead_created: 'Лид создан',
-      lead_updated: 'Лид обновлен',
-      task_created: 'Задача создана',
-      task_completed: 'Задача выполнена',
-      goal_created: 'Цель создана',
-      goal_completed: 'Цель выполнена',
-      telegram_sent: 'Сообщение отправлено',
-      telegram_received: 'Сообщение получено',
-      instagram_sent: 'Сообщение отправлено',
-      instagram_received: 'Сообщение получено',
-      whatsapp_sent: 'Сообщение отправлено',
-      whatsapp_received: 'Сообщение получено',
-    }
-    return labels[activity.activity_type] ?? activity.activity_type_display ?? 'Событие'
-  }
-
-  const formatActivityDescription = (description: string) => {
-    const cleaned = description.trim().replace(/^[^\p{L}\p{N}]+/u, '').trim()
-    const manualControlMatch = cleaned.match(/^(.+?) took manual control\s+[-—]\s+AI paused$/i)
-    if (manualControlMatch) {
-      return `${manualControlMatch[1]} взял(а) управление: ИИ поставлен на паузу`
-    }
-
-    const handbackMatch = cleaned.match(/^AI agent re-enabled by (.+)$/i)
-    if (handbackMatch) {
-      return `ИИ снова включен: ${handbackMatch[1]}`
-    }
-
-    return cleaned
-      .replace(/^Lead converted to customer$/i, 'Лид переведен в клиента')
-      .replace(/^Telegram message sent:\s*/i, 'Отправлено в Telegram: ')
-      .replace(/^Instagram message sent:\s*/i, 'Отправлено в Instagram: ')
-      .replace(/^WhatsApp message sent:\s*/i, 'Отправлено в WhatsApp: ')
-      .replace(/^AI auto-response:\s*/i, 'Ответ ИИ: ')
-      .replace(/^Manager reply:\s*/i, 'Ответ менеджера: ')
-  }
-
   return (
     <Card>
       <CardHeader>
@@ -113,8 +72,8 @@ export function LeadActivityTimeline({ leadId }: LeadActivityTimelineProps) {
 
                 {/* Activity content */}
                 <div className="flex-1 pb-4 min-w-0">
-                  <p className="text-sm font-medium">{getActivityTitle(activity)}</p>
-                  <p className="text-sm text-muted-foreground">{formatActivityDescription(activity.description)}</p>
+                  <p className="text-sm font-medium">{activity.activity_type_display}</p>
+                  <p className="text-sm text-muted-foreground">{activity.description}</p>
                   <p className="text-xs text-muted-foreground mt-1">
                     {formatDate(activity.created_at)}
                   </p>

@@ -75,14 +75,9 @@ import { useAuth } from '@/contexts/auth-context'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import {
   buildInternalToolsVisibilityOrgSettings,
-  buildLeadDiscoverySourcesOrgSettings,
-  createLeadDiscoverySourceValue,
   getDefaultInternalToolsVisibility,
-  getDefaultLeadDiscoverySourceOptions,
   getInternalToolsVisibilitySettings,
-  getLeadDiscoverySourceOptions,
   type InternalToolsVisibilitySettings,
-  type LeadDiscoverySourceOption,
 } from '@/lib/org-settings'
 
 const INSTAGRAM_OAUTH_RESULT_STORAGE_KEY = 'cayu.instagram.oauth.result'
@@ -107,19 +102,6 @@ type InstagramOAuthResult = {
 }
 
 type InstagramSyncSource = 'popup_open' | 'popup_closed' | 'message' | 'storage' | 'visibility'
-
-function getApiErrorMessage(error: unknown, fallback: string): string {
-  if (error instanceof ApiError) {
-    const data = error.data
-    if (data && typeof data === 'object') {
-      const detail = (data as Record<string, unknown>).detail ?? (data as Record<string, unknown>).error
-      if (typeof detail === 'string') return detail
-      const firstValue = Object.values(data as Record<string, unknown>)[0]
-      if (Array.isArray(firstValue) && typeof firstValue[0] === 'string') return firstValue[0]
-    }
-  }
-  return fallback
-}
 
 const wait = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms))
 
@@ -183,9 +165,6 @@ function SettingsPage() {
   // Team + Org state
   const { user } = useAuth()
   const orgSlug = user?.current_organization_slug ?? ''
-  const currentOrgRole = user?.current_organization_role
-  const isOwnerOrAdmin = Boolean(user?.is_superadmin || user?.is_admin || currentOrgRole === 'owner' || currentOrgRole === 'admin')
-  const isOwner = Boolean(user?.is_superadmin || currentOrgRole === 'owner')
   const [inviteOpen, setInviteOpen] = useState(false)
   const [inviteEmail, setInviteEmail] = useState('')
   const [inviteRole, setInviteRole] = useState<'member' | 'admin'>('member')
@@ -199,30 +178,21 @@ function SettingsPage() {
   const [internalToolsVisibility, setInternalToolsVisibility] = useState<InternalToolsVisibilitySettings>(
     getDefaultInternalToolsVisibility,
   )
-  const [leadDiscoverySources, setLeadDiscoverySources] = useState<LeadDiscoverySourceOption[]>(
-    getDefaultLeadDiscoverySourceOptions,
-  )
-  const [discoverySourceName, setDiscoverySourceName] = useState('')
-  const [editingDiscoverySourceValue, setEditingDiscoverySourceValue] = useState<string | null>(null)
-  const [discoverySourceError, setDiscoverySourceError] = useState('')
 
 
   const { data: stages = [], isLoading } = useQuery({
     queryKey: ['pipeline-stages'],
     queryFn: fetchPipelineStages,
-    enabled: isOwnerOrAdmin,
   })
 
   const { data: segments = [], isLoading: isLoadingSegments } = useQuery({
     queryKey: ['segments'],
     queryFn: fetchSegments,
-    enabled: isOwnerOrAdmin,
   })
 
   const { data: telegramStatus } = useQuery({
     queryKey: ['telegram-integration-status'],
     queryFn: fetchTelegramIntegrationStatus,
-    enabled: isOwnerOrAdmin,
   })
 
   const { data: instagramStatus, refetch: refetchInstagramStatus } = useQuery({
@@ -233,7 +203,7 @@ function SettingsPage() {
     // (cross-origin iframe timing or CSP can silently drop postMessage).
     // Stops automatically once isInstagramConnecting is false.
     refetchInterval: isInstagramConnecting ? 2000 : false,
-    enabled: !!user && isOwnerOrAdmin,
+    enabled: !!user,
   })
 
   useEffect(() => {
@@ -475,14 +445,12 @@ function SettingsPage() {
   const { data: whatsappStatus } = useQuery({
     queryKey: ['whatsapp-integration-status'],
     queryFn: fetchWhatsAppIntegrationStatus,
-    enabled: isOwnerOrAdmin,
   })
 
 
   const { data: aiConfig } = useQuery({
     queryKey: ['ai-config'],
     queryFn: fetchAIConfig,
-    enabled: isOwnerOrAdmin,
   })
 
   const updateAIConfigMutation = useMutation({
@@ -512,22 +480,22 @@ function SettingsPage() {
         <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
           <div className="space-y-2">
             <div className="flex flex-wrap items-center gap-2">
-              <span className="text-sm font-medium">Управление AI-ответами</span>
+              <span className="text-sm font-medium">AI Message Control</span>
               <Badge className={isPaused ? 'bg-amber-500 text-white hover:bg-amber-500' : 'bg-emerald-600 text-white hover:bg-emerald-600'}>
                 {isPaused ? (
-                  <><AlertTriangleIcon className="mr-1 h-3 w-3" />На паузе</>
+                  <><AlertTriangleIcon className="mr-1 h-3 w-3" />Paused</>
                 ) : (
-                  <><CheckCircleIcon className="mr-1 h-3 w-3" />Активен</>
+                  <><CheckCircleIcon className="mr-1 h-3 w-3" />Active</>
                 )}
               </Badge>
             </div>
             <p className={`text-sm ${isPaused ? 'text-amber-900 dark:text-amber-100' : 'text-emerald-900 dark:text-emerald-100'}`}>
               {isPaused
-                ? `${channelLabel}: AI не отправляет ответы и не запускает активные автоматизации, пока вы не включите канал.`
-                : `${channelLabel}: AI отвечает и запускает автоматизации для подходящих диалогов.`}
+                ? `${channelLabel} AI replies and AI-driven automation are disabled for all leads until you resume them.`
+                : `${channelLabel} AI replies and automation are active for eligible conversations.`}
             </p>
             <p className="text-xs text-muted-foreground">
-              Сообщения команды продолжают отправляться вручную даже при паузе AI.
+              Manual team messages continue working normally even while AI is paused for this channel.
             </p>
           </div>
           <Button
@@ -538,11 +506,11 @@ function SettingsPage() {
             onClick={() => handleAIConfigChange({ [channelKey]: !isPaused })}
           >
             {isUpdatingThisChannel ? (
-              <><Loader2Icon className="mr-2 h-4 w-4 animate-spin" />Обновление...</>
+              <><Loader2Icon className="mr-2 h-4 w-4 animate-spin" />Updating...</>
             ) : isPaused ? (
-              <><PlayCircleIcon className="mr-2 h-4 w-4" />Включить AI</>
+              <><PlayCircleIcon className="mr-2 h-4 w-4" />Resume AI</>
             ) : (
-              <><PauseCircleIcon className="mr-2 h-4 w-4" />Поставить на паузу</>
+              <><PauseCircleIcon className="mr-2 h-4 w-4" />Pause AI</>
             )}
           </Button>
         </div>
@@ -554,7 +522,7 @@ function SettingsPage() {
   const { data: orgMembers = [], isLoading: membersLoading } = useQuery({
     queryKey: ['org-members', orgSlug],
     queryFn: () => fetchOrgMembers(orgSlug),
-    enabled: !!orgSlug && isOwnerOrAdmin,
+    enabled: !!orgSlug,
   })
 
   const { data: orgs = [] } = useQuery({
@@ -570,18 +538,14 @@ function SettingsPage() {
 
   useEffect(() => {
     setInternalToolsVisibility(getInternalToolsVisibilitySettings(currentOrg?.org_settings))
-    setLeadDiscoverySources(getLeadDiscoverySourceOptions(currentOrg?.org_settings))
   }, [currentOrg?.org_settings])
 
+  const currentUserMember = orgMembers.find(m => m.user_email === user?.email)
+  const isOwnerOrAdmin = currentUserMember?.role === 'owner' || currentUserMember?.role === 'admin'
+  const isOwner = currentUserMember?.role === 'owner'
   const canManageInternalToolsVisibility = isOwnerOrAdmin
   const canAccessDevDatabaseExport = isOwnerOrAdmin && internalToolsVisibility.showDevDatabaseExport
-  const activeTab = !isOwnerOrAdmin
-    ? 'preferences'
-    : tab === 'team'
-      ? 'general'
-    : !canAccessDevDatabaseExport && tab === 'dev-database-export'
-      ? 'general'
-      : tab
+  const activeTab = !canAccessDevDatabaseExport && tab === 'dev-database-export' ? 'general' : tab
 
   const updateInternalToolsVisibilityMutation = useMutation({
     mutationFn: async (nextVisibility: InternalToolsVisibilitySettings) => {
@@ -596,53 +560,15 @@ function SettingsPage() {
     onSuccess: (updatedOrganization) => {
       queryClient.setQueryData(['organizations'], (existing: typeof orgs | undefined) => {
         if (!existing) {
-          return [updatedOrganization]
+          return existing
         }
 
-        const nextOrganizations = existing.map((organization) => (
+        return existing.map((organization) => (
           organization.slug === updatedOrganization.slug ? updatedOrganization : organization
         ))
-        return nextOrganizations.some((organization) => organization.slug === updatedOrganization.slug)
-          ? nextOrganizations
-          : [...nextOrganizations, updatedOrganization]
       })
       void queryClient.invalidateQueries({ queryKey: ['organizations'] })
       toast.success('Видимость инструментов разработчика обновлена')
-    },
-  })
-
-  const updateLeadDiscoverySourcesMutation = useMutation({
-    mutationFn: async (nextSources: LeadDiscoverySourceOption[]) => {
-      if (!orgSlug) {
-        throw new Error('Organization is required')
-      }
-
-      return updateOrganization(orgSlug, {
-        org_settings: buildLeadDiscoverySourcesOrgSettings(currentOrg?.org_settings, nextSources),
-      })
-    },
-    onSuccess: (updatedOrganization) => {
-      queryClient.setQueryData(['organizations'], (existing: typeof orgs | undefined) => {
-        if (!existing) {
-          return [updatedOrganization]
-        }
-
-        const nextOrganizations = existing.map((organization) => (
-          organization.slug === updatedOrganization.slug ? updatedOrganization : organization
-        ))
-        return nextOrganizations.some((organization) => organization.slug === updatedOrganization.slug)
-          ? nextOrganizations
-          : [...nextOrganizations, updatedOrganization]
-      })
-      setLeadDiscoverySources(getLeadDiscoverySourceOptions(updatedOrganization.org_settings))
-      setDiscoverySourceError('')
-      toast.success('Источники лидов сохранены')
-    },
-    onError: (error) => {
-      const message = getApiErrorMessage(error, 'Не удалось сохранить источники лидов')
-      setLeadDiscoverySources(getLeadDiscoverySourceOptions(currentOrg?.org_settings))
-      setDiscoverySourceError(message)
-      toast.error(message)
     },
   })
 
@@ -707,62 +633,6 @@ function SettingsPage() {
         toast.error('Не удалось обновить видимость инструментов разработчика')
       },
     })
-  }
-
-  const saveLeadDiscoverySources = (nextSources: LeadDiscoverySourceOption[]) => {
-    setLeadDiscoverySources(nextSources)
-    updateLeadDiscoverySourcesMutation.mutate(nextSources)
-  }
-
-  const handleSaveDiscoverySource = () => {
-    const label = discoverySourceName.trim()
-    setDiscoverySourceError('')
-    if (!label) {
-      const message = 'Введите название источника'
-      setDiscoverySourceError(message)
-      toast.error(message)
-      return
-    }
-
-    if (editingDiscoverySourceValue) {
-      saveLeadDiscoverySources(
-        leadDiscoverySources.map((source) => (
-          source.value === editingDiscoverySourceValue ? { ...source, label } : source
-        )),
-      )
-    } else {
-      const value = createLeadDiscoverySourceValue(label, leadDiscoverySources)
-      saveLeadDiscoverySources([...leadDiscoverySources, { value, label }])
-    }
-
-    setDiscoverySourceName('')
-    setEditingDiscoverySourceValue(null)
-  }
-
-  const handleEditDiscoverySource = (source: LeadDiscoverySourceOption) => {
-    setDiscoverySourceName(source.label)
-    setEditingDiscoverySourceValue(source.value)
-  }
-
-  const handleDeleteDiscoverySource = (sourceValue: string) => {
-    const nextSources = leadDiscoverySources.filter((source) => source.value !== sourceValue)
-    if (nextSources.length === 0) {
-      toast.error('Оставьте хотя бы один источник')
-      return
-    }
-    saveLeadDiscoverySources(nextSources)
-    setDiscoverySourceError('')
-    if (editingDiscoverySourceValue === sourceValue) {
-      setDiscoverySourceName('')
-      setEditingDiscoverySourceValue(null)
-    }
-  }
-
-  const handleResetDiscoverySources = () => {
-    setDiscoverySourceName('')
-    setEditingDiscoverySourceValue(null)
-    setDiscoverySourceError('')
-    saveLeadDiscoverySources(getDefaultLeadDiscoverySourceOptions())
   }
 
   const handleExportDevDatabase = async () => {
@@ -1273,27 +1143,20 @@ function SettingsPage() {
           <div className="px-4 lg:px-6">
             <Tabs value={activeTab} onValueChange={(t) => navigate({ to: '/settings', search: { tab: t } })} className="space-y-6">
               <TabsList>
-                {isOwnerOrAdmin && (
-                  <>
-                    <TabsTrigger value="general">{t('settings.tabs.general')}</TabsTrigger>
-                    <TabsTrigger value="integrations">
-                      <PlugIcon className="h-4 w-4 mr-2" />
-                      {t('settings.tabs.integrations')}
-                    </TabsTrigger>
-                    <TabsTrigger value="ai-support">
-                      <BrainCircuitIcon className="h-4 w-4 mr-2" />
-                      {t('settings.tabs.aiAgent')}
-                    </TabsTrigger>
-                  </>
-                )}
+                <TabsTrigger value="general">{t('settings.tabs.general')}</TabsTrigger>
+                <TabsTrigger value="integrations">
+                  <PlugIcon className="h-4 w-4 mr-2" />
+                  {t('settings.tabs.integrations')}
+                </TabsTrigger>
+                <TabsTrigger value="ai-support">
+                  <BrainCircuitIcon className="h-4 w-4 mr-2" />
+                  {t('settings.tabs.aiAgent')}
+                </TabsTrigger>
                 <TabsTrigger value="preferences">
                   {t('settings.tabs.preferences')}
                 </TabsTrigger>
-                {isOwnerOrAdmin && (
-                  <>
-                    <TabsTrigger value="organization">Организация</TabsTrigger>
-                  </>
-                )}
+                <TabsTrigger value="team">Команда</TabsTrigger>
+                <TabsTrigger value="organization">Организация</TabsTrigger>
                 {canAccessDevDatabaseExport && (
                   <TabsTrigger value="dev-database-export">
                     <DatabaseIcon className="mr-2 h-4 w-4" />
@@ -1423,98 +1286,6 @@ function SettingsPage() {
                           ))}
                         </div>
                       )}
-                    </CardContent>
-                  </Card>
-
-                  <Card>
-                    <CardHeader>
-                      <CardTitle>Источники “Откуда узнал”</CardTitle>
-                      <CardDescription>
-                        Настройте варианты, которые менеджеры выбирают в карточке лида и фильтрах.
-                      </CardDescription>
-                    </CardHeader>
-                    <CardContent className="space-y-4">
-                      <div className="flex flex-col gap-2 sm:flex-row">
-                        <Input
-                          value={discoverySourceName}
-                          onChange={(event) => {
-                            setDiscoverySourceName(event.target.value)
-                            setDiscoverySourceError('')
-                          }}
-                          onKeyDown={(event) => {
-                            if (event.key === 'Enter') {
-                              event.preventDefault()
-                              handleSaveDiscoverySource()
-                            }
-                          }}
-                          placeholder="Например: TikTok, 2ГИС, блогер, рекомендация партнера"
-                          disabled={updateLeadDiscoverySourcesMutation.isPending}
-                        />
-                        <div className="flex gap-2">
-                          <Button
-                            onClick={handleSaveDiscoverySource}
-                            disabled={updateLeadDiscoverySourcesMutation.isPending}
-                            className="shrink-0"
-                          >
-                            {updateLeadDiscoverySourcesMutation.isPending
-                              ? 'Сохраняем...'
-                              : editingDiscoverySourceValue ? 'Сохранить' : 'Добавить'}
-                          </Button>
-                          {editingDiscoverySourceValue ? (
-                            <Button
-                              variant="outline"
-                              onClick={() => {
-                                setDiscoverySourceName('')
-                                setEditingDiscoverySourceValue(null)
-                              }}
-                              disabled={updateLeadDiscoverySourcesMutation.isPending}
-                            >
-                              Отмена
-                            </Button>
-                          ) : null}
-                        </div>
-                      </div>
-                      {discoverySourceError ? (
-                        <p className="text-sm text-destructive">{discoverySourceError}</p>
-                      ) : null}
-
-                      <div className="space-y-2">
-                        {leadDiscoverySources.map((source) => (
-                          <div key={source.value} className="flex items-center gap-2 rounded-md bg-muted/50 p-3">
-                            <div className="min-w-0 flex-1">
-                              <span className="font-medium text-sm">{source.label}</span>
-                              <span className="ml-2 text-xs text-muted-foreground">({source.value})</span>
-                            </div>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              onClick={() => handleEditDiscoverySource(source)}
-                              disabled={updateLeadDiscoverySourcesMutation.isPending}
-                              aria-label="Редактировать источник"
-                            >
-                              <PencilIcon className="h-4 w-4" />
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              onClick={() => handleDeleteDiscoverySource(source.value)}
-                              disabled={updateLeadDiscoverySourcesMutation.isPending}
-                              aria-label="Удалить источник"
-                            >
-                              <TrashIcon className="h-4 w-4" />
-                            </Button>
-                          </div>
-                        ))}
-                      </div>
-
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={handleResetDiscoverySources}
-                        disabled={updateLeadDiscoverySourcesMutation.isPending}
-                      >
-                        Вернуть стандартный список
-                      </Button>
                     </CardContent>
                   </Card>
 

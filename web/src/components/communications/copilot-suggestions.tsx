@@ -49,7 +49,7 @@ export function CopilotSuggestions({ leadId, onSelectSuggestion }: CopilotSugges
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-1.5 text-purple-800 dark:text-purple-300">
           <SparklesIcon className="h-4 w-4 animate-pulse" />
-          <span className="text-xs font-bold uppercase tracking-wider">ИИ-ассистент</span>
+          <span className="text-xs font-bold uppercase tracking-wider">AI Co-pilot Ассистент</span>
         </div>
         
         <Button 

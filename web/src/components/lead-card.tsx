@@ -1,7 +1,6 @@
-import { MailIcon, PhoneIcon, FileTextIcon, DollarSignIcon, CalendarDaysIcon, HandIcon, InstagramIcon, MessageSquareIcon } from 'lucide-react'
+import { MailIcon, PhoneIcon, EyeIcon, DollarSignIcon, CalendarDaysIcon, HandIcon } from 'lucide-react'
 import { useNavigate } from '@tanstack/react-router'
-import type { MouseEvent } from 'react'
-import { getContactChannelLabel, resolveLeadContactChannel, type Lead } from '@/lib/api'
+import { type Lead } from '@/lib/api'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -24,14 +23,14 @@ export function InstagramIntentBadge({ tier }: { tier: NonNullable<Lead['instagr
 interface LeadCardProps {
   lead: Lead
   onEdit: (lead: Lead) => void
-  onOpen?: (lead: Lead) => void
-  onOpenChat?: (lead: Lead) => void
-  discoverySourceLabel?: string
 }
 
+<<<<<<< HEAD
 export function LeadCard({ lead, onOpen, onOpenChat }: LeadCardProps) {
+=======
+export function LeadCard({ lead }: LeadCardProps) {
+>>>>>>> 4834611ce65171b0f637ae0dc4e5b0d6b0ba1e07
   const navigate = useNavigate()
-  const channel = resolveLeadContactChannel(lead)
 
   const formatDate = (dateString: string | null) => {
     if (!dateString) return null
@@ -51,30 +50,15 @@ export function LeadCard({ lead, onOpen, onOpenChat }: LeadCardProps) {
     }).format(parseFloat(value))
   }
 
-  const handleOpen = () => {
-    if (onOpen) {
-      onOpen(lead)
-      return
-    }
-    navigate({ to: '/leads/$leadId', params: { leadId: lead.id.toString() } })
-  }
-
-  const handleOpenChat = (event: MouseEvent<HTMLButtonElement>) => {
-    event.stopPropagation()
-    if (onOpenChat) {
-      onOpenChat(lead)
-    }
-  }
-
   return (
-    <Card className="cursor-pointer transition-shadow hover:shadow-md" onClick={handleOpen}>
+    <Card className="cursor-pointer transition-shadow hover:shadow-md" onClick={() => navigate({ to: '/leads/$leadId', params: { leadId: lead.id.toString() } })}>
       <CardContent className="p-4">
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-1.5">
               <h4 className="font-semibold truncate">{lead.contact_person || 'Без имени'}</h4>
               {lead.ai_paused ? (
-                <span className="flex h-5 items-center gap-0.5 rounded-full bg-amber-500 px-1.5 text-[10px] font-semibold text-white shrink-0" title="ИИ приостановлен — ручное управление">
+                <span className="flex h-5 items-center gap-0.5 rounded-full bg-amber-500 px-1.5 text-[10px] font-semibold text-white shrink-0" title="AI приостановлен — ручное управление">
                   <HandIcon className="h-3 w-3" />
                 </span>
               ) : null}
@@ -88,53 +72,36 @@ export function LeadCard({ lead, onOpen, onOpenChat }: LeadCardProps) {
               e.stopPropagation()
               navigate({ to: '/leads/$leadId', params: { leadId: lead.id.toString() } })
             }}
-            aria-label="Открыть карточку лида"
-            title="Открыть карточку"
           >
-            <FileTextIcon className="h-4 w-4" />
+            <EyeIcon className="h-4 w-4" />
           </Button>
         </div>
 
         <div className="flex flex-wrap gap-1 mt-2">
-          {channel === 'instagram' && (
-            <button
-              type="button"
-              onClick={handleOpenChat}
-              className="inline-flex h-5 items-center gap-1 rounded-full border border-pink-200 bg-pink-50 px-1.5 text-[9px] font-medium text-pink-700 transition hover:shadow-sm dark:border-pink-900/50 dark:bg-pink-950/20 dark:text-pink-400"
-              title={`Открыть чат: ${getContactChannelLabel(channel)}`}
-              aria-label={`Открыть чат: ${getContactChannelLabel(channel)}`}
-            >
-              <InstagramIcon className="h-3 w-3" />
+          {lead.instagram_user_id && (
+            <Badge variant="outline" className="text-[9px] px-1 h-4 bg-pink-50 text-pink-700 border-pink-200 dark:bg-pink-950/20 dark:text-pink-400 dark:border-pink-900/50 gap-0.5">
               Insta
-            </button>
+            </Badge>
           )}
-          {channel === 'telegram' && (
-            <button
-              type="button"
-              onClick={handleOpenChat}
-              className="inline-flex h-5 items-center gap-1 rounded-full border border-blue-200 bg-blue-50 px-1.5 text-[9px] font-medium text-blue-700 transition hover:shadow-sm dark:border-blue-900/50 dark:bg-blue-950/20 dark:text-blue-400"
-              title={`Открыть чат: ${getContactChannelLabel(channel)}`}
-              aria-label={`Открыть чат: ${getContactChannelLabel(channel)}`}
-            >
-              <MessageSquareIcon className="h-3 w-3" />
+          {lead.telegram_chat_id && (
+            <Badge variant="outline" className="text-[9px] px-1 h-4 bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950/20 dark:text-blue-400 dark:border-blue-900/50 gap-0.5">
               TG
-            </button>
+            </Badge>
           )}
-          {channel === 'whatsapp' && (
-            <button
-              type="button"
-              onClick={handleOpenChat}
-              className="inline-flex h-5 items-center gap-1 rounded-full border border-green-200 bg-green-50 px-1.5 text-[9px] font-medium text-green-700 transition hover:shadow-sm dark:border-green-900/50 dark:bg-green-950/20 dark:text-green-400"
-              title={`Открыть чат: ${getContactChannelLabel(channel)}`}
-              aria-label={`Открыть чат: ${getContactChannelLabel(channel)}`}
-            >
-              <PhoneIcon className="h-3 w-3" />
+          {lead.whatsapp_phone && (
+            <Badge variant="outline" className="text-[9px] px-1 h-4 bg-green-50 text-green-700 border-green-200 dark:bg-green-950/20 dark:text-green-400 dark:border-green-900/50 gap-0.5">
               WA
-            </button>
+            </Badge>
           )}
           {lead.instagram_intent_tier ? (
             <InstagramIntentBadge tier={lead.instagram_intent_tier} />
           ) : null}
+<<<<<<< HEAD
+=======
+          {lead.source ? (
+            <LeadSourceBadge source={lead.source} />
+          ) : null}
+>>>>>>> 4834611ce65171b0f637ae0dc4e5b0d6b0ba1e07
         </div>
 
         <div className="mt-3 space-y-1.5">

@@ -1,4 +1,4 @@
-import { createFileRoute, Navigate } from '@tanstack/react-router'
+import { createFileRoute } from '@tanstack/react-router'
 import { useState, useCallback, useEffect, useRef, useMemo } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
@@ -103,20 +103,10 @@ import {
   type AgentConfig,
 } from '@/lib/api'
 import { Slider } from '@/components/ui/slider'
-import { useAuth } from '@/contexts/auth-context'
 
 export const Route = createFileRoute('/_app/flows')({
   component: FlowsPage,
 })
-
-function canManageWorkspace(user: ReturnType<typeof useAuth>['user']) {
-  return Boolean(
-    user?.is_superadmin ||
-    user?.is_admin ||
-    user?.current_organization_role === 'owner' ||
-    user?.current_organization_role === 'admin',
-  )
-}
 
 // ─── Card type styles ──────────────────────────────────────────────────────────
 
@@ -1627,14 +1617,6 @@ function AgentsPanel({ onNavigateToFlows }: AgentsPanelProps) {
 }
 
 function FlowsPage() {
-  const { user } = useAuth()
-  if (!canManageWorkspace(user)) {
-    return <Navigate to="/dashboard" />
-  }
-  return <FlowsPageContent />
-}
-
-function FlowsPageContent() {
   const qc = useQueryClient()
   const [leftTab, setLeftTab] = useState<'flows' | 'tools' | 'ai-model' | 'transfer' | 'global-prompt' | 'agents'>('flows')
   const [selectedFlowId, setSelectedFlowId] = useState<number | null>(null)

@@ -23,8 +23,6 @@ Extract the following information about the CUSTOMER from the conversation:
 - guest_count (number of guests as an integer, e.g. from "нас будет 3", "2 adults", "семья из 4", "4 человека")
 - room_type_preference (preferred room type mentioned, e.g. "Deluxe Balcony", "семейный номер", "стандарт", "люкс")
 - meal_plan (meal plan preference — return ONLY one of these exact values: "none", "breakfast", "lunch", "dinner", "half_board_bl", "half_board_bd", "full_board"; map guest's words like "завтрак" → "breakfast", "завтрак и обед" → "half_board_bl", "завтрак и ужин" → "half_board_bd", "всё включено" → "full_board")
-- discovery_source (how the guest says they learned about the hotel — return ONLY one of the configured organization source values passed in the runtime prompt; infer ONLY from the customer's explicit words, not from the chat channel)
-- discovery_source_detail (short free-text detail about how they learned about the hotel, e.g. "посоветовали друзья", "увидел рекламу в Instagram"; include only if the customer explicitly says it)
 {exclusion_instruction}
 
 LANGUAGE NOTE: The conversation may be in Russian, Kyrgyz, English, or a mix of these. Extract information regardless of the language used. Return text field values in the exact language the customer used (except meal_plan and dates which must follow the exact formats above).
@@ -38,10 +36,8 @@ IMPORTANT RULES:
    - Never use: "не указано", "Не указано", "not specified", "not provided", "N/A", "n/a", "unknown", "Unknown", "-", "none", "None", "null", "белгисиз", "жок", "айтылган жок", or any similar placeholder
    - Only include REAL data that the customer actually provided
 6. If the customer gives only day numbers/range without a month (for example "с 1 по 7") and no month is clear from nearby customer messages, OMIT check_in_date/check_out_date. Never assume January.
-7. Do NOT confuse the communication channel with discovery_source. If the guest writes in Instagram, that does NOT mean discovery_source is "instagram". Extract discovery_source only when the customer explicitly answers how they learned about us.
-8. Match discovery_source by meaning, not only exact wording. If the organization configured "Партнер Nomad Sport" and the guest says "на забеге Nomad Sport говорили про вас", use that configured source value.
 
-Return JSON with keys: company_name, contact_person, phone, email, problem_description, preferred_contact_time, check_in_date, check_out_date, guest_count, room_type_preference, meal_plan, discovery_source, discovery_source_detail.
+Return JSON with keys: company_name, contact_person, phone, email, problem_description, preferred_contact_time, check_in_date, check_out_date, guest_count, room_type_preference, meal_plan.
 OMIT any field where no REAL customer-provided information is found. Empty or placeholder values are NOT acceptable.
 
 Example format:
@@ -54,7 +50,5 @@ Example format:
   "room_type_preference": "стандарт с балконом",
   "meal_plan": "half_board_bd",
   "problem_description": "Хотим отдохнуть на Иссык-Куле всей семьёй",
-  "preferred_contact_time": "вечером после 18:00",
-  "discovery_source": "friends",
-  "discovery_source_detail": "посоветовали друзья"
+  "preferred_contact_time": "вечером после 18:00"
 }

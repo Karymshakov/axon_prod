@@ -156,7 +156,6 @@ class RoomPricing(models.Model):
 
 class RoomCombinationNote(models.Model):
     """Per-combination metadata: notes, type overrides, and custom user-added combinations."""
-    organization = models.ForeignKey(**ORG_FK)
     guest_count = models.IntegerField(help_text='Number of guests (1–10)')
     combination_index = models.IntegerField(help_text='0-based index within the guest count group')
     note = models.TextField(blank=True)
@@ -184,7 +183,7 @@ class RoomCombinationNote(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        unique_together = [('organization', 'guest_count', 'combination_index')]
+        unique_together = [('guest_count', 'combination_index')]
         ordering = ['guest_count', 'combination_index']
         verbose_name = 'Room Combination Note'
         verbose_name_plural = 'Room Combination Notes'
@@ -225,60 +224,3 @@ class Playbook(models.Model):
 
     def __str__(self):
         return self.name
-
-
-class ReplyTemplateCategory(models.Model):
-    """Manager-facing quick reply category."""
-
-    organization = models.ForeignKey(**ORG_FK)
-    name = models.CharField(max_length=100)
-    order = models.PositiveIntegerField(default=0)
-    is_active = models.BooleanField(default=True)
-    created_at = models.DateTimeField(default=timezone.now)
-    updated_at = models.DateTimeField(auto_now=True)
-
-    class Meta:
-        ordering = ['order', 'id']
-        verbose_name = 'Reply Template Category'
-        verbose_name_plural = 'Reply Template Categories'
-
-    def __str__(self):
-        return self.name
-
-
-class ReplyTemplate(models.Model):
-    """Reusable manager quick reply shown in Communications."""
-
-    CHANNEL_ALL = 'all'
-    CHANNEL_TELEGRAM = 'telegram'
-    CHANNEL_INSTAGRAM = 'instagram'
-    CHANNEL_WHATSAPP = 'whatsapp'
-    CHANNEL_CHOICES = [
-        (CHANNEL_ALL, 'All channels'),
-        (CHANNEL_TELEGRAM, 'Telegram'),
-        (CHANNEL_INSTAGRAM, 'Instagram'),
-        (CHANNEL_WHATSAPP, 'WhatsApp'),
-    ]
-
-    organization = models.ForeignKey(**ORG_FK)
-    category = models.ForeignKey(
-        ReplyTemplateCategory,
-        on_delete=models.CASCADE,
-        related_name='templates',
-    )
-    title = models.CharField(max_length=120)
-    text = models.TextField()
-    channel = models.CharField(max_length=30, choices=CHANNEL_CHOICES, default=CHANNEL_ALL)
-    tags = models.JSONField(default=list, blank=True)
-    order = models.PositiveIntegerField(default=0)
-    is_active = models.BooleanField(default=True)
-    created_at = models.DateTimeField(default=timezone.now)
-    updated_at = models.DateTimeField(auto_now=True)
-
-    class Meta:
-        ordering = ['category__order', 'order', 'id']
-        verbose_name = 'Reply Template'
-        verbose_name_plural = 'Reply Templates'
-
-    def __str__(self):
-        return self.title

@@ -1,99 +1,123 @@
-import { useMemo, useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
-import { FileTextIcon, SearchIcon } from 'lucide-react'
+import { useState } from 'react'
+import { FileTextIcon, SearchIcon, PlusIcon } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { fetchReplyTemplates, type ReplyTemplate, type ReplyTemplateChannel } from '@/lib/api'
-import { useAuth } from '@/contexts/auth-context'
+
+interface Template {
+  id: string
+  title: string
+  text: string
+}
 
 interface TemplateCategory {
   key: string
   label: string
-  templates: ReplyTemplate[]
+  templates: Template[]
 }
 
+const TEMPLATES: TemplateCategory[] = [
+  {
+    key: 'general',
+    label: 'Общие',
+    templates: [
+      {
+        id: 'g1',
+        title: 'Приветствие',
+        text: 'Здравствуйте! Рады приветствовать вас. Чем мы можем помочь вам сегодня?'
+      },
+      {
+        id: 'g2',
+        title: 'Завершение диалога',
+        text: 'Если у вас возникнут еще какие-либо вопросы, мы с радостью ответим на них. Хорошего дня!'
+      }
+    ]
+  },
+  {
+    key: 'checkin',
+    label: 'Заселение',
+    templates: [
+      {
+        id: 'c1',
+        title: 'Правила заселения',
+        text: 'Стандартное время заезда в наш отель — с 14:00, выезда — до 12:00. При себе необходимо иметь паспорт. Возможен ранний заезд по предварительному согласованию при наличии свободных номеров.'
+      },
+      {
+        id: 'c2',
+        title: 'Необходимые документы',
+        text: 'Для заселения гражданам РФ потребуется паспорт РФ на каждого гостя. Для детей до 14 лет — оригинал свидетельства о рождении. Для иностранных граждан — паспорт, виза (при необходимости) и миграционная карта.'
+      }
+    ]
+  },
+  {
+    key: 'pricing',
+    label: 'Цены & Услуги',
+    templates: [
+      {
+        id: 'p1',
+        title: 'Способы оплаты',
+        text: 'Вы можете оплатить проживание банковской картой на сайте при бронировании, переводом на расчетный счет или наличными/картой на стойке регистрации при заселении.'
+      },
+      {
+        id: 'p2',
+        title: 'Питание (Завтрак)',
+        text: 'Завтрак проходит по системе «Шведский стол» в нашем ресторане с 07:30 до 10:30 по будням и с 08:00 до 11:00 по выходным. Стоимость завтрака, если он не включен в тариф — 900 рублей с человека.'
+      }
+    ]
+  },
+  {
+    key: 'location',
+    label: 'Адрес & Проезд',
+    templates: [
+      {
+        id: 'l1',
+        title: 'Адрес и контакты',
+        text: 'Наш адрес: г. Москва, ул. Примерная, д. 15. Стойка регистрации работает круглосуточно. Телефон для связи: +7 (495) 123-45-67.'
+      },
+      {
+        id: 'l2',
+        title: 'Как добраться',
+        text: 'Мы находимся в 5 минутах ходьбы от станции метро «Парк Культуры». Выход №3, далее прямо по улице до перекрестка, затем направо. Для гостей на автомобиле есть бесплатная охраняемая парковка.'
+      }
+    ]
+  }
+]
+
 interface QuickRepliesPopoverProps {
-  channel: ReplyTemplateChannel
   onSelectTemplate: (text: string) => void
 }
 
-export function QuickRepliesPopover({ channel, onSelectTemplate }: QuickRepliesPopoverProps) {
-  const { user } = useAuth()
+export function QuickRepliesPopover({ onSelectTemplate }: QuickRepliesPopoverProps) {
   const [search, setSearch] = useState('')
   const [open, setOpen] = useState(false)
-  const orgSlug = user?.current_organization_slug ?? ''
-
-  const { data: templates = [], isLoading } = useQuery({
-    queryKey: ['reply-templates', orgSlug, channel],
-    queryFn: () => fetchReplyTemplates(channel),
-    enabled: open && !!orgSlug,
-  })
-
-  const categories = useMemo<TemplateCategory[]>(() => {
-    const grouped = new Map<number, TemplateCategory>()
-    for (const template of templates) {
-      const existing = grouped.get(template.category)
-      if (existing) {
-        existing.templates.push(template)
-      } else {
-        grouped.set(template.category, {
-          key: String(template.category),
-          label: template.category_name || 'Без категории',
-          templates: [template],
-        })
-      }
-    }
-    return [...grouped.values()].map((category) => ({
-      ...category,
-      templates: [...category.templates].sort((a, b) => a.order - b.order || a.title.localeCompare(b.title)),
-    }))
-  }, [templates])
-
-  const filteredCategories = useMemo(() => {
-    const query = search.trim().toLowerCase()
-    if (!query) return categories
-    return categories
-      .map((category) => ({
-        ...category,
-        templates: category.templates.filter((template) =>
-          template.title.toLowerCase().includes(query) ||
-          template.text.toLowerCase().includes(query) ||
-          template.tags.some((tag) => tag.toLowerCase().includes(query)),
-        ),
-      }))
-      .filter((category) => category.templates.length > 0)
-  }, [categories, search])
 
   const handleSelect = (text: string) => {
     onSelectTemplate(text)
     setOpen(false)
   }
 
-  const renderTemplateButton = (template: ReplyTemplate) => (
-    <button
-      key={template.id}
-      onClick={() => handleSelect(template.text)}
-      className="flex w-full flex-col gap-0.5 rounded-md border border-transparent p-2 text-left outline-none transition-all hover:border-border hover:bg-muted/80 focus-visible:ring-1 focus-visible:ring-primary"
-    >
-      <span className="text-xs font-semibold text-foreground">{template.title}</span>
-      <p className="line-clamp-2 text-[11px] leading-relaxed text-muted-foreground">
-        {template.text}
-      </p>
-    </button>
-  )
-
-  const firstCategoryKey = filteredCategories[0]?.key
+  // Filter templates based on search query
+  const filteredCategories = TEMPLATES.map(category => {
+    const filteredTemplates = category.templates.filter(
+      t => 
+        t.title.toLowerCase().includes(search.toLowerCase()) || 
+        t.text.toLowerCase().includes(search.toLowerCase())
+    )
+    return {
+      ...category,
+      templates: filteredTemplates
+    }
+  }).filter(category => category.templates.length > 0)
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
+        <Button 
+          type="button" 
+          variant="outline" 
+          size="sm" 
           className="h-8 gap-1.5 border-dashed border-primary/40 text-primary hover:bg-primary/5"
         >
           <FileTextIcon className="h-4 w-4" />
@@ -103,8 +127,8 @@ export function QuickRepliesPopover({ channel, onSelectTemplate }: QuickRepliesP
       <PopoverContent className="w-80 p-3 sm:w-96" align="start">
         <div className="space-y-3">
           <div className="flex items-center justify-between border-b pb-2">
-            <h4 className="text-sm font-semibold">Быстрые шаблоны</h4>
-            <span className="text-[10px] text-muted-foreground">Вставка в сообщение</span>
+            <h4 className="font-semibold text-sm">Быстрые шаблоны</h4>
+            <span className="text-[10px] text-muted-foreground">Нажмите для вставки в чат</span>
           </div>
 
           <div className="relative">
@@ -113,39 +137,63 @@ export function QuickRepliesPopover({ channel, onSelectTemplate }: QuickRepliesP
               placeholder="Поиск по шаблонам..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="h-8 pl-8 text-xs"
+              className="pl-8 h-8 text-xs"
             />
           </div>
 
-          {isLoading ? (
-            <div className="py-8 text-center text-xs text-muted-foreground">Загрузка...</div>
-          ) : filteredCategories.length === 0 ? (
-            <div className="py-8 text-center text-xs text-muted-foreground">Шаблоны не найдены</div>
-          ) : search ? (
+          {search ? (
             <ScrollArea className="h-60">
-              <div className="space-y-2 pr-2">
-                {filteredCategories.flatMap((category) => category.templates).map(renderTemplateButton)}
+              <div className="space-y-3 pr-2">
+                {filteredCategories.length === 0 ? (
+                  <div className="text-center text-xs text-muted-foreground py-8">
+                    Шаблоны не найдены
+                  </div>
+                ) : (
+                  filteredCategories.flatMap(cat => cat.templates).map(template => (
+                    <button
+                      key={template.id}
+                      onClick={() => handleSelect(template.text)}
+                      className="w-full text-left p-2 rounded-md hover:bg-muted border border-transparent hover:border-border transition-all flex flex-col gap-0.5 outline-none focus-visible:ring-1 focus-visible:ring-primary"
+                    >
+                      <span className="text-xs font-semibold text-foreground">{template.title}</span>
+                      <p className="text-[11px] text-muted-foreground line-clamp-2 leading-relaxed">
+                        {template.text}
+                      </p>
+                    </button>
+                  ))
+                )}
               </div>
             </ScrollArea>
           ) : (
-            <Tabs defaultValue={firstCategoryKey ?? ''} className="w-full">
-              <TabsList className="flex h-auto w-full flex-wrap justify-start gap-1 bg-muted p-1">
-                {filteredCategories.map((category) => (
-                  <TabsTrigger
-                    key={category.key}
-                    value={category.key}
-                    className="h-7 px-2 text-[10px]"
+            <Tabs defaultValue="general" className="w-full">
+              <TabsList className="w-full grid grid-cols-4 h-8 p-0.5 bg-muted">
+                {TEMPLATES.map(cat => (
+                  <TabsTrigger 
+                    key={cat.key} 
+                    value={cat.key} 
+                    className="text-[10px] py-1 px-1 h-full"
                   >
-                    {category.label}
+                    {cat.label}
                   </TabsTrigger>
                 ))}
               </TabsList>
-
-              {filteredCategories.map((category) => (
+              
+              {TEMPLATES.map(category => (
                 <TabsContent key={category.key} value={category.key} className="mt-2 outline-none">
                   <ScrollArea className="h-60">
                     <div className="space-y-2 pr-2">
-                      {category.templates.map(renderTemplateButton)}
+                      {category.templates.map(template => (
+                        <button
+                          key={template.id}
+                          onClick={() => handleSelect(template.text)}
+                          className="w-full text-left p-2 rounded-md hover:bg-muted/80 border border-transparent hover:border-border transition-all flex flex-col gap-0.5 outline-none focus-visible:ring-1 focus-visible:ring-primary"
+                        >
+                          <span className="text-xs font-semibold text-foreground">{template.title}</span>
+                          <p className="text-[11px] text-muted-foreground line-clamp-2 leading-relaxed">
+                            {template.text}
+                          </p>
+                        </button>
+                      ))}
                     </div>
                   </ScrollArea>
                 </TabsContent>

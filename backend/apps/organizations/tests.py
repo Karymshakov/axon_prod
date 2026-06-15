@@ -26,12 +26,6 @@ class OrganizationSettingsVisibilityTests(APITestCase):
             name='Member',
             role='support',
         )
-        self.platform_admin_member = user_model.objects.create_user(
-            email='platform-admin-member@example.com',
-            password='password123',
-            name='Platform Admin Member',
-            role='admin',
-        )
 
         self.organization = Organization.objects.create(
             name='Nomad Camp',
@@ -51,11 +45,6 @@ class OrganizationSettingsVisibilityTests(APITestCase):
         OrganizationMember.objects.create(
             organization=self.organization,
             user=self.member,
-            role=OrganizationMember.Role.MEMBER,
-        )
-        OrganizationMember.objects.create(
-            organization=self.organization,
-            user=self.platform_admin_member,
             role=OrganizationMember.Role.MEMBER,
         )
 
@@ -89,41 +78,9 @@ class OrganizationSettingsVisibilityTests(APITestCase):
         self.assertFalse(self.organization.org_settings['internal_tools_visibility']['show_dev_database_export'])
         self.assertFalse(self.organization.org_settings['internal_tools_visibility']['show_reset_ai_memory'])
 
-    def test_admin_can_update_lead_discovery_sources(self):
-        self.client.force_authenticate(user=self.admin)
-
-        response = self.client.patch(
-            self.url,
-            {
-                'org_settings': {
-                    'lead_discovery_sources': [
-                        {'value': 'partner_nomad_sport', 'label': 'Партнер Nomad Sport'},
-                        {'value': 'other', 'label': 'Другое'},
-                    ],
-                },
-            },
-            format='json',
-        )
-
-        self.assertEqual(response.status_code, 200)
-        self.organization.refresh_from_db()
-        self.assertEqual(
-            self.organization.org_settings['lead_discovery_sources'][0]['value'],
-            'partner_nomad_sport',
-        )
-
     def test_member_cannot_update_internal_tools_visibility(self):
         self.client.force_authenticate(user=self.member)
 
         response = self.client.patch(self.url, self.payload, format='json')
 
         self.assertEqual(response.status_code, 403)
-
-    def test_platform_admin_can_update_even_with_member_org_role(self):
-        self.client.force_authenticate(user=self.platform_admin_member)
-
-        response = self.client.patch(self.url, self.payload, format='json')
-
-        self.assertEqual(response.status_code, 200)
-        self.organization.refresh_from_db()
-        self.assertFalse(self.organization.org_settings['internal_tools_visibility']['show_ai_diagnostics'])

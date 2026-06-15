@@ -129,15 +129,7 @@ def _lead_booking_complete_or_final(lead) -> bool:
         has_name = bool(str(getattr(lead, 'contact_person', '') or '').strip())
     return has_name and all(
         bool(getattr(lead, field, None))
-        for field in (
-            'phone',
-            'check_in_date',
-            'check_out_date',
-            'guest_count',
-            'room_type_preference',
-            'meal_plan',
-            'discovery_source',
-        )
+        for field in ('phone', 'check_in_date', 'check_out_date', 'guest_count', 'room_type_preference', 'meal_plan')
     )
 
 

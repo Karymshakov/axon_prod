@@ -1,7 +1,6 @@
-import { Lead, fetchLeadNotes, fetchPipelineStages, fetchSegments, getContactChannelLabel, getLeadStatusLabel, resolveLeadContactChannel } from '@/lib/api'
+import { Lead, fetchLeadNotes } from '@/lib/api'
 import { useQuery } from '@tanstack/react-query'
 import { LeadSourceBadge } from '@/components/lead-source-badge'
-import { useLeadDiscoverySources } from '@/hooks/use-lead-discovery-sources'
 import {
   Sheet,
   SheetContent,
@@ -11,14 +10,22 @@ import {
 } from '@/components/ui/sheet'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { FileText, Pencil, CalendarDays, Users, BedDouble, Utensils } from 'lucide-react'
+import { Pencil, CalendarDays, Users, BedDouble, Utensils, ChevronRight } from 'lucide-react'
 
 interface LeadDetailsSidebarProps {
   lead: Lead | null
   open: boolean
   onClose: () => void
   onEdit: (lead: Lead) => void
-  onOpenFull?: (lead: Lead) => void
+}
+
+const STATUS_LABELS: Record<string, string> = {
+  new: 'Новый',
+  attempted: 'Попытка',
+  contacted: 'Связались',
+  unqualified: 'Неквалифицирован',
+  nurturing: 'В работе',
+  converted: 'Конвертирован',
 }
 
 const STATUS_COLORS: Record<string, 'default' | 'secondary' | 'destructive' | 'outline'> = {
@@ -30,24 +37,11 @@ const STATUS_COLORS: Record<string, 'default' | 'secondary' | 'destructive' | 'o
   converted: 'default',
 }
 
-export function LeadDetailsSidebar({ lead, open, onClose, onEdit, onOpenFull }: LeadDetailsSidebarProps) {
-  const discoverySourceOptions = useLeadDiscoverySources()
+export function LeadDetailsSidebar({ lead, open, onClose, onEdit }: LeadDetailsSidebarProps) {
   const { data: notes = [] } = useQuery({
     queryKey: ['lead-notes', lead?.id],
     queryFn: () => fetchLeadNotes(lead!.id),
     enabled: open && !!lead?.id,
-  })
-
-  const { data: stages = [] } = useQuery({
-    queryKey: ['pipeline-stages'],
-    queryFn: fetchPipelineStages,
-    enabled: open,
-  })
-
-  const { data: segments = [] } = useQuery({
-    queryKey: ['segments'],
-    queryFn: fetchSegments,
-    enabled: open,
   })
 
   const formatDate = (dateString: string | null) => {
@@ -79,10 +73,6 @@ export function LeadDetailsSidebar({ lead, open, onClose, onEdit, onOpenFull }: 
   const instagramDisplay = lead.instagram_username
     ? `@${lead.instagram_username}`
     : lead.instagram_user_id || null
-  const stageName = getLeadStatusLabel(lead.status, stages)
-  const segmentName = segments.find((segment) => segment.key === lead.segment)?.name
-    || (lead.segment === 'individual' ? 'Индивидуальный' : lead.segment_display)
-  const discoverySourceLabel = discoverySourceOptions.find((option) => option.value === lead.discovery_source)?.label
 
   return (
     <Sheet open={open} onOpenChange={(isOpen) => !isOpen && onClose()}>
@@ -91,17 +81,6 @@ export function LeadDetailsSidebar({ lead, open, onClose, onEdit, onOpenFull }: 
           <div className="flex items-center justify-between gap-4">
             <SheetTitle className="flex-1">{lead.contact_person || 'Без имени'}</SheetTitle>
             <div className="flex items-center gap-2">
-              {onOpenFull ? (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => onOpenFull(lead)}
-                  data-cayu="Button:open-lead-card"
-                >
-                  <FileText className="h-4 w-4" />
-                  Карточка
-                </Button>
-              ) : null}
               <Button
                 variant="ghost"
                 size="icon"
@@ -191,6 +170,15 @@ export function LeadDetailsSidebar({ lead, open, onClose, onEdit, onOpenFull }: 
                   </span>
                 </div>
               ) : null}
+
+              {[lead.check_in_date, lead.check_out_date, lead.guest_count, lead.room_type_preference, lead.meal_plan].filter(Boolean).length < 5 ? (
+                <div className="flex items-center gap-1.5 pt-1 border-t border-blue-200">
+                  <ChevronRight className="h-3 w-3 text-blue-400" />
+                  <span className="text-xs text-blue-500">
+                    {5 - [lead.check_in_date, lead.check_out_date, lead.guest_count, lead.room_type_preference, lead.meal_plan].filter(Boolean).length} деталей ещё нужно
+                  </span>
+                </div>
+              ) : null}
             </div>
           ) : null}
 
@@ -244,26 +232,17 @@ export function LeadDetailsSidebar({ lead, open, onClose, onEdit, onOpenFull }: 
             ) : null}
              <div className="flex items-center justify-between px-3 py-2">
                <span className="font-medium text-muted-foreground">Тип клиента</span>
-               <Badge variant="outline">{segmentName}</Badge>
+               <Badge variant="outline">{lead.segment_display}</Badge>
              </div>
-             <div className="flex items-center justify-between px-3 py-2">
-               <span className="font-medium text-muted-foreground">Канал обращения</span>
-               <span>{getContactChannelLabel(resolveLeadContactChannel(lead))}</span>
-             </div>
-             {lead.discovery_source ? (
+             {lead.source ? (
                <div className="flex items-center justify-between px-3 py-2">
-                 <span className="font-medium text-muted-foreground">Откуда узнал</span>
-                 <div className="flex max-w-[60%] flex-col items-end gap-1">
-                   <LeadSourceBadge source={lead.discovery_source} label={discoverySourceLabel} />
-                   {lead.discovery_source_detail ? (
-                     <span className="text-right text-xs text-muted-foreground">{lead.discovery_source_detail}</span>
-                   ) : null}
-                 </div>
+                 <span className="font-medium text-muted-foreground">Источник</span>
+                 <LeadSourceBadge source={lead.source} />
                </div>
              ) : null}
             <div className="flex items-center justify-between px-3 py-2">
               <span className="font-medium text-muted-foreground">Статус</span>
-              <Badge variant={STATUS_COLORS[lead.status]}>{stageName}</Badge>
+              <Badge variant={STATUS_COLORS[lead.status]}>{STATUS_LABELS[lead.status] ?? lead.status}</Badge>
             </div>
           </div>
 

@@ -3,7 +3,7 @@ import base64
 import logging
 
 from rest_framework import viewsets, status
-from rest_framework.decorators import action, api_view, permission_classes
+from rest_framework.decorators import action, api_view
 from rest_framework.response import Response
 
 logger = logging.getLogger(__name__)
@@ -24,16 +24,14 @@ Rules:
 The result will be used directly by an AI assistant to answer customer questions, so be precise and complete."""
 from .models import (
     HotelProfile, HotelProfileLink, HotelPolicy, HotelFAQ, HandoverContact,
-    Playbook, ReplyTemplateCategory, ReplyTemplate, RoomPricing, RoomCombinationNote,
+    Playbook, RoomPricing, RoomCombinationNote,
 )
 from .serializers import (
     HotelProfileSerializer, HotelProfileLinkSerializer,
     HotelPolicySerializer, HotelFAQSerializer, HandoverContactSerializer,
-    PlaybookSerializer, ReplyTemplateCategorySerializer, ReplyTemplateSerializer,
-    RoomPricingSerializer, RoomCombinationNoteSerializer,
+    PlaybookSerializer, RoomPricingSerializer, RoomCombinationNoteSerializer,
 )
 from apps.organizations.mixins import OrganizationQuerysetMixin
-from apps.organizations.permissions import IsOrganizationAdminOrReadOnly, IsOrganizationMember
 
 
 def _get_org(request):
@@ -48,7 +46,6 @@ def _get_org(request):
 
 
 @api_view(['GET', 'PATCH'])
-@permission_classes([IsOrganizationAdminOrReadOnly])
 def hotel_profile(request):
     """Retrieve or partially update the org-scoped HotelProfile."""
     org = _get_org(request)
@@ -64,7 +61,6 @@ def hotel_profile(request):
 class HotelProfileLinkViewSet(OrganizationQuerysetMixin, viewsets.ModelViewSet):
     queryset = HotelProfileLink.objects.all()
     serializer_class = HotelProfileLinkSerializer
-    permission_classes = [IsOrganizationAdminOrReadOnly]
 
     def get_queryset(self):
         user = self.request.user
@@ -83,7 +79,6 @@ class HotelProfileLinkViewSet(OrganizationQuerysetMixin, viewsets.ModelViewSet):
 class HotelPolicyViewSet(OrganizationQuerysetMixin, viewsets.ModelViewSet):
     queryset = HotelPolicy.objects.all()
     serializer_class = HotelPolicySerializer
-    permission_classes = [IsOrganizationAdminOrReadOnly]
 
     def perform_create(self, serializer):
         user = self.request.user
@@ -95,7 +90,6 @@ class HotelPolicyViewSet(OrganizationQuerysetMixin, viewsets.ModelViewSet):
 class HotelFAQViewSet(OrganizationQuerysetMixin, viewsets.ModelViewSet):
     queryset = HotelFAQ.objects.all()
     serializer_class = HotelFAQSerializer
-    permission_classes = [IsOrganizationAdminOrReadOnly]
 
     def perform_create(self, serializer):
         user = self.request.user
@@ -107,7 +101,6 @@ class HotelFAQViewSet(OrganizationQuerysetMixin, viewsets.ModelViewSet):
 class HandoverContactViewSet(OrganizationQuerysetMixin, viewsets.ModelViewSet):
     queryset = HandoverContact.objects.all()
     serializer_class = HandoverContactSerializer
-    permission_classes = [IsOrganizationAdminOrReadOnly]
 
     def perform_create(self, serializer):
         user = self.request.user
@@ -119,7 +112,6 @@ class HandoverContactViewSet(OrganizationQuerysetMixin, viewsets.ModelViewSet):
 class PlaybookViewSet(OrganizationQuerysetMixin, viewsets.ModelViewSet):
     queryset = Playbook.objects.all()
     serializer_class = PlaybookSerializer
-    permission_classes = [IsOrganizationAdminOrReadOnly]
 
     def perform_create(self, serializer):
         user = self.request.user
@@ -206,59 +198,6 @@ class PlaybookViewSet(OrganizationQuerysetMixin, viewsets.ModelViewSet):
         except Exception as e:
             logger.error(f'Gemini PDF extraction error: {e}', exc_info=True)
             return None
-
-
-class ReplyTemplateCategoryViewSet(OrganizationQuerysetMixin, viewsets.ModelViewSet):
-    queryset = ReplyTemplateCategory.objects.prefetch_related('templates').all()
-    serializer_class = ReplyTemplateCategorySerializer
-    permission_classes = [IsOrganizationMember]
-
-    def get_queryset(self):
-        qs = super().get_queryset()
-        if self.request.method == 'GET':
-            return qs.filter(is_active=True).prefetch_related('templates')
-        return qs
-
-    def perform_create(self, serializer):
-        user = self.request.user
-        org = None if getattr(user, 'is_superadmin', False) else self._get_organization()
-        max_order = ReplyTemplateCategory.objects.filter(organization=org).count() if org else ReplyTemplateCategory.objects.count()
-        serializer.save(organization=org, order=max_order)
-
-
-class ReplyTemplateViewSet(OrganizationQuerysetMixin, viewsets.ModelViewSet):
-    queryset = ReplyTemplate.objects.select_related('category').all()
-    serializer_class = ReplyTemplateSerializer
-    permission_classes = [IsOrganizationMember]
-    filterset_fields = ['category', 'is_active']
-
-    def get_queryset(self):
-        qs = super().get_queryset().select_related('category')
-        if self.request.method == 'GET':
-            qs = qs.filter(is_active=True, category__is_active=True)
-        channel = self.request.query_params.get('channel')
-        if channel and channel != 'all':
-            qs = qs.filter(channel__in=['all', channel])
-        return qs
-
-    def perform_create(self, serializer):
-        user = self.request.user
-        org = None if getattr(user, 'is_superadmin', False) else self._get_organization()
-        category = serializer.validated_data.get('category')
-        if org and category.organization_id != org.id:
-            from rest_framework.exceptions import PermissionDenied
-            raise PermissionDenied('Template category is not in your organization.')
-        max_order = ReplyTemplate.objects.filter(organization=org, category=category).count() if org else ReplyTemplate.objects.filter(category=category).count()
-        serializer.save(organization=org, order=max_order)
-
-    def perform_update(self, serializer):
-        user = self.request.user
-        org = None if getattr(user, 'is_superadmin', False) else self._get_organization()
-        category = serializer.validated_data.get('category')
-        if org and category is not None and category.organization_id != org.id:
-            from rest_framework.exceptions import PermissionDenied
-            raise PermissionDenied('Template category is not in your organization.')
-        serializer.save()
 
 
 # Expected Excel column headers (case-insensitive, stripped)
@@ -589,7 +528,6 @@ def prompt_preview(request):
 class RoomPricingViewSet(OrganizationQuerysetMixin, viewsets.ModelViewSet):
     queryset = RoomPricing.objects.all()
     serializer_class = RoomPricingSerializer
-    permission_classes = [IsOrganizationAdminOrReadOnly]
 
     @action(detail=False, methods=['post'], url_path='upload-excel')
     def upload_excel(self, request):
@@ -758,10 +696,7 @@ class RoomPricingViewSet(OrganizationQuerysetMixin, viewsets.ModelViewSet):
 
             if row_id:
                 try:
-                    instance_qs = RoomPricing.objects.all()
-                    if upload_org:
-                        instance_qs = instance_qs.filter(organization=upload_org)
-                    instance = instance_qs.get(id=row_id)
+                    instance = RoomPricing.objects.get(id=row_id)
                     for k, v in pricing_fields.items():
                         setattr(instance, k, v)
                     instance.save()
@@ -808,11 +743,9 @@ def room_combinations(request):
     guest_count_param = request.query_params.get('guest_count')
     data = generate_room_combinations(org=org)
 
-    # Attach notes and stored type overrides from DB; mark auto-generated rows.
-    # These settings are organization-scoped because they affect AI pricing logic.
+    # Attach notes and stored type overrides from DB; mark auto-generated rows
+    # Note: RoomCombinationNote has no organization field — notes are shared globally
     notes_qs = RoomCombinationNote.objects.filter(is_custom=False)
-    if org:
-        notes_qs = notes_qs.filter(organization=org)
     hidden_keys = {(n.guest_count, n.combination_index) for n in notes_qs if n.is_hidden}
     notes_map = {
         (n.guest_count, n.combination_index): {'note': n.note, 'type': n.combination_type}
@@ -829,12 +762,11 @@ def room_combinations(request):
             combo['is_custom'] = False
             combo['id'] = None
 
-    # Append custom combinations with live-calculated prices for this organization.
+    # Append custom combinations with live-calculated prices
+    # Note: RoomCombinationNote has no organization field — notes are shared globally
     custom_qs = RoomCombinationNote.objects.filter(is_custom=True)
-    if org:
-        custom_qs = custom_qs.filter(organization=org)
     if custom_qs.exists():
-        lookup = _build_room_lookup(org=org)
+        lookup = _build_room_lookup()
         custom_by_gc: dict = {}
         for c in custom_qs:
             prices_data = calculate_combination_prices(c.rooms or [], room_lookup=lookup)
@@ -880,7 +812,6 @@ def room_combination_room_types(request):
 
 
 @api_view(['POST'])
-@permission_classes([IsOrganizationAdminOrReadOnly])
 def create_custom_combination(request):
     """Create a custom room combination for a guest count group."""
     from .pricing_utils import COMBINATIONS_MAP, calculate_combination_prices, _build_room_lookup
@@ -941,7 +872,6 @@ def create_custom_combination(request):
 
 
 @api_view(['DELETE'])
-@permission_classes([IsOrganizationAdminOrReadOnly])
 def delete_custom_combination(request, pk):
     """Delete a custom combination by its primary key."""
     org = _get_org(request)
@@ -957,7 +887,6 @@ def delete_custom_combination(request, pk):
 
 
 @api_view(['DELETE'])
-@permission_classes([IsOrganizationAdminOrReadOnly])
 def hide_auto_combination(request, guest_count, combination_index):
     """Hide an auto-generated combination so it no longer appears in the API."""
     if not (1 <= guest_count <= 10):
@@ -975,7 +904,6 @@ def hide_auto_combination(request, guest_count, combination_index):
 
 
 @api_view(['PUT', 'PATCH'])
-@permission_classes([IsOrganizationAdminOrReadOnly])
 def room_combination_note(request, guest_count, combination_index):
     """Save or update a custom note or type for a combination row."""
     if not (1 <= guest_count <= 10):

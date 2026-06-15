@@ -1,4 +1,4 @@
-from rest_framework.permissions import BasePermission, SAFE_METHODS
+from rest_framework.permissions import BasePermission
 from .models import OrganizationMember
 
 
@@ -8,9 +8,9 @@ class IsOrganizationMember(BasePermission):
     def has_permission(self, request, view):
         if not request.user or not request.user.is_authenticated:
             return False
-        if getattr(request.user, 'is_superadmin', False) or getattr(request.user, 'is_admin', False):
+        if getattr(request.user, 'is_superadmin', False):
             return True
-        org = getattr(request, 'organization', None) or getattr(request.user, 'current_organization', None)
+        org = getattr(request, 'organization', None)
         if org is None:
             return False
         return OrganizationMember.objects.filter(
@@ -24,9 +24,9 @@ class IsOrganizationAdmin(BasePermission):
     def has_permission(self, request, view):
         if not request.user or not request.user.is_authenticated:
             return False
-        if getattr(request.user, 'is_superadmin', False) or getattr(request.user, 'is_admin', False):
+        if getattr(request.user, 'is_superadmin', False):
             return True
-        org = getattr(request, 'organization', None) or getattr(request.user, 'current_organization', None)
+        org = getattr(request, 'organization', None)
         if org is None:
             return False
         return OrganizationMember.objects.filter(
@@ -43,7 +43,7 @@ class IsOrganizationOwner(BasePermission):
     def has_permission(self, request, view):
         if not request.user or not request.user.is_authenticated:
             return False
-        if getattr(request.user, 'is_superadmin', False) or getattr(request.user, 'is_admin', False):
+        if getattr(request.user, 'is_superadmin', False):
             return True
         org = getattr(request, 'organization', None)
         if org is None:
@@ -52,31 +52,6 @@ class IsOrganizationOwner(BasePermission):
             organization=org,
             user=request.user,
             role=OrganizationMember.Role.OWNER,
-            is_active=True,
-        ).exists()
-
-
-class IsOrganizationAdminOrReadOnly(BasePermission):
-    """Organization members can read; only owner/admin can write."""
-
-    def has_permission(self, request, view):
-        if not request.user or not request.user.is_authenticated:
-            return False
-        if getattr(request.user, 'is_superadmin', False) or getattr(request.user, 'is_admin', False):
-            return True
-        org = getattr(request, 'organization', None) or getattr(request.user, 'current_organization', None)
-        if org is None:
-            return False
-        if request.method in SAFE_METHODS:
-            return OrganizationMember.objects.filter(
-                organization=org,
-                user=request.user,
-                is_active=True,
-            ).exists()
-        return OrganizationMember.objects.filter(
-            organization=org,
-            user=request.user,
-            role__in=[OrganizationMember.Role.OWNER, OrganizationMember.Role.ADMIN],
             is_active=True,
         ).exists()
 

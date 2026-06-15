@@ -1,5 +1,3 @@
-import json
-
 from unittest.mock import AsyncMock, Mock, patch
 from urllib.parse import parse_qs, urlparse
 
@@ -18,219 +16,11 @@ from .instagram_integration_views import (
     instagram_callback,
     instagram_status,
 )
-from .models import AIConfig, InstagramAppConfig, InstagramConnection, Lead, LeadActivity, LeadGoal
+from .models import AIConfig, InstagramAppConfig, InstagramConnection, Lead, LeadActivity
 from .views import _reset_lead_ai_memory
 from .telegram_views import _delayed_ai_response, telegram_webhook
 from .instagram_views import instagram_webhook
 from .whatsapp_views import _delayed_whatsapp_ai_response
-
-
-class LeadChannelApiTests(TestCase):
-    def setUp(self):
-        user_model = get_user_model()
-        self.owner = user_model.objects.create_user(
-            email='lead-channel-owner@example.com',
-            password='password123',
-            name='Owner',
-            role='admin',
-        )
-        self.org = Organization.objects.create(name='Nomad Camp', slug='lead-channel-api', owner=self.owner)
-        self.owner.current_organization = self.org
-        self.owner.save(update_fields=['current_organization'])
-
-        from apps.organizations.models import OrganizationMember
-        OrganizationMember.objects.create(organization=self.org, user=self.owner, role='admin')
-        self.factory = APIRequestFactory()
-
-    def _list_leads(self, params):
-        from apps.leads.views import LeadViewSet
-
-        request = self.factory.get('/api/leads/', params)
-        force_authenticate(request, user=self.owner)
-        response = LeadViewSet.as_view({'get': 'list'})(request)
-        self.assertEqual(response.status_code, 200)
-        return response.data
-
-    def test_contact_channel_filter_uses_system_channel_and_legacy_identifiers(self):
-        instagram_lead = Lead.objects.create(
-            organization=self.org,
-            contact_person='Instagram Guest',
-            contact_channel='instagram',
-            instagram_user_id='ig-1',
-        )
-        Lead.objects.create(
-            organization=self.org,
-            contact_person='Telegram Guest',
-            contact_channel='',
-            telegram_chat_id='tg-1',
-        )
-        Lead.objects.create(
-            organization=self.org,
-            contact_person='WhatsApp Guest',
-            contact_channel='whatsapp',
-            whatsapp_phone='996555111222',
-        )
-
-        data = self._list_leads({'contact_channel': 'instagram'})
-
-        self.assertEqual([item['id'] for item in data], [instagram_lead.id])
-
-    def test_contact_channel_and_discovery_source_filters_are_combined(self):
-        instagram_lead = Lead.objects.create(
-            organization=self.org,
-            contact_person='Instagram From Instagram',
-            contact_channel='instagram',
-            instagram_user_id='ig-1',
-            discovery_source='instagram',
-        )
-        Lead.objects.create(
-            organization=self.org,
-            contact_person='Telegram From Instagram',
-            contact_channel='telegram',
-            telegram_chat_id='tg-1',
-            discovery_source='instagram',
-        )
-        Lead.objects.create(
-            organization=self.org,
-            contact_person='Instagram From Friends',
-            contact_channel='instagram',
-            instagram_user_id='ig-2',
-            discovery_source='friends',
-        )
-
-        data = self._list_leads({
-            'contact_channel': 'instagram',
-            'discovery_source': 'instagram',
-        })
-
-        self.assertEqual([item['id'] for item in data], [instagram_lead.id])
-
-    def test_ready_status_filter_matches_won_and_converted(self):
-        won_lead = Lead.objects.create(
-            organization=self.org,
-            contact_person='Won Guest',
-            status='won',
-        )
-        converted_lead = Lead.objects.create(
-            organization=self.org,
-            contact_person='Converted Guest',
-            status='converted',
-        )
-        Lead.objects.create(
-            organization=self.org,
-            contact_person='Working Guest',
-            status='nurturing',
-        )
-
-        data = self._list_leads({'status': 'won'})
-
-        self.assertEqual({item['id'] for item in data}, {won_lead.id, converted_lead.id})
-
-    def test_contact_channel_is_read_only_on_update(self):
-        from apps.leads.views import LeadViewSet
-
-        lead = Lead.objects.create(
-            organization=self.org,
-            contact_person='Telegram Guest',
-            contact_channel='telegram',
-            telegram_chat_id='tg-1',
-        )
-        request = self.factory.patch(
-            f'/api/leads/{lead.id}/',
-            {'contact_channel': 'instagram', 'contact_person': 'Updated Guest'},
-            format='json',
-        )
-        force_authenticate(request, user=self.owner)
-        response = LeadViewSet.as_view({'patch': 'partial_update'})(request, pk=lead.id)
-
-        self.assertEqual(response.status_code, 200)
-        lead.refresh_from_db()
-        self.assertEqual(lead.contact_person, 'Updated Guest')
-        self.assertEqual(lead.contact_channel, 'telegram')
-
-    def test_manual_create_sets_manual_contact_channel(self):
-        from apps.leads.views import LeadViewSet
-
-        request = self.factory.post(
-            '/api/leads/',
-            {
-                'contact_person': 'Manual Guest',
-                'phone': '+996777889933',
-                'segment': 'individual',
-                'status': 'new',
-            },
-            format='json',
-        )
-        force_authenticate(request, user=self.owner)
-        response = LeadViewSet.as_view({'post': 'create'})(request)
-
-        self.assertEqual(response.status_code, 201)
-        lead = Lead.objects.get(id=response.data['id'])
-        self.assertEqual(lead.contact_channel, 'manual')
-
-    def test_goal_complete_action_updates_goal_and_activity(self):
-        from apps.leads.views import LeadGoalViewSet
-
-        lead = Lead.objects.create(
-            organization=self.org,
-            contact_person='Goal Guest',
-            contact_channel='telegram',
-            telegram_chat_id='tg-goal',
-        )
-        goal = LeadGoal.objects.create(
-            organization=self.org,
-            lead=lead,
-            goal_type='collect_phone',
-            priority=LeadGoal.PRIORITY_HIGH,
-        )
-        request = self.factory.post(
-            f'/api/lead-goals/{goal.id}/complete/',
-            {'current_value': '+996777889933'},
-            format='json',
-        )
-        force_authenticate(request, user=self.owner)
-
-        response = LeadGoalViewSet.as_view({'post': 'complete'})(request, pk=goal.id)
-
-        self.assertEqual(response.status_code, 200)
-        goal.refresh_from_db()
-        self.assertEqual(goal.status, LeadGoal.STATUS_COMPLETED)
-        self.assertEqual(goal.achieved_value, '+996777889933')
-        self.assertTrue(
-            LeadActivity.objects.filter(
-                lead=lead,
-                activity_type=LeadActivity.TYPE_GOAL_COMPLETED,
-                organization=self.org,
-            ).exists()
-        )
-
-    def test_goal_complete_action_allows_legacy_goal_without_organization(self):
-        from apps.leads.views import LeadGoalViewSet
-
-        lead = Lead.objects.create(
-            organization=self.org,
-            contact_person='Legacy Goal Guest',
-            contact_channel='telegram',
-            telegram_chat_id='tg-legacy-goal',
-        )
-        goal = LeadGoal.objects.create(
-            organization=None,
-            lead=lead,
-            goal_type='collect_phone',
-            priority=LeadGoal.PRIORITY_HIGH,
-        )
-        request = self.factory.post(
-            f'/api/lead-goals/{goal.id}/complete/',
-            {'current_value': '+996700000001'},
-            format='json',
-        )
-        force_authenticate(request, user=self.owner)
-
-        response = LeadGoalViewSet.as_view({'post': 'complete'})(request, pk=goal.id)
-
-        self.assertEqual(response.status_code, 200)
-        goal.refresh_from_db()
-        self.assertEqual(goal.status, LeadGoal.STATUS_COMPLETED)
 
 
 class BlankAutoReplyRetryTests(TestCase):
@@ -562,9 +352,8 @@ class GlobalChannelAiPauseTests(TestCase):
         self.assertTrue(response.data['success'])
         send_mock.assert_awaited_once()
 
-    @patch('apps.leads.integration_views.instagram_service.is_configured', return_value=True)
     @patch('apps.leads.integration_views.instagram_service.send_message', return_value={'message_id': 'ig-mid-1'})
-    def test_manual_instagram_send_still_works_while_globally_paused(self, send_mock, _configured_mock):
+    def test_manual_instagram_send_still_works_while_globally_paused(self, send_mock):
         request = self.factory.post('/api/leads/communications/instagram/send/', {'lead_id': self.lead.id, 'message': 'Manual instagram reply'}, format='json')
         force_authenticate(request, user=self.owner)
 
@@ -572,7 +361,7 @@ class GlobalChannelAiPauseTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response.data['success'])
-        send_mock.assert_called_once_with(self.lead.instagram_user_id, 'Manual instagram reply', org=self.org, raise_exception=True)
+        send_mock.assert_called_once_with(self.lead.instagram_user_id, 'Manual instagram reply')
         sent_activity = LeadActivity.objects.filter(
             lead=self.lead,
             activity_type=LeadActivity.TYPE_INSTAGRAM_SENT,
@@ -593,6 +382,7 @@ class GlobalChannelAiPauseTests(TestCase):
         send_mock.assert_called_once_with(self.lead.whatsapp_phone, 'Manual whatsapp reply', org=self.org, raise_exception=True)
 
 
+<<<<<<< HEAD
 class PassiveAiIntakeTests(TestCase):
     def setUp(self):
         user_model = get_user_model()
@@ -725,6 +515,8 @@ class PassiveAiIntakeTests(TestCase):
         self.assertEqual(self.lead.meal_plan, 'breakfast')
 
 
+=======
+>>>>>>> 4834611ce65171b0f637ae0dc4e5b0d6b0ba1e07
 class ResetAiMemoryTests(TestCase):
     def setUp(self):
         user_model = get_user_model()
@@ -3629,40 +3421,6 @@ class AIConnectionAndIntentClassifierTests(TestCase):
         res = ai_service.extract_lead_data('hello', [], None)
 
         self.assertEqual(res, {})
-
-    def test_extract_lead_data_uses_organization_discovery_sources(self):
-        from apps.leads.ai_service import ai_service
-
-        self.org.org_settings = {
-            'lead_discovery_sources': [
-                {'value': 'partner_nomad_sport', 'label': 'Партнер Nomad Sport'},
-                {'value': 'other', 'label': 'Другое'},
-            ],
-        }
-        self.org.save(update_fields=['org_settings'])
-
-        ai_service.client = Mock()
-        mock_response = Mock()
-        mock_response.choices = [
-            Mock(message=Mock(content=json.dumps({
-                'discovery_source': 'На забеге Nomad Sport',
-                'discovery_source_detail': 'на забеге Nomad Sport говорили про вас',
-            })))
-        ]
-        ai_service.client.chat.completions.create.return_value = mock_response
-
-        with patch.object(ai_service, 'is_configured', return_value=True):
-            res = ai_service.extract_lead_data(
-                'На забеге Nomad Sport говорили про вас',
-                [],
-                None,
-                self.org,
-            )
-
-        self.assertEqual(res['discovery_source'], 'partner_nomad_sport')
-        prompt = ai_service.client.chat.completions.create.call_args.kwargs['messages'][0]['content']
-        self.assertIn('partner_nomad_sport', prompt)
-        self.assertIn('Партнер Nomad Sport', prompt)
 
     def test_dynamic_pricing_tools_filtering_guest_count_three_plus_unknown_children(self):
         from apps.leads.ai_service import ai_service

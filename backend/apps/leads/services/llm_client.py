@@ -113,8 +113,6 @@ _STAGE_FIELD_LABELS_RU = {
     'guest_count': 'количество гостей',
     'room_type_preference': 'пожелания по номеру',
     'meal_plan': 'питание',
-    'discovery_source': 'откуда гость узнал об отеле',
-    'discovery_source_detail': 'деталь источника',
     'preferred_contact_time': 'удобное время для связи',
 }
 
@@ -290,7 +288,7 @@ class AIService:
             self.client = OpenAI(
                 api_key=gemini_key,
                 base_url='https://generativelanguage.googleapis.com/v1beta/openai/',
-                max_retries=0,
+                max_retries=3,
             )
             self._model = os.environ.get('GEMINI_MODEL') or 'gemini-2.5-flash'
             logger.info(f"AI service: using Gemini ({self._model}) via OpenAI-compatible API")
@@ -775,7 +773,6 @@ class AIService:
         known_booking = []
         needed_booking = []
         needed_contact = []
-        needed_context = []
         # Detect if the current flow card is "Meal Plan Selection" — when True, the guest
         # has already picked a room and we must present meal options, NOT call room tools again.
         _on_meal_plan_card = bool(
@@ -830,42 +827,6 @@ class AIService:
                 # On Meal Plan card — room was chosen this session even if not yet persisted.
                 known_booking.append('Room type: chosen in this session (see conversation history)')
 
-            _discovery_source = lead_data.get('discovery_source') or (lead.discovery_source if lead else '')
-            _discovery_detail = lead_data.get('discovery_source_detail') or (lead.discovery_source_detail if lead else '')
-            if _discovery_source:
-                known_booking.append(f"Discovery source: {_discovery_detail or _discovery_source}")
-            else:
-                _has_contact_ready = _has_reliable_name and bool(lead_data.get('phone') or (lead.phone if lead else ''))
-                _has_booking_ready = bool(
-                    (lead_data.get('check_in_date') or (lead.check_in_date if lead else None))
-                    and (lead_data.get('check_out_date') or (lead.check_out_date if lead else None))
-                    and (lead_data.get('guest_count') or (lead.guest_count if lead else None))
-                    and (lead_data.get('room_type_preference') or (lead.room_type_preference if lead else None))
-                    and (lead_data.get('meal_plan') or (lead.meal_plan if lead else None))
-                )
-                if _has_contact_ready and _has_booking_ready:
-                    needed_context.append(
-                        'how the guest learned about the hotel — ask softly once before marking the booking ready'
-                    )
-
-        if lead is not None and not getattr(lead, 'discovery_source', ''):
-            try:
-                from apps.leads.services.discovery_sources import build_discovery_sources_prompt_block
-
-                lc_parts.append(
-                    "\nDISCOVERY SOURCE RULE — do not confuse this with the chat channel:\n"
-                    "Before saying the booking is fully ready, ask one short optional-sounding question: "
-                    "'И еще подскажите, пожалуйста, откуда вы о нас узнали?'. "
-                    "Ask it after guest name and phone are known or provided in the current message. "
-                    "If the guest answers loosely, match by meaning to the configured source list.\n\n"
-                    f"{build_discovery_sources_prompt_block(getattr(lead, 'organization', None))}"
-                )
-            except Exception:
-                lc_parts.append(
-                    "\nDISCOVERY SOURCE RULE — ask where the guest learned about the hotel after name and phone are known. "
-                    "Do not infer it from Telegram, Instagram or WhatsApp."
-                )
-
         if known_contact or known_booking:
             lc_parts.append(
                 "\nALREADY KNOWN — do NOT ask for this information again:"
@@ -884,7 +845,7 @@ class AIService:
             except Exception:
                 pass
 
-        needed = needed_booking + needed_contact + needed_context
+        needed = needed_booking + needed_contact
         if needed:
             lc_parts.append(
                 "\nSTILL NEEDED TO COMPLETE BOOKING — work through these in order:"
@@ -895,11 +856,6 @@ class AIService:
                 lc_parts.append(
                     "Contact collection rule: require guest name and phone. "
                     "Email is optional; phrase it as 'email, если удобно', and continue without it if the guest does not provide one."
-                )
-            if needed_context:
-                lc_parts.append(
-                    "Discovery source collection rule: keep it soft and short. "
-                    "Ask after the main booking details and contact are clear; never treat Instagram/Telegram/WhatsApp as the answer by default."
                 )
         if stage_policy and stage_policy.resolution:
             try:
@@ -2083,22 +2039,11 @@ Example output:
             logger.error(f"Intent classification failed: {e}", exc_info=True)
             return 'booking_intent'
 
-    def extract_lead_data(
-        self,
-        message: str,
-        conversation_history: list = None,
-        our_company_name: str = None,
-        organization=None,
-    ) -> dict:
+    def extract_lead_data(self, message: str, conversation_history: list = None, our_company_name: str = None) -> dict:
         if not self.is_configured():
             return {}
 
         try:
-            from apps.leads.services.discovery_sources import (
-                build_discovery_sources_prompt_block,
-                normalize_discovery_source,
-            )
-
             exclusion_instruction = ""
             if our_company_name:
                 exclusion_instruction = f"""
@@ -2110,13 +2055,12 @@ Messages from "assistant" role are from our bot - ignore any company names menti
             now_bishkek = datetime.now(ZoneInfo('Asia/Bishkek'))
             today_str = now_bishkek.strftime('%Y-%m-%d')
             tomorrow_str = (now_bishkek + timedelta(days=1)).strftime('%Y-%m-%d')
-            discovery_sources_prompt = build_discovery_sources_prompt_block(organization)
 
             extraction_prompt = f"""Today's date: {today_str} (Kyrgyzstan time, UTC+6). Tomorrow is {tomorrow_str}.
 
 Extract the following information about the CUSTOMER from the conversation:
 - company_name (the CUSTOMER's company, NOT the company they are contacting)
-- contact_person (the CUSTOMER's name)
+- contact_person (the CUSTOMER's name; DO NOT extract joke responses like "меня не зовут", "никто", nicknames/handles that are not real names, random keystrokes like "asdfgh", placeholder words, or phrases describing how they found out about us like "птички напели" / "птичка напела")
 - phone (the CUSTOMER's phone number)
 - email (the CUSTOMER's email address)
 - problem_description (a brief summary of the customer's need or request — what they are looking for, in their own words)
@@ -2126,11 +2070,7 @@ Extract the following information about the CUSTOMER from the conversation:
 - guest_count (number of guests as an integer, e.g. from "нас будет 3", "2 adults", "семья из 4", "4 человека")
 - room_type_preference (preferred room type mentioned, e.g. "Deluxe Balcony", "семейный номер", "стандарт", "люкс")
 - meal_plan (meal plan preference — return ONLY one of these exact values: "none", "breakfast", "lunch", "dinner", "half_board_bl", "half_board_bd", "full_board"; map guest's words like "завтрак" → "breakfast", "завтрак и обед" → "half_board_bl", "завтрак и ужин" → "half_board_bd", "всё включено" → "full_board")
-- discovery_source (how the guest says they learned about the hotel; infer ONLY from the customer's explicit words, not from the chat channel)
-- discovery_source_detail (short free-text detail about how they learned about the hotel, e.g. "friends recommended it", "saw an Instagram ad"; include only if the customer explicitly says it)
 {exclusion_instruction}
-
-{discovery_sources_prompt}
 
 LANGUAGE NOTE: The conversation may be in Russian, Kyrgyz, English, or a mix of these. Extract information regardless of the language used. Return text field values in the exact language the customer used (except meal_plan and dates which must follow the exact formats above).
 
@@ -2143,9 +2083,8 @@ IMPORTANT RULES:
    - Never use: "не указано", "Не указано", "not specified", "not provided", "N/A", "n/a", "unknown", "Unknown", "-", "none", "None", "null", "белгисиз", "жок", "айтылган жок", or any similar placeholder
    - Only include REAL data that the customer actually provided
 6. If the customer gives only day numbers/range without a month (for example "с 1 по 7") and no month is clear from nearby customer messages, OMIT check_in_date/check_out_date. Never assume January.
-7. Do NOT confuse the communication channel with discovery_source. If the guest writes in Instagram, that does NOT mean discovery_source is "instagram". Extract discovery_source only when the customer explicitly answers how they learned about us.
 
-Return JSON with keys: company_name, contact_person, phone, email, problem_description, preferred_contact_time, check_in_date, check_out_date, guest_count, room_type_preference, meal_plan, discovery_source, discovery_source_detail.
+Return JSON with keys: company_name, contact_person, phone, email, problem_description, preferred_contact_time, check_in_date, check_out_date, guest_count, room_type_preference, meal_plan.
 OMIT any field where no REAL customer-provided information is found. Empty or placeholder values are NOT acceptable.
 
 Example format:
@@ -2158,9 +2097,7 @@ Example format:
   "room_type_preference": "стандарт с балконом",
   "meal_plan": "half_board_bd",
   "problem_description": "Хотим отдохнуть на Иссык-Куле всей семьёй",
-  "preferred_contact_time": "вечером после 18:00",
-  "discovery_source": "friends",
-  "discovery_source_detail": "посоветовали друзья"
+  "preferred_contact_time": "вечером после 18:00"
 }}"""
 
             messages = [
@@ -2218,18 +2155,12 @@ Example format:
                 'problem_description', 'preferred_contact_time',
                 'check_in_date', 'check_out_date', 'guest_count',
                 'room_type_preference', 'meal_plan',
-                'discovery_source', 'discovery_source_detail',
             }
 
             filtered_data = {}
             for key, value in extracted_data.items():
                 if key in allowed_keys and value and str(value).strip().lower() not in placeholder_values:
-                    if key == 'discovery_source':
-                        normalized_source = normalize_discovery_source(value, organization)
-                        if normalized_source:
-                            filtered_data[key] = normalized_source
-                    else:
-                        filtered_data[key] = value
+                    filtered_data[key] = value
 
             logger.info(f"Extracted lead data: {filtered_data}")
             return filtered_data

@@ -61,13 +61,6 @@ import { useAuth } from '@/contexts/auth-context'
 import { getInternalToolsVisibilitySettings } from '@/lib/org-settings'
 
 export const Route = createFileRoute('/_app/communications')({
-  validateSearch: (search: Record<string, unknown>) => ({
-    leadId: typeof search.leadId === 'string' ? search.leadId : undefined,
-    channel:
-      search.channel === 'telegram' || search.channel === 'instagram' || search.channel === 'whatsapp'
-        ? search.channel
-        : undefined,
-  }),
   component: CommunicationsPage,
 })
 
@@ -110,26 +103,18 @@ function sortActivitiesChronologically<T extends { created_at: string; id: numbe
   })
 }
 
-function getSentBy(metadata: Record<string, unknown> | null): string {
-  if (!metadata) return 'ИИ'
-  if (metadata.is_manager_manual) {
-    const name = typeof metadata.sent_by_name === 'string' ? metadata.sent_by_name.trim() : ''
-    const initials = typeof metadata.sent_by_initials === 'string' ? metadata.sent_by_initials.trim() : ''
-    const email = typeof metadata.sent_by_email === 'string' ? metadata.sent_by_email.trim() : ''
-    return name || initials || email || 'Менеджер'
-  }
-  if (metadata.is_ai_generated || metadata.is_ai_agent || metadata.is_ai_action) return 'ИИ'
-  return 'ИИ'
+function getSentBy(metadata: Record<string, unknown> | null): 'ai' | 'manager' {
+  if (!metadata) return 'ai'
+  if (metadata.is_manager_manual) return 'manager'
+  if (metadata.is_ai_generated || metadata.is_ai_agent || metadata.is_ai_action) return 'ai'
+  return 'ai'
 }
 
 function CommunicationsPage() {
   const navigate = useNavigate()
-  const routeSearch = Route.useSearch()
   const { t } = useLanguage()
   const { user } = useAuth()
   const queryClient = useQueryClient()
-  const requestedLeadId = routeSearch.leadId
-  const requestedChannel = routeSearch.channel as ConversationChannel | undefined
 
   // Dynamic Unified inbox filters
   const [activeChannelTab, setActiveChannelTab] = useState<'all' | ConversationChannel>('all')
@@ -138,7 +123,7 @@ function CommunicationsPage() {
 
   // Workspace layout states
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null)
-  const [showRightSidebar, setShowRightSidebar] = useState(false)
+  const [showRightSidebar, setShowRightSidebar] = useState(true)
   const [showAiDiagnosticsOpen, setShowAiDiagnosticsOpen] = useState(false)
   const [message, setMessage] = useState('')
   const [isSending, setIsSending] = useState(false)
@@ -151,7 +136,6 @@ function CommunicationsPage() {
 
   const scrollAreaRef = useRef<HTMLDivElement>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
-  const handledLeadSearchRef = useRef<string | null>(null)
 
   // Fetch integration statuses
   const { data: telegramStatus } = useQuery({
@@ -190,10 +174,8 @@ function CommunicationsPage() {
 
   // Reset override channel when selecting a different lead
   useEffect(() => {
-    if (!requestedChannel) {
-      setOverrideChannel(null)
-    }
-  }, [selectedLead?.id, requestedChannel])
+    setOverrideChannel(null)
+  }, [selectedLead?.id])
 
   // Fetch unread count map
   const { data: unreadData } = useQuery({
@@ -380,23 +362,6 @@ function CommunicationsPage() {
     })
   }
 
-  useEffect(() => {
-    if (!requestedLeadId || leads.length === 0) return
-
-    const requestKey = `${requestedLeadId}:${requestedChannel ?? ''}`
-    if (handledLeadSearchRef.current === requestKey) return
-
-    const targetLead = leads.find((lead) => String(lead.id) === requestedLeadId)
-    if (!targetLead) return
-
-    setActiveChannelTab('all')
-    handleSelectLead(targetLead)
-    if (requestedChannel) {
-      setOverrideChannel(requestedChannel)
-    }
-    handledLeadSearchRef.current = requestKey
-  }, [requestedLeadId, requestedChannel, leads])
-
   // Toggle AI agent control
   const handleToggleAiPause = async (lead: Lead) => {
     setIsTogglingAi(true)
@@ -576,7 +541,7 @@ function CommunicationsPage() {
                 className={`text-[10px] font-bold px-2 py-1 rounded border transition-all flex items-center gap-1 ${activeStatusFilter === 'active' ? 'bg-green-50 border-green-200 text-green-700' : 'bg-transparent border-transparent text-muted-foreground hover:text-foreground'
                   }`}
               >
-                ИИ
+                AI
               </button>
             </div>
 
@@ -649,10 +614,17 @@ function CommunicationsPage() {
                             </Badge>
                           ) : (
                             <Badge className="h-4 px-1 bg-green-500/10 border-green-500/20 text-green-600 hover:bg-green-500/10 text-[9px] gap-0.5 font-bold">
-                              <BotIcon className="h-2 w-2" /> ИИ
+                              <BotIcon className="h-2 w-2" /> AI
                             </Badge>
                           )}
 
+<<<<<<< HEAD
+=======
+                          {/* Lead Source Badge */}
+                          {lead.source && (
+                            <LeadSourceBadge source={lead.source} className="h-4 px-1 text-[8px] shrink-0" />
+                          )}
+>>>>>>> 4834611ce65171b0f637ae0dc4e5b0d6b0ba1e07
                         </div>
 
                         {/* Unread badge */}
@@ -737,7 +709,7 @@ function CommunicationsPage() {
                       : 'bg-green-50 border-green-200 text-green-700'
                     }`}>
                     {selectedLead.ai_paused ? (
-                      <span className="flex items-center gap-1"><HandIcon className="h-3.5 w-3.5" /> Ручной режим · ИИ ведет карточку</span>
+                      <span className="flex items-center gap-1"><HandIcon className="h-3.5 w-3.5" /> Ручной режим</span>
                     ) : (
                       <span className="flex items-center gap-1"><BotIcon className="h-3.5 w-3.5" /> Ассистент активен</span>
                     )}
@@ -756,8 +728,8 @@ function CommunicationsPage() {
                     {selectedLead.ai_paused ? (
                       <>
                         <PlayIcon className="h-3.5 w-3.5" />
-                        <span className="hidden sm:inline">Включить ИИ</span>
-                        <span className="sm:hidden">ИИ</span>
+                        <span className="hidden sm:inline">Включить AI</span>
+                        <span className="sm:hidden">AI</span>
                       </>
                     ) : (
                       <>
@@ -789,7 +761,7 @@ function CommunicationsPage() {
                     onClick={() => setShowRightSidebar(!showRightSidebar)}
                   >
                     <SlidersHorizontalIcon className="h-3.5 w-3.5" />
-                    <span className="hidden sm:inline">Карточка</span>
+                    <span className="hidden sm:inline">Профиль</span>
                   </Button>
                 </div>
               </div>
@@ -891,7 +863,7 @@ function CommunicationsPage() {
 
                               {sentBy && (
                                 <span className={`font-semibold ${isSent ? 'text-primary-foreground/60' : 'text-muted-foreground'}`}>
-                                  {sentBy}
+                                  {sentBy === 'ai' ? 'ИИ' : 'Менеджер'}
                                 </span>
                               )}
                               <span className={isSent ? 'text-primary-foreground/75' : 'text-muted-foreground'}>
@@ -920,7 +892,7 @@ function CommunicationsPage() {
 
                 {/* Templates and Quick utilities */}
                 <div className="flex items-center gap-2">
-                  <QuickRepliesPopover channel={activeChannel} onSelectTemplate={(text) => setMessage(prev => prev + text)} />
+                  <QuickRepliesPopover onSelectTemplate={(text) => setMessage(prev => prev + text)} />
 
                   {/* Emoji Picker */}
                   <Popover>
@@ -1022,7 +994,7 @@ function CommunicationsPage() {
               }}
               className="bg-red-600 text-white hover:bg-red-700"
             >
-              {isResettingAiMemory ? 'Сброс...' : 'Сбросить память ИИ'}
+              {isResettingAiMemory ? 'Сброс...' : 'Сбросить память AI'}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

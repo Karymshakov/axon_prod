@@ -17,8 +17,6 @@ from .instagram_service import instagram_service
 from .agent_service import agent_service
 from .agent_dispatcher import agent_dispatcher
 from .channel_ai_control import is_channel_ai_globally_paused
-from .services.discovery_sources import normalize_discovery_source
-from .services.passive_intake import infer_room_type_from_last_offer, run_passive_ai_intake
 
 logger = logging.getLogger(__name__)
 INSTAGRAM_GRAPH_API_VERSION = 'v25.0'
@@ -197,12 +195,10 @@ def _delayed_instagram_ai_response(
         # Respect manual takeover — manager paused AI via native Instagram app
         if lead.ai_paused and not force_response:
             logger.info(f"Lead {lead_id}: AI response skipped (ai_paused=True — manager in control)")
-            run_passive_ai_intake(lead, text, channel='instagram')
             return
 
         if is_channel_ai_globally_paused('instagram', config=config, lead=lead):
             logger.info(f"Lead {lead_id}: AI response skipped (Instagram AI paused globally)")
-            run_passive_ai_intake(lead, text, channel='instagram')
             return
 
         # Backfill username/contact_person if the webhook's username lookup failed.
@@ -334,7 +330,6 @@ def _delayed_instagram_ai_response(
                 logger.info(f"Lead {lead.id}: proceeding with AI response despite tier={tier}")
 
         if not will_respond:
-            run_passive_ai_intake(lead, combined_text, channel='instagram')
             return
 
         # Full activity history (all types, no cap) for complete context.
@@ -513,12 +508,7 @@ def _delayed_instagram_ai_response(
                 conversation_history_for_extract.append({"role": role, "content": msg_text})
 
             our_company_name = config.company_profile.split('\n')[0] if config.company_profile else None
-            extracted_data = ai_service.extract_lead_data(
-                combined_text,
-                conversation_history_for_extract,
-                our_company_name,
-                lead.organization,
-            )
+            extracted_data = ai_service.extract_lead_data(combined_text, conversation_history_for_extract, our_company_name)
             if extracted_data:
                 from apps.leads.services.stage_resolver import mark_name_confirmed_by_user
 
@@ -561,11 +551,6 @@ def _delayed_instagram_ai_response(
                     if lead.room_type_preference != extracted_data['room_type_preference']:
                         lead.room_type_preference = extracted_data['room_type_preference']
                         updated_fields.append('room_type_preference')
-                elif not lead.room_type_preference:
-                    inferred_room_type = infer_room_type_from_last_offer(lead, extracted_data, combined_text)
-                    if inferred_room_type:
-                        lead.room_type_preference = inferred_room_type
-                        updated_fields.append('room_type_preference')
 
                 if extracted_data.get('meal_plan'):
                     valid_meal_plans = {'none', 'breakfast', 'lunch', 'dinner', 'half_board_bl', 'half_board_bd', 'full_board'}
@@ -573,14 +558,6 @@ def _delayed_instagram_ai_response(
                         if lead.meal_plan != extracted_data['meal_plan']:
                             lead.meal_plan = extracted_data['meal_plan']
                             updated_fields.append('meal_plan')
-                if extracted_data.get('discovery_source'):
-                    discovery_source = normalize_discovery_source(extracted_data['discovery_source'], lead.organization)
-                    if discovery_source and lead.discovery_source != discovery_source:
-                        lead.discovery_source = discovery_source
-                        updated_fields.append('discovery_source')
-                if extracted_data.get('discovery_source_detail') and lead.discovery_source_detail != extracted_data['discovery_source_detail']:
-                    lead.discovery_source_detail = str(extracted_data['discovery_source_detail'])[:255]
-                    updated_fields.append('discovery_source_detail')
 
                 if updated_fields:
                     lead.save()
@@ -746,7 +723,6 @@ def instagram_webhook(request):
                         instagram_username=sender_username or '',
                         contact_person=f'@{sender_username}' if sender_username else '',
                         source='Instagram',
-                        contact_channel='instagram',
                         status=Lead.STATUS_NEW,
                         organization=_ig_org,
                         custom_fields={},

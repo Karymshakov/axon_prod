@@ -19,28 +19,6 @@ from .serializers import LoginSerializer, UserSerializer, UserProfileSerializer
 from .models import User
 
 
-def _ensure_valid_current_organization(user):
-    if not user or not user.is_authenticated or getattr(user, 'is_superadmin', False):
-        return user
-
-    current_org = getattr(user, 'current_organization', None)
-    if current_org and OrganizationMember.objects.filter(
-        organization=current_org,
-        user=user,
-        is_active=True,
-    ).exists():
-        return user
-
-    member = OrganizationMember.objects.filter(
-        user=user,
-        is_active=True,
-    ).select_related('organization').order_by('joined_at', 'id').first()
-    if member and user.current_organization_id != member.organization_id:
-        user.current_organization = member.organization
-        user.save(update_fields=['current_organization'])
-    return user
-
-
 def _can_export_dev_database(user) -> bool:
     if not user or not user.is_authenticated:
         return False
@@ -64,7 +42,7 @@ def _can_export_dev_database(user) -> bool:
 def login(request):
     serializer = LoginSerializer(data=request.data, context={'request': request})
     serializer.is_valid(raise_exception=True)
-    user = _ensure_valid_current_organization(serializer.validated_data['user'])
+    user = serializer.validated_data['user']
     refresh = RefreshToken.for_user(user)
     return Response({
         'access': str(refresh.access_token),
@@ -103,8 +81,7 @@ def logout(request):
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def get_me(request):
-    user = _ensure_valid_current_organization(request.user)
-    return Response(UserSerializer(user).data)
+    return Response(UserSerializer(request.user).data)
 
 
 @api_view(['PATCH'])

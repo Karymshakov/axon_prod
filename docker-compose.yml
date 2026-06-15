@@ -8,20 +8,20 @@ services:
     environment:
       POSTGRES_DB: ${DB_NAME:-axon_prod}
       POSTGRES_USER: ${DB_USER:-postgres}
-      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-admin}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     networks:
       - axon-net
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 10s
       timeout: 5s
       retries: 5
 
   # ─── Redis Broker / Cache ───────────────────────────────────────────────────
   redis:
-    image: redis:7-alpine
+    image: redis:7
     container_name: axon_redis
     restart: always
     volumes:
@@ -49,7 +49,7 @@ services:
     env_file:
       - .env
     environment:
-      DATABASE_URL: postgresql://${DB_USER:-postgres}:${DB_PASSWORD}@db:5432/${DB_NAME:-axon_prod}
+      DATABASE_URL: postgresql://${DB_USER:-postgres}:${DB_PASSWORD:-admin}@db:5432/${DB_NAME:-axon_prod}
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/0
       DJANGO_DEBUG: "False"
@@ -75,7 +75,7 @@ services:
     env_file:
       - .env
     environment:
-      DATABASE_URL: postgresql://${DB_USER:-postgres}:${DB_PASSWORD}@db:5432/${DB_NAME:-axon_prod}
+      DATABASE_URL: postgresql://${DB_USER:-postgres}:${DB_PASSWORD:-admin}@db:5432/${DB_NAME:-axon_prod}
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/0
       DJANGO_DEBUG: "False"
@@ -100,7 +100,7 @@ services:
     env_file:
       - .env
     environment:
-      DATABASE_URL: postgresql://${DB_USER:-postgres}:${DB_PASSWORD}@db:5432/${DB_NAME:-axon_prod}
+      DATABASE_URL: postgresql://${DB_USER:-postgres}:${DB_PASSWORD:-admin}@db:5432/${DB_NAME:-axon_prod}
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/0
       DJANGO_DEBUG: "False"

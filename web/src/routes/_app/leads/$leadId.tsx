@@ -1,18 +1,9 @@
-import { createFileRoute, Link, useNavigate } from '@tanstack/react-router'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowLeftIcon, MailIcon, PhoneIcon, AlertTriangleIcon, BotIcon, HandIcon, PlayIcon, MessageSquareIcon } from 'lucide-react'
+import { createFileRoute, Link } from '@tanstack/react-router'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { ArrowLeftIcon, MailIcon, PhoneIcon, SendIcon, AlertTriangleIcon, BotIcon, HandIcon, PlayIcon } from 'lucide-react'
 import { useState } from 'react'
 import { useLanguage } from '@/contexts/language-context'
-import {
-  fetchLead,
-  fetchPipelineStages,
-  getContactChannelLabel,
-  getLeadStatusLabel,
-  resolveLeadContactChannel,
-  updateLead,
-  triggerInstagramAiResponse,
-  toggleAiPause,
-} from '@/lib/api'
+import { fetchLead, sendTelegramMessage, sendInstagramMessageFromComms, updateLead, triggerInstagramAiResponse, toggleAiPause } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { InstagramIntentBadge, INTENT_TIER_CONFIG } from '@/components/lead-card'
@@ -28,7 +19,15 @@ import { LeadNotes } from '@/components/lead-notes'
 import { LeadActivityTimeline } from '@/components/lead-activity-timeline'
 import { LeadTasks } from '@/components/lead-tasks'
 import { LeadGoals } from '@/components/lead-goals'
-import { useLeadDiscoverySources } from '@/hooks/use-lead-discovery-sources'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import { Textarea } from '@/components/ui/textarea'
 import { toast } from 'sonner'
 
 export const Route = createFileRoute('/_app/leads/$leadId')({
@@ -39,30 +38,58 @@ function LeadDetailPage() {
   const { t } = useLanguage()
   const { leadId } = Route.useParams()
   const leadIdNum = parseInt(leadId, 10)
+  const [telegramDialogOpen, setTelegramDialogOpen] = useState(false)
+  const [telegramMessage, setTelegramMessage] = useState('')
+  const [instagramDialogOpen, setInstagramDialogOpen] = useState(false)
+  const [instagramMessage, setInstagramMessage] = useState('')
   const [isTriggeringAi, setIsTriggeringAi] = useState(false)
-  const navigate = useNavigate()
   const queryClient = useQueryClient()
-  const discoverySourceOptions = useLeadDiscoverySources()
 
   const { data: lead, isLoading } = useQuery({
     queryKey: ['lead', leadIdNum],
     queryFn: () => fetchLead(leadIdNum),
   })
 
-  const { data: stages = [] } = useQuery({
-    queryKey: ['pipeline-stages'],
-    queryFn: fetchPipelineStages,
+  const sendTelegramMutation = useMutation({
+    mutationFn: (message: string) => sendTelegramMessage(leadIdNum, message),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['lead-activities', leadIdNum] })
+      setTelegramDialogOpen(false)
+      setTelegramMessage('')
+      toast.success(t('leads.telegramSentSuccess'))
+    },
+    onError: (error: any) => {
+      toast.error(error?.data?.error || t('leads.telegramSentError'))
+    },
   })
 
-  const openLeadChat = () => {
-    const channel = lead ? resolveLeadContactChannel(lead) : ''
-    navigate({
-      to: '/communications',
-      search: {
-        leadId: String(leadIdNum),
-        channel: channel || undefined,
-      } as never,
-    })
+  const sendInstagramMutation = useMutation({
+    mutationFn: (message: string) => sendInstagramMessageFromComms(leadIdNum, message),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['lead-activities', leadIdNum] })
+      setInstagramDialogOpen(false)
+      setInstagramMessage('')
+      toast.success(t('leads.instagramSentSuccess'))
+    },
+    onError: (error: any) => {
+      toast.error(error?.data?.error || t('leads.instagramSentError'))
+    },
+  })
+
+  const handleSendTelegram = () => {
+    if (!telegramMessage.trim()) {
+      toast.error(t('leads.enterMessage'))
+      return
+    }
+    sendTelegramMutation.mutate(telegramMessage)
+  }
+
+  const handleSendInstagram = () => {
+    if (!instagramMessage.trim()) {
+      toast.error(t('leads.enterMessage'))
+      return
+    }
+    sendInstagramMutation.mutate(instagramMessage)
   }
 
   const getStatusColor = (status: string): 'default' | 'secondary' | 'destructive' | 'outline' => {
@@ -96,9 +123,6 @@ function LeadDetailPage() {
     )
   }
 
-  const stageName = getLeadStatusLabel(lead.status, stages)
-  const discoverySourceLabel = discoverySourceOptions.find((option) => option.value === lead.discovery_source)?.label
-
   return (
     <div className="flex flex-1 flex-col">
       <div className="flex flex-1 flex-col gap-2">
@@ -115,7 +139,7 @@ function LeadDetailPage() {
 
               <div className="flex items-start justify-between gap-4">
                 <div>
-                  <h1 className="text-2xl font-bold">{lead.contact_person || 'Без имени'}</h1>
+                  <h1 className="text-2xl font-bold">{lead.contact_person || 'Unnamed Lead'}</h1>
 
                   {/* Contact details inline */}
                   <div className="flex items-center gap-3 mt-1 text-sm">
@@ -135,18 +159,15 @@ function LeadDetailPage() {
 
                   <div className="flex flex-wrap items-center gap-2 mt-2">
                     <Badge variant={getStatusColor(lead.status)}>
-                      {stageName}
+                      {lead.status.charAt(0).toUpperCase() + lead.status.slice(1)}
                     </Badge>
-                    {resolveLeadContactChannel(lead) ? (
-                      <Badge variant="outline">{getContactChannelLabel(resolveLeadContactChannel(lead))}</Badge>
-                    ) : null}
-                    {lead.discovery_source ? (
-                      <LeadSourceBadge source={lead.discovery_source} label={discoverySourceLabel} />
+                    {lead.source ? (
+                      <LeadSourceBadge source={lead.source} />
                     ) : null}
                     {lead.ai_paused ? (
                       <Badge className="gap-1 bg-amber-500 text-white hover:bg-amber-500">
                         <HandIcon className="h-3 w-3" />
-                        Ручной режим
+                        Manual Mode
                       </Badge>
                     ) : null}
                     {lead.instagram_intent_tier ? (
@@ -158,9 +179,12 @@ function LeadDetailPage() {
                         {t('leads.objectionLabel')} {lead.current_objection_display}
                       </Badge>
                     ) : null}
+                    {lead.active_goals_count > 0 ? (
+                      <Badge variant="secondary">{lead.active_goals_count} {t('leads.activeGoalsSection')}</Badge>
+                    ) : null}
                   </div>
 
-                  {/* ИИ Control — Взять управление / Вернуть ИИ */}
+                  {/* AI Control — Взять управление / Вернуть AI */}
                   <div className={`flex items-center gap-3 mt-3 p-3 rounded-md border ${lead.ai_paused ? 'bg-amber-50 border-amber-200' : 'bg-green-50 border-green-200'}`}>
                     {lead.ai_paused ? (
                       <>
@@ -168,11 +192,11 @@ function LeadDetailPage() {
                           <div className="flex items-center gap-2">
                             <Badge className="bg-amber-500 text-white hover:bg-amber-500 gap-1 shrink-0">
                               <HandIcon className="h-3 w-3" />
-                              Ручной режим
+                              You're in control
                             </Badge>
                             {lead.ai_paused_at ? (
                               <span className="text-xs text-amber-600 truncate">
-                                 {new Date(lead.ai_paused_at).toLocaleDateString('ru-RU', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
+                                 \{new Date(lead.ai_paused_at).toLocaleDateString('ru-RU', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
                               </span>
                             ) : null}
                           </div>
@@ -186,14 +210,14 @@ function LeadDetailPage() {
                               queryClient.invalidateQueries({ queryKey: ['lead', leadIdNum] })
                               queryClient.invalidateQueries({ queryKey: ['leads'] })
                               queryClient.invalidateQueries({ queryKey: ['lead-activities', leadIdNum] })
-                              toast.success('ИИ-агент снова включен')
+                              toast.success('AI-агент снова включен')
                             } catch {
-                              toast.error('Не удалось переключить ИИ')
+                              toast.error('Не удалось переключить AI')
                             }
                           }}
                         >
                           <PlayIcon className="h-3.5 w-3.5" />
-                          Вернуть ИИ
+                          Вернуть AI
                         </Button>
                       </>
                     ) : (
@@ -202,7 +226,7 @@ function LeadDetailPage() {
                           <div className="flex items-center gap-2">
                             <Badge className="bg-green-600 text-white hover:bg-green-600 gap-1 shrink-0">
                               <BotIcon className="h-3 w-3" />
-                              ИИ активен
+                              AI активен
                             </Badge>
                           </div>
                         </div>
@@ -216,9 +240,9 @@ function LeadDetailPage() {
                               queryClient.invalidateQueries({ queryKey: ['lead', leadIdNum] })
                               queryClient.invalidateQueries({ queryKey: ['leads'] })
                               queryClient.invalidateQueries({ queryKey: ['lead-activities', leadIdNum] })
-                              toast.success('ИИ на паузе — управление перешло к вам')
+                              toast.success('AI на паузе — управление перешло к вам')
                             } catch {
-                              toast.error('Не удалось переключить ИИ')
+                              toast.error('Не удалось переключить AI')
                             }
                           }}
                         >
@@ -276,10 +300,18 @@ function LeadDetailPage() {
                   ) : null}
                 </div>
                 <div className="flex flex-wrap gap-2">
-                  <Button onClick={openLeadChat} className="gap-2">
-                    <MessageSquareIcon className="h-4 w-4" />
-                    Открыть чат
-                  </Button>
+                  {lead.telegram_chat_id ? (
+                    <Button onClick={() => setTelegramDialogOpen(true)}>
+                      <SendIcon className="h-4 w-4 mr-2" />
+                      {t('leads.sendTelegramMessage')}
+                    </Button>
+                  ) : null}
+                  {lead.instagram_user_id ? (
+                    <Button onClick={() => setInstagramDialogOpen(true)}>
+                      <SendIcon className="h-4 w-4 mr-2" />
+                      {t('leads.sendInstagramDM')}
+                    </Button>
+                  ) : null}
                 </div>
               </div>
             </div>
@@ -287,15 +319,116 @@ function LeadDetailPage() {
 
           {/* Content */}
           <div className="px-4 lg:px-6">
-            <div className="grid gap-4 xl:grid-cols-2">
+            <div className="grid gap-4 md:grid-cols-2">
+              {/* Tasks & Reminders */}
               <LeadTasks leadId={leadIdNum} />
+
+              {/* Conversation Goals */}
               <LeadGoals leadId={leadIdNum} />
+
+              {/* Activity Timeline */}
               <LeadActivityTimeline leadId={leadIdNum} />
+
+              {/* Notes */}
               <LeadNotes leadId={leadIdNum} />
             </div>
           </div>
         </div>
       </div>
+
+      {/* Telegram Message Dialog */}
+      <Dialog open={telegramDialogOpen} onOpenChange={setTelegramDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t('leads.sendTelegramMessage')}</DialogTitle>
+            <DialogDescription>
+              {t('leads.sendMessageTo')} {lead.contact_person} {t('leads.viaTelegram')}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <label htmlFor="telegram-message" className="text-sm font-medium">
+                {t('leads.message')}
+              </label>
+              <Textarea
+                id="telegram-message"
+                placeholder={t('leads.messagePlaceholder')}
+                value={telegramMessage}
+                onChange={(e) => setTelegramMessage(e.target.value)}
+                rows={6}
+                maxLength={4096}
+              />
+              <p className="text-xs text-muted-foreground">
+                {telegramMessage.length} / 4096 characters
+              </p>
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setTelegramDialogOpen(false)
+                setTelegramMessage('')
+              }}
+            >
+              {t('common.cancel')}
+            </Button>
+            <Button
+              onClick={handleSendTelegram}
+              disabled={sendTelegramMutation.isPending || !telegramMessage.trim()}
+            >
+              {sendTelegramMutation.isPending ? t('leads.sending') : t('leads.sendMessage')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Instagram Message Dialog */}
+      <Dialog open={instagramDialogOpen} onOpenChange={setInstagramDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t('leads.sendInstagramDM')}</DialogTitle>
+            <DialogDescription>
+              {t('leads.sendMessageTo')} {lead.contact_person} {t('leads.viaInstagram')}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <label htmlFor="instagram-message" className="text-sm font-medium">
+                {t('leads.message')}
+              </label>
+              <Textarea
+                id="instagram-message"
+                placeholder={t('leads.messagePlaceholder')}
+                value={instagramMessage}
+                onChange={(e) => setInstagramMessage(e.target.value)}
+                rows={6}
+              />
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setInstagramDialogOpen(false)
+                setInstagramMessage('')
+              }}
+            >
+              {t('common.cancel')}
+            </Button>
+            <Button
+              onClick={handleSendInstagram}
+              disabled={sendInstagramMutation.isPending || !instagramMessage.trim()}
+            >
+              {sendInstagramMutation.isPending ? t('leads.sending') : t('leads.sendMessage')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
