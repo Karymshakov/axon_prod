@@ -12,21 +12,36 @@ jobs:
     steps:
       - name: Deploy via SSH
         uses: appleboy/ssh-action@v1.2.0
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
         with:
           host: ${{ secrets.HOST }}
           username: ${{ secrets.USERNAME }}
           key: ${{ secrets.SSH_KEY }}
           port: ${{ secrets.PORT }}
+          envs: DOCKERHUB_USERNAME,DOCKERHUB_TOKEN
           script: |
+            set -e
+
             cd /home/Axon_prod/Axon_prod/axon_prod
 
             git fetch origin
             git reset --hard origin/master
 
-            docker compose down
-            if ! docker compose up -d --build; then
-              echo "=== POSTGRES LOGS ==="
-              docker compose logs db
-              echo "====================="
+            if [ -n "$DOCKERHUB_USERNAME" ] && [ -n "$DOCKERHUB_TOKEN" ]; then
+              echo "$DOCKERHUB_TOKEN" | docker login -u "$DOCKERHUB_USERNAME" --password-stdin
+            fi
+
+            if ! docker compose pull db redis; then
+              echo "=== IMAGE PULL FAILED: RUNNING CONTAINERS WERE NOT STOPPED ==="
               exit 1
             fi
+
+            if ! docker compose build; then
+              echo "=== BUILD FAILED: RUNNING CONTAINERS WERE NOT STOPPED ==="
+              exit 1
+            fi
+
+            docker compose up -d --remove-orphans
+            docker compose ps
