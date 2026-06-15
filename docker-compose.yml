@@ -2,7 +2,7 @@
 services:
   # ─── PostgreSQL Database ────────────────────────────────────────────────────
   db:
-    image: ${POSTGRES_IMAGE:-postgres:17}
+    image: ${POSTGRES_IMAGE:-mirror.gcr.io/library/postgres:17}
     container_name: axon_postgres
     restart: always
     environment:
@@ -21,7 +21,7 @@ services:
 
   # ─── Redis Broker / Cache ───────────────────────────────────────────────────
   redis:
-    image: ${REDIS_IMAGE:-redis:7}
+    image: ${REDIS_IMAGE:-mirror.gcr.io/library/redis:7}
     container_name: axon_redis
     restart: always
     volumes:
@@ -40,7 +40,7 @@ services:
       context: ./backend
       dockerfile: Dockerfile
       args:
-        PYTHON_IMAGE: ${PYTHON_IMAGE:-python:3.12-slim}
+        PYTHON_IMAGE: ${PYTHON_IMAGE:-mirror.gcr.io/library/python:3.12-slim}
     container_name: axon_backend
     restart: always
     depends_on:
@@ -67,7 +67,7 @@ services:
       context: ./backend
       dockerfile: Dockerfile
       args:
-        PYTHON_IMAGE: ${PYTHON_IMAGE:-python:3.12-slim}
+        PYTHON_IMAGE: ${PYTHON_IMAGE:-mirror.gcr.io/library/python:3.12-slim}
     container_name: axon_celery_worker
     restart: always
     command: celery -A config worker --loglevel=info
@@ -94,7 +94,7 @@ services:
       context: ./backend
       dockerfile: Dockerfile
       args:
-        PYTHON_IMAGE: ${PYTHON_IMAGE:-python:3.12-slim}
+        PYTHON_IMAGE: ${PYTHON_IMAGE:-mirror.gcr.io/library/python:3.12-slim}
     container_name: axon_celery_beat
     restart: always
     command: celery -A config beat --loglevel=info --schedule=/tmp/celerybeat-schedule
@@ -121,8 +121,8 @@ services:
       context: ./web
       dockerfile: Dockerfile
       args:
-        NODE_IMAGE: ${NODE_IMAGE:-node:20-alpine}
-        NGINX_IMAGE: ${NGINX_IMAGE:-nginx:1.25-alpine}
+        NODE_IMAGE: ${NODE_IMAGE:-mirror.gcr.io/library/node:20-alpine}
+        NGINX_IMAGE: ${NGINX_IMAGE:-mirror.gcr.io/library/nginx:1.25-alpine}
     container_name: axon_frontend
     restart: always
     ports:

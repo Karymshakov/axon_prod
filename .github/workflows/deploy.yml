@@ -12,15 +12,11 @@ jobs:
     steps:
       - name: Deploy via SSH
         uses: appleboy/ssh-action@v1.2.0
-        env:
-          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
-          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
         with:
           host: ${{ secrets.HOST }}
           username: ${{ secrets.USERNAME }}
           key: ${{ secrets.SSH_KEY }}
           port: ${{ secrets.PORT }}
-          envs: DOCKERHUB_USERNAME,DOCKERHUB_TOKEN
           script: |
             set -e
 
@@ -29,18 +25,21 @@ jobs:
             git fetch origin
             git reset --hard origin/master
 
-            if [ -n "$DOCKERHUB_USERNAME" ] && [ -n "$DOCKERHUB_TOKEN" ]; then
-              echo "$DOCKERHUB_TOKEN" | docker login -u "$DOCKERHUB_USERNAME" --password-stdin
-            fi
+            export PYTHON_IMAGE="${PYTHON_IMAGE:-mirror.gcr.io/library/python:3.12-slim}"
+            export NODE_IMAGE="${NODE_IMAGE:-mirror.gcr.io/library/node:20-alpine}"
+            export NGINX_IMAGE="${NGINX_IMAGE:-mirror.gcr.io/library/nginx:1.25-alpine}"
+            export POSTGRES_IMAGE="${POSTGRES_IMAGE:-mirror.gcr.io/library/postgres:17}"
+            export REDIS_IMAGE="${REDIS_IMAGE:-mirror.gcr.io/library/redis:7}"
 
-            if ! docker compose pull db redis; then
-              echo "=== IMAGE PULL FAILED: RUNNING CONTAINERS WERE NOT STOPPED ==="
-              exit 1
-            fi
-
-            if ! docker compose build; then
-              echo "=== BUILD FAILED: RUNNING CONTAINERS WERE NOT STOPPED ==="
-              exit 1
+            if ! docker compose pull db redis || ! docker compose build; then
+              echo "=== PRIMARY PUBLIC MIRROR FAILED: TRYING AWS PUBLIC ECR ==="
+              export PYTHON_IMAGE="public.ecr.aws/docker/library/python:3.12-slim"
+              export NODE_IMAGE="public.ecr.aws/docker/library/node:20-alpine"
+              export NGINX_IMAGE="public.ecr.aws/docker/library/nginx:1.25-alpine"
+              export POSTGRES_IMAGE="public.ecr.aws/docker/library/postgres:17"
+              export REDIS_IMAGE="public.ecr.aws/docker/library/redis:7"
+              docker compose pull db redis
+              docker compose build
             fi
 
             docker compose up -d --remove-orphans

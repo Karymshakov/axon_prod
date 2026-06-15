@@ -1,5 +1,5 @@
 # --- Stage 1: Build ---
-ARG NODE_IMAGE=node:20-alpine
+ARG NODE_IMAGE=mirror.gcr.io/library/node:20-alpine
 FROM ${NODE_IMAGE} AS build
 
 WORKDIR /app
@@ -13,7 +13,7 @@ COPY . .
 RUN npm run build
 
 # --- Stage 2: Serve ---
-ARG NGINX_IMAGE=nginx:1.25-alpine
+ARG NGINX_IMAGE=mirror.gcr.io/library/nginx:1.25-alpine
 FROM ${NGINX_IMAGE}
 
 # Copy compiled Vite output to Nginx html root

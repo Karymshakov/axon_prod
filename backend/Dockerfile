@@ -1,4 +1,4 @@
-ARG PYTHON_IMAGE=python:3.12-slim
+ARG PYTHON_IMAGE=mirror.gcr.io/library/python:3.12-slim
 FROM ${PYTHON_IMAGE}
 
 # Set environment variables
