@@ -381,8 +381,6 @@ class GlobalChannelAiPauseTests(TestCase):
         self.assertTrue(response.data['success'])
         send_mock.assert_called_once_with(self.lead.whatsapp_phone, 'Manual whatsapp reply', org=self.org, raise_exception=True)
 
-
-<<<<<<< HEAD
 class PassiveAiIntakeTests(TestCase):
     def setUp(self):
         user_model = get_user_model()
@@ -515,8 +513,6 @@ class PassiveAiIntakeTests(TestCase):
         self.assertEqual(self.lead.meal_plan, 'breakfast')
 
 
-=======
->>>>>>> 4834611ce65171b0f637ae0dc4e5b0d6b0ba1e07
 class ResetAiMemoryTests(TestCase):
     def setUp(self):
         user_model = get_user_model()

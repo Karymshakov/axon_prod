@@ -25,11 +25,7 @@ interface LeadCardProps {
   onEdit: (lead: Lead) => void
 }
 
-<<<<<<< HEAD
-export function LeadCard({ lead, onOpen, onOpenChat }: LeadCardProps) {
-=======
 export function LeadCard({ lead }: LeadCardProps) {
->>>>>>> 4834611ce65171b0f637ae0dc4e5b0d6b0ba1e07
   const navigate = useNavigate()
 
   const formatDate = (dateString: string | null) => {
@@ -96,12 +92,6 @@ export function LeadCard({ lead }: LeadCardProps) {
           {lead.instagram_intent_tier ? (
             <InstagramIntentBadge tier={lead.instagram_intent_tier} />
           ) : null}
-<<<<<<< HEAD
-=======
-          {lead.source ? (
-            <LeadSourceBadge source={lead.source} />
-          ) : null}
->>>>>>> 4834611ce65171b0f637ae0dc4e5b0d6b0ba1e07
         </div>
 
         <div className="mt-3 space-y-1.5">

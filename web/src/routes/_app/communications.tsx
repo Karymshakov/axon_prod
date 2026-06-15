@@ -617,14 +617,6 @@ function CommunicationsPage() {
                               <BotIcon className="h-2 w-2" /> AI
                             </Badge>
                           )}
-
-<<<<<<< HEAD
-=======
-                          {/* Lead Source Badge */}
-                          {lead.source && (
-                            <LeadSourceBadge source={lead.source} className="h-4 px-1 text-[8px] shrink-0" />
-                          )}
->>>>>>> 4834611ce65171b0f637ae0dc4e5b0d6b0ba1e07
                         </div>
 
                         {/* Unread badge */}
