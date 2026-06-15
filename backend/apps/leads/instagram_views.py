@@ -392,6 +392,8 @@ def _delayed_instagram_ai_response(
             'guest_count': lead.guest_count,
             'room_type_preference': lead.room_type_preference,
             'meal_plan': lead.meal_plan,
+            'discovery_source': lead.discovery_source,
+            'discovery_source_detail': lead.discovery_source_detail,
         }
         ai_response = agent_dispatcher.dispatch(
             lead, combined_text, lead_data, conversation_history,
@@ -518,12 +520,16 @@ def _delayed_instagram_ai_response(
                 lead.organization,
             )
             if extracted_data:
+                from apps.leads.services.stage_resolver import mark_name_confirmed_by_user
+
                 updated_fields = []
 
                 if extracted_data.get('contact_person'):
                     if lead.contact_person != extracted_data['contact_person']:
                         lead.contact_person = extracted_data['contact_person']
                         updated_fields.append('contact_person')
+                    if mark_name_confirmed_by_user(lead):
+                        updated_fields.append('agent_context')
 
                 if extracted_data.get('phone'):
                     if lead.phone != extracted_data['phone']:

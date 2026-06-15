@@ -32,11 +32,35 @@ LEAD_STAGE_FIELDS = (
 )
 
 
+def mark_name_confirmed_by_user(lead) -> bool:
+    """Mark the saved lead name as user-confirmed by AI extraction/state."""
+    if lead is None:
+        return False
+    context = dict(getattr(lead, 'agent_context', None) or {})
+    if context.get('name_confirmed_by_user') is True:
+        return False
+    context['name_confirmed_by_user'] = True
+    lead.agent_context = context
+    return True
+
+
+def _name_confirmed_by_user(lead, name: str) -> bool:
+    if lead is None or not name:
+        return False
+    context = getattr(lead, 'agent_context', None) or {}
+    if context.get('name_confirmed_by_user') is not True:
+        return False
+    saved_name = str(getattr(lead, 'contact_person', '') or '').strip()
+    return not saved_name or saved_name == name
+
+
 def is_reliable_contact_person(lead, value: Any | None = None) -> bool:
     """Return True when contact_person looks like a real guest name, not a handle."""
     name = str(value if value is not None else getattr(lead, 'contact_person', '') or '').strip()
     if not has_stage_value(name):
         return False
+    if _name_confirmed_by_user(lead, name):
+        return True
 
     lowered = name.lower().lstrip('@')
     telegram_username = str(getattr(lead, 'telegram_username', '') or '').lower().lstrip('@')

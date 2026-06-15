@@ -127,7 +127,7 @@ ASGI_APPLICATION = 'config.asgi.application'
 
 # Database
 DATABASES = {
-    'default': env.db('DATABASE_URL', default='postgresql://postgres:postgres@localhost:5433/app_dev')
+    'default': env.db('DATABASE_URL', default='postgresql://postgres:postgres@localhost:5432/app_dev')
 }
 
 # Internationalization
@@ -250,11 +250,13 @@ CELERY_TIMEZONE = TIME_ZONE
 
 # Celery Beat Schedule (periodic tasks)
 # The AI agent check frequency is configurable via AIConfig.check_frequency_hours
-# This schedule runs hourly and the task itself checks if it should actually execute
+# This schedule runs often enough for exact short reminders; the task itself
+# still checks AIConfig.check_frequency_hours for generic follow-up cadence.
+AI_AGENT_BEAT_SECONDS = env.float('AI_AGENT_BEAT_SECONDS', default=60.0)
 CELERY_BEAT_SCHEDULE = {
     'ai-agent-check': {
         'task': 'leads.run_agent_check',
-        'schedule': 1800.0,  # Every 30 min — catches short promises ("через пару часов")
+        'schedule': AI_AGENT_BEAT_SECONDS,
     },
 }
 

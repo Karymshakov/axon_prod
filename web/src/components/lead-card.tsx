@@ -5,7 +5,6 @@ import { getContactChannelLabel, resolveLeadContactChannel, type Lead } from '@/
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { LeadSourceBadge } from '@/components/lead-source-badge'
 
 export const INTENT_TIER_CONFIG = {
   booking_intent: { label: 'Намерение забронировать', className: 'bg-green-100 text-green-800 border-green-200' },
@@ -30,7 +29,7 @@ interface LeadCardProps {
   discoverySourceLabel?: string
 }
 
-export function LeadCard({ lead, onOpen, onOpenChat, discoverySourceLabel }: LeadCardProps) {
+export function LeadCard({ lead, onOpen, onOpenChat }: LeadCardProps) {
   const navigate = useNavigate()
   const channel = resolveLeadContactChannel(lead)
 
@@ -135,9 +134,6 @@ export function LeadCard({ lead, onOpen, onOpenChat, discoverySourceLabel }: Lea
           )}
           {lead.instagram_intent_tier ? (
             <InstagramIntentBadge tier={lead.instagram_intent_tier} />
-          ) : null}
-          {lead.discovery_source ? (
-            <LeadSourceBadge source={lead.discovery_source} label={discoverySourceLabel} />
           ) : null}
         </div>
 

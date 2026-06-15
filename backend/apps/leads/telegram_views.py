@@ -70,29 +70,6 @@ def _is_our_company(name: str, company_profile: str) -> bool:
 # check for pre-existing uncompressed files (legacy fallback at send time).
 _TELEGRAM_PHOTO_MAX_BYTES = 8 * 1024 * 1024   # 8 MB safety threshold
 
-# Keywords that indicate the guest is explicitly requesting photos or visuals.
-# Media selection is only attempted when one of these appears in the message —
-# this prevents the AI from spontaneously sending photos when the guest hasn't asked.
-_PHOTO_REQUEST_KEYWORDS = frozenset([
-    # English
-    'photo', 'photos', 'picture', 'pictures', 'pic', 'pics', 'image', 'images',
-    'show me', 'can i see', 'send me', 'what does it look like', 'how does it look',
-    'look like', 'looks like', 'see the room', 'see photos', 'see pictures',
-    # Russian
-    'фото', 'фотографи', 'фотку', 'фотки', 'покажи', 'покажите',
-    'посмотреть', 'как выглядит', 'как выглядают', 'пришли', 'пришлите',
-    'покажи фото', 'фотографии',
-    # Kyrgyz
-    'сүрөт', 'сүрөттөр',
-])
-
-
-def _guest_wants_photos(text: str) -> bool:
-    """Return True only if the guest is explicitly asking to see photos or visuals."""
-    text_lower = text.lower()
-    return any(kw in text_lower for kw in _PHOTO_REQUEST_KEYWORDS)
-
-
 def _split_into_messages(text: str) -> list:
     """
     Split a multi-paragraph AI response into individual chat messages by double newlines.
@@ -395,12 +372,9 @@ def _delayed_ai_response(lead_id: int, activity_id: int, chat_id: str, text: str
             status='info',
         )
 
-        recent_context = "\n".join([m["content"] for m in conversation_history[-6:]])
-        selected_media = (
-            ai_service.select_media_for_response(combined_text, recent_context, organization=lead.organization)
-            if _guest_wants_photos(combined_text)
-            else None
-        )
+        # Media sending should be decided by the configured AI flow/tool prompt,
+        # not by channel-level keyword matching.
+        selected_media = None
 
         fast_updated = _apply_fast_lead_extraction(lead, combined_text)
         if fast_updated:
@@ -416,6 +390,8 @@ def _delayed_ai_response(lead_id: int, activity_id: int, chat_id: str, text: str
             'guest_count': lead.guest_count,
             'room_type_preference': lead.room_type_preference,
             'meal_plan': lead.meal_plan,
+            'discovery_source': lead.discovery_source,
+            'discovery_source_detail': lead.discovery_source_detail,
         }
 
         def _generate_ai_response() -> str | None:
@@ -712,11 +688,16 @@ def _delayed_ai_response(lead_id: int, activity_id: int, chat_id: str, text: str
                     lead.organization,
                 )
             if extracted_data:
+                from apps.leads.services.stage_resolver import mark_name_confirmed_by_user
+
                 updated_fields = []
 
-                if extracted_data.get('contact_person') and lead.contact_person != extracted_data['contact_person']:
-                    lead.contact_person = extracted_data['contact_person']
-                    updated_fields.append('contact_person')
+                if extracted_data.get('contact_person'):
+                    if lead.contact_person != extracted_data['contact_person']:
+                        lead.contact_person = extracted_data['contact_person']
+                        updated_fields.append('contact_person')
+                    if mark_name_confirmed_by_user(lead):
+                        updated_fields.append('agent_context')
                 if extracted_data.get('phone') and lead.phone != extracted_data['phone']:
                     lead.phone = extracted_data['phone']
                     updated_fields.append('phone')

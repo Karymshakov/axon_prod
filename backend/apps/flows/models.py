@@ -213,7 +213,9 @@ class ManagerTransferConfig(models.Model):
             'Custom notification message template. Leave blank to use the default. '
             'Available variables: {reason}, {guest_name}, {guest_phone}, {guest_email}, '
             '{platform}, {checkin_date}, {checkout_date}, {nights}, {guest_count}, '
-            '{room_description}, {meal_plan}, {price_per_night}, {total_price}, {notes}, {contact_id}'
+            '{room_description}, {meal_plan}, {price_per_night}, {total_price}, '
+            '{discovery_source}, {discovery_source_detail}, {notes}, {contact_id}, '
+            '{business_name}'
         ),
     )
     updated_at = models.DateTimeField(auto_now=True)

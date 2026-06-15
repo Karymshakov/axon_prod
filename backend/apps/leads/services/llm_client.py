@@ -4,7 +4,7 @@ import time
 import logging
 import re
 from difflib import SequenceMatcher
-from datetime import datetime
+from datetime import datetime, date
 from typing import NamedTuple
 from zoneinfo import ZoneInfo
 from openai import OpenAI
@@ -47,6 +47,53 @@ from apps.leads.services.stage_resolver import is_reliable_contact_person
 logger = logging.getLogger(__name__)
 
 _BISHKEK_TZ = ZoneInfo('Asia/Bishkek')
+
+
+def _coerce_iso_date(value) -> date | None:
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    if not value:
+        return None
+    try:
+        return date.fromisoformat(str(value)[:10])
+    except (TypeError, ValueError):
+        return None
+
+
+def _same_day_booking_cutoff_instruction(checkin_value, *, org=None, now: datetime | None = None) -> str:
+    checkin_date = _coerce_iso_date(checkin_value)
+    if checkin_date is None:
+        return ''
+    now = now or datetime.now(_BISHKEK_TZ)
+    if checkin_date != now.date():
+        return ''
+
+    settings = getattr(org, 'org_settings', None) or {}
+    if not isinstance(settings, dict):
+        settings = {}
+    if settings.get('same_day_booking_cutoff_enabled', True) is False:
+        return ''
+
+    try:
+        cutoff_hour = int(settings.get('same_day_booking_cutoff_hour', 16))
+    except (TypeError, ValueError):
+        cutoff_hour = 16
+    cutoff_hour = max(0, min(23, cutoff_hour))
+    if now.hour < cutoff_hour:
+        return ''
+
+    checkin_time = str(settings.get('check_in_time') or '14:00').strip() or '14:00'
+    tomorrow_iso = date.fromordinal(now.date().toordinal() + 1).isoformat()
+    return (
+        f"Current local time is after the same-day booking cutoff ({cutoff_hour:02d}:00). "
+        f"The guest's requested check-in date is today ({checkin_date.isoformat()}). "
+        "Do NOT confirm, quote as ready, or proceed as if same-day arrival is bookable now. "
+        f"Tell the guest briefly that check-in is handled during the hotel's check-in hours "
+        f"(default/check-in from {checkin_time}; if configured hotel info says otherwise, use it), "
+        f"and offer to book from tomorrow ({tomorrow_iso}) instead."
+    )
 
 
 class _PromptBuildResult(NamedTuple):
@@ -932,6 +979,13 @@ class AIService:
         _known_checkin = _ld_for_rules.get('check_in_date') or (str(lead.check_in_date) if lead and lead.check_in_date else None)
         _known_checkout = _ld_for_rules.get('check_out_date') or (str(lead.check_out_date) if lead and lead.check_out_date else None)
         _room_pref = str(_ld_for_rules.get('room_type_preference') or '').lower()
+        _same_day_cutoff_instruction = _same_day_booking_cutoff_instruction(_known_checkin, org=_org, now=now)
+        if _same_day_cutoff_instruction:
+            messages.add_system(
+                'same_day_booking_cutoff',
+                'SAME-DAY BOOKING CUTOFF',
+                _same_day_cutoff_instruction,
+            )
         _separate_room_request = wants_separate_room_options(message)
         if _separate_room_request:
             messages.add_system(
@@ -1002,7 +1056,7 @@ class AIService:
                 or str(getattr(selected_media, 'category', '') or '').lower() in {'rooms', 'room', 'номер', 'номера'}
             )
             _message_requests_room_photos = bool(
-                re.search(r'(фото|фотк|покаж|смотр|image|photo|picture)', _msg_lower)
+                re.search(r'(фот|фото|фотк|покаж|смотр|image|photo|picture)', _msg_lower)
                 and re.search(r'(номер|номеров|комнат|room|rooms)', _msg_lower)
             )
             try:
@@ -1598,8 +1652,10 @@ Example output:
         Run LLM tool-call loop (≤3 rounds). On API error retries with backoff then falls back to no-tools.
         Returns: (response_text, needs_manager_transfer, transfer_trigger_args, transfer_already_called, last_transfer_args)
         """
+        org = _org_from_lead(lead)
+        business_name = getattr(org, 'name', '') or 'нашем отеле'
         _FALLBACK_MSG = (
-            "Добрый день! 🌊 Рады приветствовать вас в Nomad Camp.\n"
+            f"Добрый день! 🌊 Рады приветствовать вас в {business_name}.\n"
             "Сейчас не получилось быстро проверить детали по вашему сообщению. "
             "Напишите, пожалуйста, ещё раз - я обязательно помогу 🙏"
         )
@@ -1658,7 +1714,7 @@ Example output:
                     tool_msgs.append({"role": "tool", "tool_call_id": tc.id, "content": result_json})
                     return
 
-            if tc.function.name in ('get_room_options', 'get_family_room'):
+            if tc.function.name in ('get_room_options', 'get_family_room', 'get_room_images'):
                 from apps.leads.services.booking_tools import normalize_booking_tool_args
                 normalized = normalize_booking_tool_args(
                     tc.function.name, tc_args, message, conversation_history, lead_data, lead,

@@ -662,6 +662,8 @@ class PassiveAiIntakeTests(TestCase):
         self.assertEqual(self.lead.guest_count, 4)
         self.assertEqual(self.lead.discovery_source, 'friends')
         self.assertEqual(self.lead.discovery_source_detail, 'посоветовали друзья')
+        self.assertIn('agent_context', updated_fields)
+        self.assertTrue(self.lead.agent_context.get('name_confirmed_by_user'))
         self.assertFalse(
             LeadActivity.objects.filter(
                 lead=self.lead,
@@ -1704,6 +1706,27 @@ class AIConnectionAndIntentClassifierTests(TestCase):
 
         fallback = fallback_answer_from_playbooks('сколько метров до пляжа?', org=self.org)
         self.assertIn('200 метров', fallback)
+        self.assertIn(self.org.name, fallback)
+        self.assertNotIn('Nomad Camp', fallback)
+
+    def test_playbook_tokenizer_ignores_short_tokens(self):
+        from apps.leads.utils.playbooks import _tokenize_for_playbook
+
+        self.assertEqual(_tokenize_for_playbook('и где фото'), {'где', 'фото'})
+
+    def test_playbook_fallback_ignores_unrelated_short_question(self):
+        from apps.hotel_info.models import Playbook
+        from apps.leads.ai_service import fallback_answer_from_playbooks
+
+        Playbook.objects.create(
+            organization=self.org,
+            name='Nomad Camp sales handoff',
+            trigger_description='Nomad Camp corporate bookings and handoff rules.',
+            content='AI-ассистент не должен называть цены. Передай запрос менеджеру.',
+            is_active=True,
+        )
+
+        self.assertIsNone(fallback_answer_from_playbooks('и где фото?', org=self.org))
 
     @patch.dict('os.environ', {'AI_PROVIDER': 'gemini'}, clear=False)
     def test_gemini_skips_llm_playbook_selector_by_default(self):
@@ -1826,6 +1849,35 @@ class AIConnectionAndIntentClassifierTests(TestCase):
         self.assertNotIn('продолжим с бронированием', lowered)
         self.assertIn('точной информации', lowered)
 
+    def test_same_day_booking_cutoff_instruction_is_configurable(self):
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+        from apps.leads.services.llm_client import _same_day_booking_cutoff_instruction
+
+        self.org.org_settings = {
+            'same_day_booking_cutoff_hour': 16,
+            'check_in_time': '14:00',
+        }
+        now = datetime(2026, 6, 16, 16, 30, tzinfo=ZoneInfo('Asia/Bishkek'))
+
+        instruction = _same_day_booking_cutoff_instruction('2026-06-16', org=self.org, now=now)
+
+        self.assertIn('same-day booking cutoff', instruction)
+        self.assertIn('2026-06-17', instruction)
+        self.assertIn('14:00', instruction)
+        self.assertEqual(
+            _same_day_booking_cutoff_instruction('2026-06-17', org=self.org, now=now),
+            '',
+        )
+        self.assertEqual(
+            _same_day_booking_cutoff_instruction(
+                '2026-06-16',
+                org=self.org,
+                now=datetime(2026, 6, 16, 15, 59, tzinfo=ZoneInfo('Asia/Bishkek')),
+            ),
+            '',
+        )
+
     def test_fast_telegram_extraction_saves_name_with_phone(self):
         from apps.leads.telegram_views import _apply_fast_lead_extraction
         from apps.leads.models import Lead
@@ -1867,6 +1919,20 @@ class AIConnectionAndIntentClassifierTests(TestCase):
         self.assertFalse(is_reliable_contact_person(qim))
         self.assertFalse(is_reliable_contact_person(nk))
         self.assertTrue(is_reliable_contact_person(nurdin))
+
+    def test_short_latin_name_counts_when_confirmed_by_extractor_state(self):
+        from apps.leads.models import Lead
+        from apps.leads.services.stage_resolver import is_reliable_contact_person, mark_name_confirmed_by_user
+
+        lead = Lead.objects.create(
+            organization=self.org,
+            contact_person='NK',
+            telegram_username='ssssslatt',
+        )
+        mark_name_confirmed_by_user(lead)
+
+        self.assertTrue(is_reliable_contact_person(lead, 'NK'))
+        self.assertEqual(lead.agent_context['name_confirmed_by_user'], True)
 
     def test_fast_telegram_extraction_treats_single_later_date_as_checkout(self):
         from datetime import date
@@ -3334,6 +3400,38 @@ class AIConnectionAndIntentClassifierTests(TestCase):
         self.assertNotIn('getroomimages', response.lower())
         self.assertIn('фото ресторана', response.lower())
 
+    def test_room_photo_args_use_explicit_tool_category_without_keyword_inference(self):
+        from apps.leads.models import Lead
+        from apps.leads.services.booking_tools import normalize_booking_tool_args
+
+        lead = Lead.objects.create(organization=self.org, contact_person='Dan', guest_count=3)
+        history = [
+            {'role': 'user', 'content': 'стандарт одноместный три раза'},
+            {'role': 'assistant', 'content': 'AI sent 3 photo(s) of Standard Twin rooms'},
+            {'role': 'user', 'content': 'так я же не стандарт Twin брал а одно местный'},
+        ]
+
+        args = normalize_booking_tool_args(
+            'get_room_images',
+            {'category': 'standard_queen'},
+            'и где фото',
+            history,
+            {'guest_count': 3},
+            lead,
+        )
+
+        self.assertEqual(args['categories'], ['standard_queen'])
+
+        no_args = normalize_booking_tool_args(
+            'get_room_images',
+            {},
+            'стандарт одноместный, покажите как выглядит',
+            history,
+            {'guest_count': 3},
+            lead,
+        )
+        self.assertNotIn('categories', no_args)
+
     def test_booking_complete_transfer_is_idempotent_for_same_signature(self):
         from types import SimpleNamespace
         from apps.leads.models import Lead
@@ -3382,6 +3480,51 @@ class AIConnectionAndIntentClassifierTests(TestCase):
         self.assertEqual(result['status'], 'success')
         self.assertTrue(result['already_notified'])
         self.assertEqual(result['message'], 'Менеджер уже уведомлён')
+
+    @patch('apps.leads.telegram_service.TelegramService.send_message', new_callable=AsyncMock)
+    def test_transfer_notification_has_discovery_source_separate_from_notes(self, mock_send):
+        from types import SimpleNamespace
+        from apps.leads.models import Lead
+        from apps.leads.services.booking_tools import execute_transfer_to_manager
+
+        mock_send.return_value = {'message_id': 1}
+        lead = Lead.objects.create(
+            organization=self.org,
+            contact_person='Нурдин',
+            phone='0550701069',
+            source='Telegram',
+            contact_channel='telegram',
+            telegram_chat_id='123456',
+            discovery_source='instagram',
+        )
+        cfg = SimpleNamespace(
+            recipient_id='manager-chat',
+            manager_name='',
+            channel='telegram',
+            notification_template='',
+        )
+
+        with patch('apps.flows.models.ManagerTransferConfig.get_config', return_value=cfg):
+            result = execute_transfer_to_manager(
+                {
+                    'reason': 'booking_complete',
+                    'guest_name': 'Нурдин',
+                    'guest_phone': '0550701069',
+                    'notes': 'Узнал из Instagram',
+                },
+                lead=lead,
+        )
+
+        self.assertEqual(result['status'], 'success')
+        sent_text = next(
+            arg for arg in mock_send.call_args.args
+            if isinstance(arg, str) and 'Новая заявка' in arg
+        )
+        self.assertIn('Откуда узнал', sent_text)
+        self.assertIn('Instagram', sent_text)
+        self.assertIn(self.org.name, sent_text)
+        self.assertNotIn('Nomad Camp', sent_text)
+        self.assertNotIn('Примечание: Узнал из Instagram', sent_text)
 
     @patch('apps.leads.ai_service.ai_service._execute_transfer_to_manager')
     def test_tool_transfer_nonempty_reply_still_mentions_manager_followup(self, mock_execute):

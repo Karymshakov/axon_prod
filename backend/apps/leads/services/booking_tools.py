@@ -41,11 +41,9 @@ _TOOL_PARAMS = {
                 },
                 "description": (
                     "Room or hotel area categories to fetch photos for. "
-                    "Room categories: 1-2 guests → standard_queen or standard_twin; "
-                    "3-4 guests or explicit 'комфорт'/'comfort' → comfort; "
-                    "family with children confirmed → family. "
-                    "Hotel area categories: cafeteria (restaurant/café/ресторан/кафе), "
-                    "pool (бассейн), spa, exterior (вид снаружи), lobby, conference (зал). "
+                    "Choose from the configured media categories and conversation context. "
+                    "Room categories: standard_queen, standard_twin, comfort, family. "
+                    "Hotel area categories: cafeteria, pool, spa, exterior, lobby, conference. "
                     "Use multiple categories when guest asks to see several areas."
                 ),
             },
@@ -89,6 +87,8 @@ _TOOL_PARAMS = {
             "price_per_night": {"type": "number"},
             "total_price": {"type": "number"},
             "notes": {"type": "string"},
+            "discovery_source": {"type": "string"},
+            "discovery_source_detail": {"type": "string"},
             "platform": {
                 "type": "string",
                 "enum": ["telegram", "whatsapp", "instagram", "other"],
@@ -101,11 +101,9 @@ _TOOL_PARAMS = {
 _FALLBACK_DESCRIPTIONS = {
     'get_room_images': (
         "Fetch and send photos to the guest — rooms OR hotel areas. "
-        "Room categories: 1-2 guests → standard_queen or standard_twin; "
-        "3-4 guests or guest says 'комфорт'/'comfort' → comfort; "
-        "family with children → family. "
-        "Hotel area categories: cafeteria (ресторан/кафе/restaurant), pool (бассейн), "
-        "spa, exterior, lobby, conference. "
+        "Choose categories from the current flow, tool schema, media setup, and conversation context. "
+        "Room categories: standard_queen, standard_twin, comfort, family. "
+        "Hotel area categories: cafeteria, pool, spa, exterior, lobby, conference. "
         "Pass multiple categories when guest asks to see several types. "
         "Photos are sent directly to the guest — compose a natural reply referencing them."
     ),
@@ -210,11 +208,16 @@ def detect_family_context(lead) -> bool:
 
     return False
 
+
+_ROOM_IMAGE_CATEGORIES = {'standard_queen', 'standard_twin', 'comfort', 'family'}
+_HOTEL_IMAGE_CATEGORIES = {'cafeteria', 'pool', 'spa', 'exterior', 'lobby', 'conference'}
+
+
 def execute_get_room_images(args: dict, lead=None) -> dict:
     """Fetch room photos by category and send them to the guest via their channel."""
     from apps.hotel_media.models import HotelMediaItem
 
-    categories = args.get('categories', [])
+    categories = args.get('categories') or args.get('room_type') or args.get('category') or []
     if isinstance(categories, str):
         categories = [categories]
 
@@ -447,6 +450,55 @@ def _remember_room_offer(lead, tool_name: str, response: dict, *, remember: bool
         )
 
 
+def _format_discovery_source_for_manager(lead, args: dict) -> str:
+    source = (
+        args.get('discovery_source')
+        or getattr(lead, 'discovery_source', '')
+        or ''
+    )
+    detail = (
+        args.get('discovery_source_detail')
+        or getattr(lead, 'discovery_source_detail', '')
+        or ''
+    )
+    source = str(source or '').strip()
+    detail = str(detail or '').strip()
+    if not source and not detail:
+        return ''
+
+    label = source
+    try:
+        from apps.leads.services.discovery_sources import get_discovery_source_options
+
+        org = _org_from_lead(lead)
+        for option in get_discovery_source_options(org):
+            if option['value'] == source:
+                label = option['label']
+                break
+    except Exception:
+        pass
+
+    if detail and detail.lower() != label.lower():
+        return f'{label} — {detail}' if label else detail
+    return label or detail
+
+
+def _note_is_discovery_source(notes: str, discovery_display: str) -> bool:
+    text = (notes or '').strip().lower()
+    if not text or not discovery_display:
+        return False
+    discovery_lower = discovery_display.lower()
+    discovery_markers = ('узнал', 'узнала', 'узнали', 'откуда', 'источник', 'learned', 'heard')
+    if not any(marker in text for marker in discovery_markers):
+        return False
+    source_tokens = {
+        token
+        for token in re.findall(r'[a-zA-Z0-9а-яА-ЯёЁөүңкһі]+', discovery_lower)
+        if len(token) >= 3
+    }
+    return bool(source_tokens and any(token in text for token in source_tokens))
+
+
 def execute_transfer_to_manager(args: dict, lead=None) -> dict:
     """Send a structured manager notification via Telegram or WhatsApp."""
     try:
@@ -502,6 +554,10 @@ def execute_transfer_to_manager(args: dict, lead=None) -> dict:
     guest_phone = args.get('guest_phone', '')
     guest_email = args.get('guest_email', '')
     platform = args.get('platform', '')
+    discovery_source_display = _format_discovery_source_for_manager(lead, args)
+    notes = args.get('notes', '') or ''
+    if _note_is_discovery_source(notes, discovery_source_display):
+        notes = ''
 
     transfer_signature = None
     if lead is not None and reason == 'booking_complete':
@@ -544,7 +600,10 @@ def execute_transfer_to_manager(args: dict, lead=None) -> dict:
             or args.get('guest_phone', '')
         )
 
+    org = _org_from_lead(lead)
+    business_name = getattr(org, 'name', '') or 'Hotel'
     template_vars = {
+        'business_name': business_name,
         'reason': reason_label,
         'guest_name': guest_name or '',
         'guest_phone': guest_phone or '',
@@ -558,7 +617,13 @@ def execute_transfer_to_manager(args: dict, lead=None) -> dict:
         'meal_plan': args.get('meal_plan', '') or '',
         'price_per_night': str(args.get('price_per_night', '')) if args.get('price_per_night') is not None else '',
         'total_price': str(args.get('total_price', '')) if args.get('total_price') is not None else '',
-        'notes': args.get('notes', '') or '',
+        'notes': notes,
+        'discovery_source': discovery_source_display,
+        'discovery_source_detail': (
+            args.get('discovery_source_detail')
+            or getattr(lead, 'discovery_source_detail', '')
+            or ''
+        ),
         'contact_id': contact_id,
         'telegram_handle': (f'@{lead.telegram_username}' if lead and lead.telegram_username else ''),
         'instagram_handle': (f'@{lead.instagram_username}' if lead and lead.instagram_username else ''),
@@ -571,7 +636,7 @@ def execute_transfer_to_manager(args: dict, lead=None) -> dict:
         message_text = cfg.notification_template.format_map(_SafeDict(template_vars))
     else:
         lines = [
-            '📋 Новая заявка — Nomad Camp',
+            f'📋 Новая заявка — {business_name}',
             f'Причина: {reason_label}',
             '',
         ]
@@ -584,6 +649,8 @@ def execute_transfer_to_manager(args: dict, lead=None) -> dict:
             lines.append(f'📧 Email: {template_vars["guest_email"]}')
         if template_vars['platform']:
             lines.append(f'💬 Канал: {template_vars["platform"]}')
+        if template_vars['discovery_source']:
+            lines.append(f'📣 Откуда узнал: {template_vars["discovery_source"]}')
         if contact_id:
             if cfg.channel == ManagerTransferConfig.CHANNEL_TELEGRAM:
                 lines.append(f'🔗 Telegram ID: {contact_id}')
@@ -1576,6 +1643,27 @@ def normalize_booking_tool_args(
         tool_args['guest_count'] = extracted_guests
     elif lead_data.get('guest_count') and not tool_args.get('guest_count'):
         tool_args['guest_count'] = lead_data.get('guest_count')
+
+    if tool_name == 'get_room_images':
+        categories = (
+            tool_args.get('categories')
+            or tool_args.get('category')
+            or tool_args.get('room_type')
+            or []
+        )
+        if isinstance(categories, str):
+            categories = [categories]
+        allowed_categories = _ROOM_IMAGE_CATEGORIES | _HOTEL_IMAGE_CATEGORIES
+        normalized_categories = []
+        for category in categories:
+            category_text = str(category or '').strip().lower()
+            if category_text in allowed_categories:
+                normalized_categories.append(category_text)
+        if normalized_categories:
+            tool_args['categories'] = list(dict.fromkeys(normalized_categories))
+        tool_args.pop('room_type', None)
+        tool_args.pop('category', None)
+        return tool_args
         
     if tool_name in ('get_room_options', 'get_family_room'):
         today = date.today()

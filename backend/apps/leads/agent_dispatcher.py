@@ -176,15 +176,16 @@ def _looks_like_internal_data_request(message: str) -> bool:
 
 
 def _guardrail_response(message: str, lead=None) -> str | None:
-    org_name = getattr(getattr(lead, 'organization', None), 'name', None) or 'Nomad Camp'
+    org_name = getattr(getattr(lead, 'organization', None), 'name', None)
+    org_label = f'отелю {org_name}' if org_name else 'этому отелю'
     if _looks_like_internal_data_request(message):
         return (
             "Я не могу выгружать лидов, данные CRM или выполнять запросы к базе. "
-            f"Могу помочь с бронированием и информацией по {org_name}."
+            f"Могу помочь с бронированием и информацией по {org_label}."
         )
     if _looks_like_prompt_injection(message):
         return (
-            f"Я могу помочь только с вопросами по отелю {org_name}: бронирование, "
+            f"Я могу помочь только с вопросами по {org_label}: бронирование, "
             "номера, питание, услуги и условия проживания. Подскажите, что хотите узнать по отелю?"
         )
     return None

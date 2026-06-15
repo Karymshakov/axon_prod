@@ -8,6 +8,7 @@ from apps.leads.ai_memory import filter_activities_since_last_ai_reset
 from apps.leads.ai_service import ai_service
 from apps.leads.models import AIConfig, Lead, LeadActivity
 from apps.leads.services.discovery_sources import normalize_discovery_source
+from apps.leads.services.stage_resolver import mark_name_confirmed_by_user
 
 logger = logging.getLogger(__name__)
 
@@ -138,9 +139,12 @@ def _is_fake_email(email: str) -> bool:
 def _apply_extracted_data(lead: Lead, extracted_data: dict[str, Any], message_text: str = '') -> list[str]:
     updated_fields: list[str] = []
 
-    if extracted_data.get('contact_person') and lead.contact_person != extracted_data['contact_person']:
-        lead.contact_person = extracted_data['contact_person']
-        updated_fields.append('contact_person')
+    if extracted_data.get('contact_person'):
+        if lead.contact_person != extracted_data['contact_person']:
+            lead.contact_person = extracted_data['contact_person']
+            updated_fields.append('contact_person')
+        if mark_name_confirmed_by_user(lead):
+            updated_fields.append('agent_context')
 
     if extracted_data.get('phone') and lead.phone != extracted_data['phone']:
         lead.phone = extracted_data['phone']

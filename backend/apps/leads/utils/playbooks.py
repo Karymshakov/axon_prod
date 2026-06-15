@@ -12,7 +12,11 @@ def _tokenize_for_playbook_universal(text: str) -> set[str]:
     """Universal language-agnostic tokenizer that extracts words of length >= 3."""
     if not text:
         return set()
-    return set(re.findall(r'[a-zA-Z0-9а-яА-ЯёЁөүңкһі]+', text.lower()))
+    return {
+        token
+        for token in re.findall(r'[a-zA-Z0-9а-яА-ЯёЁөүңкһі]+', text.lower())
+        if len(token) >= 3
+    }
 
 def _stem_token(token: str) -> str:
     """Thin wrapper for compatibility. Lowercases and strips underscore."""
@@ -403,7 +407,8 @@ def fallback_answer_from_playbooks(message: str, *, org=None, playbooks: list | 
         return None
 
     deduped = list(dict.fromkeys(selected_lines))[:8]
+    org_name = getattr(org, 'name', '') or 'отелю'
     if map_request:
-        return "Вот ссылки на карту Nomad Camp:\n" + "\n".join(deduped)
+        return f"Вот ссылки на карту {org_name}:\n" + "\n".join(deduped)
 
-    return "По Nomad Camp могу подсказать так:\n" + "\n".join(f"- {line}" for line in deduped)
+    return f"По {org_name} могу подсказать так:\n" + "\n".join(f"- {line}" for line in deduped)

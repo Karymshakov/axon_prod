@@ -245,6 +245,8 @@ def _delayed_whatsapp_ai_response(lead_id: int, activity_id: int, sender_phone: 
             'guest_count': lead.guest_count,
             'room_type_preference': lead.room_type_preference,
             'meal_plan': lead.meal_plan,
+            'discovery_source': lead.discovery_source,
+            'discovery_source_detail': lead.discovery_source_detail,
         }
         def _generate_ai_response() -> str | None:
             return agent_dispatcher.dispatch(
@@ -404,10 +406,15 @@ def _delayed_whatsapp_ai_response(lead_id: int, activity_id: int, sender_phone: 
                 lead.organization,
             )
             if extracted_data:
+                from apps.leads.services.stage_resolver import mark_name_confirmed_by_user
+
                 updated_fields = []
-                if extracted_data.get('contact_person') and lead.contact_person != extracted_data['contact_person']:
-                    lead.contact_person = extracted_data['contact_person']
-                    updated_fields.append('contact_person')
+                if extracted_data.get('contact_person'):
+                    if lead.contact_person != extracted_data['contact_person']:
+                        lead.contact_person = extracted_data['contact_person']
+                        updated_fields.append('contact_person')
+                    if mark_name_confirmed_by_user(lead):
+                        updated_fields.append('agent_context')
                 if extracted_data.get('phone') and lead.phone != extracted_data['phone']:
                     lead.phone = extracted_data['phone']
                     updated_fields.append('phone')
