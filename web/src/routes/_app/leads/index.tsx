@@ -2,8 +2,20 @@ import { createFileRoute, useNavigate } from '@tanstack/react-router'
 import { useLanguage } from '@/contexts/language-context'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useState, useMemo } from 'react'
-import { PlusIcon, PencilIcon, TrashIcon, LayoutGridIcon, LayoutListIcon, EyeIcon, SearchIcon, XIcon, InstagramIcon, MessageSquareIcon, PhoneIcon } from 'lucide-react'
-import { fetchLeads, fetchLeadStats, fetchPipelineStages, deleteLead, updateLead, createLeadNote, SOURCE_OPTIONS, type Lead } from '@/lib/api'
+import { PlusIcon, PencilIcon, TrashIcon, LayoutGridIcon, LayoutListIcon, SearchIcon, XIcon, InstagramIcon, MessageSquareIcon, PhoneIcon } from 'lucide-react'
+import {
+  CONTACT_CHANNEL_OPTIONS,
+  fetchLeads,
+  fetchLeadStats,
+  fetchPipelineStages,
+  deleteLead,
+  updateLead,
+  getLeadStatusLabel,
+  getContactChannelLabel,
+  resolveLeadContactChannel,
+  type Lead,
+} from '@/lib/api'
+import { useLeadDiscoverySources } from '@/hooks/use-lead-discovery-sources'
 import { LeadSourceBadge } from '@/components/lead-source-badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -27,7 +39,6 @@ import {
 import { LeadCard, InstagramIntentBadge } from '@/components/lead-card'
 import { LeadDialog } from '@/components/lead-dialog'
 import { LeadDetailsSidebar } from '@/components/lead-details-sidebar'
-import { InlineNotesEditor } from '@/components/inline-notes-editor'
 import { toast } from 'sonner'
 import { ConfirmationDialog } from '@/components/confirmation-dialog'
 import {
@@ -58,7 +69,19 @@ const getStatusColor = (statusKey: string): 'default' | 'secondary' | 'destructi
   return colorMap[statusKey] || 'default'
 }
 
-function DraggableLeadCard({ lead, onEdit }: { lead: Lead; onEdit: (lead: Lead) => void }) {
+function DraggableLeadCard({
+  lead,
+  onEdit,
+  onOpen,
+  onOpenChat,
+  discoverySourceLabel,
+}: {
+  lead: Lead
+  onEdit: (lead: Lead) => void
+  onOpen: (lead: Lead) => void
+  onOpenChat: (lead: Lead) => void
+  discoverySourceLabel?: string
+}) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: `lead-${lead.id}`,
     data: { lead },
@@ -73,7 +96,13 @@ function DraggableLeadCard({ lead, onEdit }: { lead: Lead; onEdit: (lead: Lead) 
 
   return (
     <div ref={setNodeRef} style={style} {...attributes} {...listeners}>
-      <LeadCard lead={lead} onEdit={onEdit} />
+      <LeadCard
+        lead={lead}
+        onEdit={onEdit}
+        onOpen={onOpen}
+        onOpenChat={onOpenChat}
+        discoverySourceLabel={discoverySourceLabel}
+      />
     </div>
   )
 }
@@ -107,7 +136,8 @@ function LeadsPage() {
   const [view, setView] = useState<'table' | 'kanban'>('table')
   const [searchQuery, setSearchQuery] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
-  const [sourceFilter, setSourceFilter] = useState('')
+  const [channelFilter, setChannelFilter] = useState('')
+  const [discoveryFilter, setDiscoveryFilter] = useState('')
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editingLead, setEditingLead] = useState<Lead | null>(null)
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
@@ -117,6 +147,7 @@ function LeadsPage() {
   const [activeLead, setActiveLead] = useState<Lead | null>(null)
   const queryClient = useQueryClient()
   const navigate = useNavigate()
+  const discoverySourceOptions = useLeadDiscoverySources()
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -130,9 +161,10 @@ function LeadsPage() {
     const params: Record<string, string> = {}
     if (searchQuery) params.search = searchQuery
     if (statusFilter && statusFilter !== 'all') params.status = statusFilter
-    if (sourceFilter && sourceFilter !== 'all') params.source = sourceFilter
+    if (channelFilter && channelFilter !== 'all') params.contact_channel = channelFilter
+    if (discoveryFilter && discoveryFilter !== 'all') params.discovery_source = discoveryFilter
     return params
-  }, [searchQuery, statusFilter, sourceFilter])
+  }, [searchQuery, statusFilter, channelFilter, discoveryFilter])
 
   const { data: stats } = useQuery({
     queryKey: ['lead-stats'],
@@ -149,17 +181,30 @@ function LeadsPage() {
     queryFn: () => fetchPipelineStages(),
   })
 
+  const displayedLeads = useMemo(() => {
+    return leads.filter((lead) => {
+      if (channelFilter && channelFilter !== 'all') {
+        const actualChannel = resolveLeadContactChannel(lead)
+        if (actualChannel !== channelFilter) return false
+      }
+      if (discoveryFilter && discoveryFilter !== 'all') {
+        if ((lead.discovery_source || '') !== discoveryFilter) return false
+      }
+      return true
+    })
+  }, [leads, channelFilter, discoveryFilter])
+
   const deleteMutation = useMutation({
     mutationFn: deleteLead,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['leads'] })
       queryClient.invalidateQueries({ queryKey: ['lead-stats'] })
-      toast.success('Lead deleted successfully')
+      toast.success('Лид удален')
       setDeleteDialogOpen(false)
       setLeadToDelete(null)
     },
     onError: () => {
-      toast.error('Failed to delete lead')
+      toast.error('Не удалось удалить лид')
     },
   })
 
@@ -169,23 +214,10 @@ function LeadsPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['leads'] })
       queryClient.invalidateQueries({ queryKey: ['lead-stats'] })
-      toast.success('Lead updated')
+      toast.success('Лид обновлен')
     },
     onError: () => {
-      toast.error('Failed to update lead')
-    },
-  })
-
-  const addNoteMutation = useMutation({
-    mutationFn: ({ leadId, content }: { leadId: number; content: string }) =>
-      createLeadNote({ lead: leadId, content }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['leads'] })
-      queryClient.invalidateQueries({ queryKey: ['lead-notes'] })
-      toast.success('Note added successfully')
-    },
-    onError: () => {
-      toast.error('Failed to add note')
+      toast.error('Не удалось обновить лид')
     },
   })
 
@@ -220,6 +252,17 @@ function LeadsPage() {
     setSidebarOpen(true)
   }
 
+  const openLeadChat = (lead: Lead) => {
+    const channel = resolveLeadContactChannel(lead)
+    navigate({
+      to: '/communications',
+      search: {
+        leadId: String(lead.id),
+        channel: channel || undefined,
+      } as never,
+    })
+  }
+
   const handleCloseSidebar = () => {
     setSidebarOpen(false)
     setSelectedLead(null)
@@ -231,10 +274,6 @@ function LeadsPage() {
     setDialogOpen(true)
   }
 
-  const handleSaveNote = async (leadId: number, content: string) => {
-    await addNoteMutation.mutateAsync({ leadId, content })
-  }
-
   const formatDate = (dateString: string | null) => {
     if (!dateString) return '-'
     return new Date(dateString).toLocaleDateString('ru-RU', {
@@ -242,6 +281,74 @@ function LeadsPage() {
       day: 'numeric',
       year: 'numeric',
     })
+  }
+
+  const formatBooking = (lead: Lead) => {
+    const parts: string[] = []
+    if (lead.check_in_date) parts.push(`заезд ${formatDate(lead.check_in_date)}`)
+    if (lead.check_out_date) parts.push(`выезд ${formatDate(lead.check_out_date)}`)
+    if (lead.guest_count) parts.push(`${lead.guest_count} гост.`)
+    if (lead.room_type_preference) parts.push(lead.room_type_preference)
+    return parts.length ? parts.join(' · ') : '—'
+  }
+
+  const getLeadSummary = (lead: Lead) =>
+    lead.problem_description || lead.latest_note || lead.notes || lead.next_steps || ''
+
+  const mealPlanLabelMap: Record<string, string> = {
+    breakfast: 'завтрак',
+    lunch: 'обед',
+    dinner: 'ужин',
+    half_board_bl: 'завтрак + обед',
+    half_board_bd: 'завтрак + ужин',
+    full_board: 'полный пансион',
+  }
+
+  const getStageLabel = (statusKey: string) => getLeadStatusLabel(statusKey, stages)
+  const getDiscoverySourceOptionLabel = (source: string | null | undefined) =>
+    discoverySourceOptions.find((option) => option.value === source)?.label
+
+  const renderChannelBadge = (lead: Lead) => {
+    const channel = resolveLeadContactChannel(lead)
+    if (!channel) {
+      return <span className="text-xs text-muted-foreground">—</span>
+    }
+
+    const label = getContactChannelLabel(channel)
+    const config = {
+      instagram: {
+        icon: <InstagramIcon className="h-3 w-3" />,
+        className: 'bg-pink-50 text-pink-700 ring-pink-200 dark:bg-pink-950/25 dark:text-pink-400 dark:ring-pink-900/40',
+      },
+      telegram: {
+        icon: <MessageSquareIcon className="h-3 w-3" />,
+        className: 'bg-blue-50 text-blue-700 ring-blue-200 dark:bg-blue-950/25 dark:text-blue-400 dark:ring-blue-900/40',
+      },
+      whatsapp: {
+        icon: <PhoneIcon className="h-3 w-3" />,
+        className: 'bg-green-50 text-green-700 ring-green-200 dark:bg-green-950/25 dark:text-green-400 dark:ring-green-900/40',
+      },
+      manual: {
+        icon: null,
+        className: 'bg-slate-50 text-slate-700 ring-slate-200 dark:bg-slate-950/25 dark:text-slate-400 dark:ring-slate-900/40',
+      },
+    }[channel]
+
+    return (
+      <button
+        type="button"
+        onClick={(event) => {
+          event.stopPropagation()
+          openLeadChat(lead)
+        }}
+        className={`inline-flex max-w-full items-center gap-1.5 whitespace-nowrap rounded-full px-2 py-0.5 text-[10px] font-medium ring-1 ring-inset transition hover:shadow-sm ${config.className}`}
+        title={`Открыть чат: ${label}`}
+        aria-label={`Открыть чат: ${label}`}
+      >
+        {config.icon}
+        <span className="truncate">{label}</span>
+      </button>
+    )
   }
 
   const handleDragStart = (event: DragStartEvent) => {
@@ -271,8 +378,8 @@ function LeadsPage() {
     .sort((a, b) => a.order - b.order)
     .map((stage) => ({
       key: stage.key,
-      label: stage.name,
-      leads: leads.filter((lead) => lead.status === stage.key),
+      label: getLeadStatusLabel(stage.key, stages),
+      leads: displayedLeads.filter((lead) => lead.status === stage.key),
       count: stats?.[stage.key as keyof typeof stats] || 0,
     }))
 
@@ -298,10 +405,10 @@ function LeadsPage() {
                   </div>
                   <div className="flex items-center gap-2">
                     <ToggleGroup type="single" value={view} onValueChange={(v) => v && setView(v as 'table' | 'kanban')}>
-                      <ToggleGroupItem value="table" aria-label="Table view">
+                      <ToggleGroupItem value="table" aria-label="Список">
                         <LayoutListIcon className="h-4 w-4" />
                       </ToggleGroupItem>
-                      <ToggleGroupItem value="kanban" aria-label="Kanban view">
+                      <ToggleGroupItem value="kanban" aria-label="Карточки">
                         <LayoutGridIcon className="h-4 w-4" />
                       </ToggleGroupItem>
                     </ToggleGroup>
@@ -339,19 +446,33 @@ function LeadsPage() {
                       <SelectItem value="all">{t('leads.allStatuses')}</SelectItem>
                       {stages.map((stage) => (
                         <SelectItem key={stage.key} value={stage.key}>
-                          {stage.name}
+                          {getStageLabel(stage.key)}
                         </SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
 
-                  <Select value={sourceFilter} onValueChange={setSourceFilter}>
+                  <Select value={channelFilter} onValueChange={setChannelFilter}>
                     <SelectTrigger className="w-[150px] h-9">
-                      <SelectValue placeholder="Все источники" />
+                      <SelectValue placeholder="Все каналы" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="all">Все источники</SelectItem>
-                      {SOURCE_OPTIONS.map((opt) => (
+                      <SelectItem value="all">Все каналы</SelectItem>
+                      {CONTACT_CHANNEL_OPTIONS.map((opt) => (
+                        <SelectItem key={opt.value} value={opt.value}>
+                          {opt.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+
+                  <Select value={discoveryFilter} onValueChange={setDiscoveryFilter}>
+                    <SelectTrigger className="w-[170px] h-9">
+                      <SelectValue placeholder="Откуда узнал" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">Любой источник</SelectItem>
+                      {discoverySourceOptions.map((opt) => (
                         <SelectItem key={opt.value} value={opt.value}>
                           {opt.label}
                         </SelectItem>
@@ -367,11 +488,12 @@ function LeadsPage() {
                       onClick={() => {
                         setStatusFilter('')
                         setSearchQuery('')
-                        setSourceFilter('')
+                        setChannelFilter('')
+                        setDiscoveryFilter('')
                       }}
                     >
                       <XIcon className="mr-1 h-3.5 w-3.5" />
-                      Clear
+                      Сбросить
                     </Button>
                   ) : null}
                 </div>
@@ -383,48 +505,65 @@ function LeadsPage() {
             {view === 'table' ? (
               <div className="px-4 lg:px-6 min-w-0">
                 <div className="rounded-md border overflow-x-auto bg-background">
-                  <Table className="table-fixed w-full">
+                  <Table className="min-w-[980px] w-full table-fixed">
+                    <colgroup>
+                      <col className="w-[250px]" />
+                      <col className="w-[130px]" />
+                      <col className="w-[120px]" />
+                      <col className="w-[250px]" />
+                      <col className="w-[150px]" />
+                      <col className="w-[130px]" />
+                      <col className="w-[64px]" />
+                    </colgroup>
                     <TableHeader>
                       <TableRow>
-                        <TableHead className="w-[160px]">{t('common.name')}</TableHead>
-                        <TableHead className="w-[130px]">{t('common.status')}</TableHead>
-                        <TableHead className="w-[110px]">Source</TableHead>
-                        <TableHead className="w-[280px]">{t('common.notes')}</TableHead>
-                        <TableHead className="w-[130px]">{t('common.date')}</TableHead>
-                        <TableHead className="w-[80px] text-right">{t('common.actions')}</TableHead>
+                        <TableHead>Гость</TableHead>
+                        <TableHead>Этап</TableHead>
+                        <TableHead>Канал</TableHead>
+                        <TableHead>Бронирование</TableHead>
+                        <TableHead>Откуда узнал</TableHead>
+                        <TableHead>Последний контакт</TableHead>
+                        <TableHead className="text-right">Действия</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
                       {isLoading ? (
                         <TableRow>
-                          <TableCell colSpan={6} className="text-center py-8 text-muted-foreground">
+                          <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
                             {t('common.loading')}
                           </TableCell>
                         </TableRow>
-                      ) : leads.length === 0 ? (
+                      ) : displayedLeads.length === 0 ? (
                         <TableRow>
-                          <TableCell colSpan={6} className="text-center py-8 text-muted-foreground">
+                          <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
                             {t('leads.noLeadsDesc')}
                           </TableCell>
                         </TableRow>
                       ) : (
-                        leads.map((lead) => (
+                        displayedLeads.map((lead) => (
                           <TableRow
                             key={lead.id}
                             className="cursor-pointer hover:bg-muted/50"
                             onClick={() => handleLeadClick(lead)}
                           >
-                            <TableCell>
+                            <TableCell className="py-3 align-top">
                               <span className="block truncate font-medium text-primary underline underline-offset-2 decoration-primary/50 hover:decoration-primary cursor-pointer">
                                 {lead.contact_person || '-'}
                               </span>
+                              {getLeadSummary(lead) ? (
+                                <span className="mt-1 block truncate text-xs text-muted-foreground" title={getLeadSummary(lead)}>
+                                  {getLeadSummary(lead)}
+                                </span>
+                              ) : (
+                                <span className="mt-1 block text-xs text-muted-foreground">Нет краткого запроса</span>
+                              )}
                               {lead.instagram_intent_tier ? (
                                 <div className="mt-0.5">
                                   <InstagramIntentBadge tier={lead.instagram_intent_tier} />
                                 </div>
                               ) : null}
                             </TableCell>
-                            <TableCell onClick={(e) => e.stopPropagation()}>
+                            <TableCell className="py-3 align-top" onClick={(e) => e.stopPropagation()}>
                               <Select
                                 value={lead.status}
                                 onValueChange={(value) => updateLeadMutation.mutate({ id: lead.id, data: { status: value } })}
@@ -433,11 +572,11 @@ function LeadsPage() {
                                   <SelectValue>
                                     <div className="flex items-center gap-1">
                                       <Badge variant={getStatusColor(lead.status)}>
-                                        {stages.find((s) => s.key === lead.status)?.name || lead.status}
+                                        {getStageLabel(lead.status)}
                                       </Badge>
                                       {lead.ai_paused && (
                                         <span className="flex h-5 items-center justify-center rounded-full bg-amber-500 px-1.5 text-[10px] font-semibold text-white">
-                                          Manual
+                                          Ручной
                                         </span>
                                       )}
                                     </div>
@@ -447,62 +586,49 @@ function LeadsPage() {
                                   {stages.map((stage) => (
                                     <SelectItem key={stage.key} value={stage.key}>
                                       <Badge variant={getStatusColor(stage.key)}>
-                                        {stage.name}
+                                        {getStageLabel(stage.key)}
                                       </Badge>
                                     </SelectItem>
                                   ))}
                                 </SelectContent>
                               </Select>
                             </TableCell>
-                            <TableCell>
+                            <TableCell className="py-3 align-top">
                               <div className="flex flex-col gap-1 items-start">
-                                {lead.instagram_user_id ? (
-                                  <span className="inline-flex items-center gap-1 rounded-full bg-pink-50 px-2 py-0.5 text-[10px] font-medium text-pink-700 ring-1 ring-inset ring-pink-200 dark:bg-pink-950/25 dark:text-pink-400 dark:ring-pink-900/40">
-                                    <InstagramIcon className="h-3 w-3" />
-                                    Instagram
-                                  </span>
-                                ) : lead.telegram_chat_id ? (
-                                  <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-medium text-blue-700 ring-1 ring-inset ring-blue-200 dark:bg-blue-950/25 dark:text-blue-400 dark:ring-blue-900/40">
-                                    <MessageSquareIcon className="h-3 w-3" />
-                                    Telegram
-                                  </span>
-                                ) : lead.whatsapp_phone ? (
-                                  <span className="inline-flex items-center gap-1 rounded-full bg-green-50 px-2 py-0.5 text-[10px] font-medium text-green-700 ring-1 ring-inset ring-green-200 dark:bg-green-950/25 dark:text-green-400 dark:ring-green-900/40">
-                                    <PhoneIcon className="h-3 w-3" />
-                                    WhatsApp
-                                  </span>
-                                ) : null}
-
-                                {lead.source ? (
-                                  <LeadSourceBadge source={lead.source} />
-                                ) : !lead.instagram_user_id && !lead.telegram_chat_id && !lead.whatsapp_phone ? (
-                                  <span className="text-xs text-muted-foreground">—</span>
-                                ) : null}
+                                {renderChannelBadge(lead)}
                               </div>
                             </TableCell>
-                            <TableCell className="align-top overflow-hidden" style={{ wordBreak: 'break-word', whiteSpace: 'normal' }} onClick={(e) => e.stopPropagation()}>
-                              <InlineNotesEditor
-                                value={lead.latest_note || ''}
-                                onSave={(content) => handleSaveNote(lead.id, content)}
-                                placeholder="Краткое описание разговора..."
-                              />
+                            <TableCell className="py-3 align-top text-xs text-muted-foreground min-w-0">
+                              <span className="block truncate" title={formatBooking(lead)}>{formatBooking(lead)}</span>
+                              {lead.meal_plan && lead.meal_plan !== 'none' ? (
+                                <span className="mt-1 block truncate">Питание: {mealPlanLabelMap[lead.meal_plan] || lead.meal_plan}</span>
+                              ) : null}
                             </TableCell>
-                            <TableCell>{formatDate(lead.last_contacted)}</TableCell>
-                            <TableCell className="text-right">
+                            <TableCell className="py-3 align-top">
+                              {lead.discovery_source ? (
+                                <div className="flex flex-col gap-1 items-start">
+                                  <LeadSourceBadge
+                                    source={lead.discovery_source}
+                                    label={getDiscoverySourceOptionLabel(lead.discovery_source)}
+                                  />
+                                  {lead.discovery_source_detail ? (
+                                    <span className="line-clamp-1 text-xs text-muted-foreground" title={lead.discovery_source_detail}>
+                                      {lead.discovery_source_detail}
+                                    </span>
+                                  ) : null}
+                                </div>
+                              ) : (
+                                <span className="text-xs text-muted-foreground">—</span>
+                              )}
+                            </TableCell>
+                            <TableCell className="py-3 align-top">{formatDate(lead.last_contacted)}</TableCell>
+                            <TableCell className="py-3 text-right align-top">
                               <div className="flex justify-end gap-1" onClick={(e) => e.stopPropagation()}>
                                 <Button
                                   variant="ghost"
                                   size="icon"
-                                  onClick={() => navigate({ to: '/leads/$leadId', params: { leadId: String(lead.id) } })}
-                                  aria-label="View Details"
-                                >
-                                  <EyeIcon className="h-4 w-4" />
-                                </Button>
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
                                   onClick={() => handleEditLead(lead)}
-                                  aria-label="Edit"
+                                  aria-label="Редактировать"
                                 >
                                   <PencilIcon className="h-4 w-4" />
                                 </Button>
@@ -510,7 +636,7 @@ function LeadsPage() {
                                   variant="ghost"
                                   size="icon"
                                   onClick={() => handleDeleteClick(lead)}
-                                  aria-label="Delete"
+                                  aria-label="Удалить"
                                 >
                                   <TrashIcon className="h-4 w-4" />
                                 </Button>
@@ -545,6 +671,9 @@ function LeadsPage() {
                               key={lead.id}
                               lead={lead}
                               onEdit={handleEditLead}
+                              onOpen={handleLeadClick}
+                              onOpenChat={openLeadChat}
+                              discoverySourceLabel={getDiscoverySourceOptionLabel(lead.discovery_source)}
 
                             />
                           ))
@@ -581,11 +710,20 @@ function LeadsPage() {
           open={sidebarOpen}
           onClose={handleCloseSidebar}
           onEdit={handleEditFromSidebar}
+          onOpenFull={(lead) => navigate({ to: '/leads/$leadId', params: { leadId: String(lead.id) } })}
         />
       </div>
 
       <DragOverlay>
-        {activeLead ? <LeadCard lead={activeLead} onEdit={() => {}} /> : null}
+        {activeLead ? (
+          <LeadCard
+            lead={activeLead}
+            onEdit={() => {}}
+            onOpen={() => {}}
+            onOpenChat={() => {}}
+            discoverySourceLabel={getDiscoverySourceOptionLabel(activeLead.discovery_source)}
+          />
+        ) : null}
       </DragOverlay>
     </DndContext>
   )
