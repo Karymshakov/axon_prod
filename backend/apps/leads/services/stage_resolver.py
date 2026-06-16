@@ -61,6 +61,19 @@ def is_reliable_contact_person(lead, value: Any | None = None) -> bool:
         return True
 
     lowered = name.lower().lstrip('@')
+    
+    # Filter out common stop-words in message texts when sharing phone number/email
+    BLACKLIST_WORDS = {
+        'мой', 'моя', 'мое', 'моё', 'номер', 'номерок', 'телефон', 'телефона', 'тел', 'контакт', 'контакты', 'вот', 'это',
+        'звоните', 'звонить', 'позвонить', 'позвоните', 'на', 'напишите', 'пишите', 'писать', 'тут', 'здесь', 'для', 'связи',
+        'связаться', 'скинул', 'скинула', 'отправить', 'отправьте', 'выслать', 'вышлите',
+        'my', 'number', 'phone', 'tel', 'contact', 'contacts', 'here', 'call', 'write', 'send', 'at', 'for', 'this',
+        'is', 'please', 'pls', 'to', 'me', 'with', 'by'
+    }
+    words_list = re.findall(r'[A-Za-zА-Яа-яЁёӨөҮүҢңҚқҺһІі_-]+', lowered)
+    if any(w in BLACKLIST_WORDS for w in words_list):
+        return False
+
     telegram_username = str(getattr(lead, 'telegram_username', '') or '').lower().lstrip('@')
     instagram_username = str(getattr(lead, 'instagram_username', '') or '').lower().lstrip('@')
     compact_name = re.sub(r'[\s._-]+', '', lowered)
