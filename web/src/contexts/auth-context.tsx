@@ -34,7 +34,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   // Sync language with user preference from DB
   useEffect(() => {
-    if (user?.language && user.language !== currentLang) {
+    if (user?.language === 'ru' && user.language !== currentLang) {
       setLanguage(user.language)
     }
   }, [user?.language, currentLang, setLanguage])

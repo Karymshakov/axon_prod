@@ -81,9 +81,9 @@ export function AiDiagnosticsPanel({ activities, channelLabel }: Props) {
       <div className="border-b bg-slate-50/70 px-4 py-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div>
-            <p className="text-sm font-medium">AI-диагностика</p>
+            <p className="text-sm font-medium">ИИ-диагностика</p>
             <p className="text-xs text-muted-foreground">
-              Новые входящие сообщения {channelLabel} будут показывать здесь текстовый след обработки AI.
+              Новые входящие сообщения {channelLabel} будут показывать здесь текстовый след обработки ИИ.
             </p>
           </div>
           <Badge variant="outline">Ожидание входящего сообщения</Badge>
@@ -96,7 +96,7 @@ export function AiDiagnosticsPanel({ activities, channelLabel }: Props) {
     <div className="border-b bg-slate-50/70 px-4 py-3">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <div>
-          <p className="text-sm font-medium">AI-диагностика</p>
+          <p className="text-sm font-medium">ИИ-диагностика</p>
           <p className="text-xs text-muted-foreground">
             История обработки для последних входящих сообщений {channelLabel}.
           </p>

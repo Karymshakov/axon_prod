@@ -11,13 +11,10 @@ interface LanguageContextType {
 const LanguageContext = createContext<LanguageContextType | null>(null)
 
 function detectLanguage(): Language {
-  // 1. Check localStorage first
+  // Product UX is Russian-first. Keep the legacy English dictionary available,
+  // but do not auto-switch the CRM to English from old browser/user settings.
   const stored = localStorage.getItem('crm_language')
-  if (stored === 'en' || stored === 'ru') return stored
-  // 2. Check browser language
-  const browserLang = navigator.language?.slice(0, 2).toLowerCase()
-  if (browserLang === 'ru') return 'ru'
-  // 3. Default to Russian
+  if (stored === 'ru') return 'ru'
   return 'ru'
 }
 

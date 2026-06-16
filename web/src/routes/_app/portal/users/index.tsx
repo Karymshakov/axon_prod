@@ -53,23 +53,28 @@ export const Route = createFileRoute('/_app/portal/users/')({
 })
 
 const ROLE_OPTIONS: { value: UserRole; label: string }[] = [
-  { value: 'admin', label: 'Admin / Manager' },
-  { value: 'support', label: 'Support' },
-  { value: 'tax_accountant', label: 'Tax Accountant' },
+  { value: 'admin', label: 'Администратор' },
+  { value: 'manager', label: 'Менеджер' },
 ]
 
+type OrgUserRole = 'admin' | 'manager'
+
+function normalizePortalRole(role: UserRole): OrgUserRole {
+  return role === 'admin' ? 'admin' : 'manager'
+}
+
 const createSchema = z.object({
-  name: z.string().min(1, 'Name is required'),
-  email: z.string().email('Enter a valid email'),
-  role: z.enum(['admin', 'support', 'tax_accountant']),
+  name: z.string().min(1, 'Укажите имя'),
+  email: z.string().email('Введите корректный email'),
+  role: z.enum(['admin', 'manager']),
   is_active: z.boolean(),
-  password: z.string().min(8, 'Password must be at least 8 characters'),
+  password: z.string().min(8, 'Пароль должен быть не короче 8 символов'),
 })
 
 const editSchema = z.object({
-  name: z.string().min(1, 'Name is required'),
-  email: z.string().email('Enter a valid email'),
-  role: z.enum(['admin', 'support', 'tax_accountant']),
+  name: z.string().min(1, 'Укажите имя'),
+  email: z.string().email('Введите корректный email'),
+  role: z.enum(['admin', 'manager']),
   is_active: z.boolean(),
 })
 
@@ -85,7 +90,7 @@ function getInitials(name: string, email: string) {
 
 function roleBadgeVariant(role: UserRole): 'default' | 'secondary' | 'outline' {
   if (role === 'admin') return 'default'
-  if (role === 'support') return 'secondary'
+  if (role === 'manager') return 'secondary'
   return 'outline'
 }
 
@@ -165,7 +170,7 @@ function AdminUsersPage() {
   // Create form
   const createForm = useForm<CreateFormData>({
     resolver: zodResolver(createSchema),
-    defaultValues: { name: '', email: '', role: 'support', is_active: true, password: '' },
+    defaultValues: { name: '', email: '', role: 'manager', is_active: true, password: '' },
   })
 
   const createMutation = useMutation({
@@ -189,7 +194,7 @@ function AdminUsersPage() {
   // Edit form
   const editForm = useForm<EditFormData>({
     resolver: zodResolver(editSchema),
-    defaultValues: { name: '', email: '', role: 'support', is_active: true },
+    defaultValues: { name: '', email: '', role: 'manager', is_active: true },
   })
 
   useEffect(() => {
@@ -197,7 +202,7 @@ function AdminUsersPage() {
       editForm.reset({
         name: userToEdit.name,
         email: userToEdit.email,
-        role: userToEdit.role,
+        role: normalizePortalRole(userToEdit.role),
         is_active: userToEdit.is_active,
       })
     }
@@ -219,8 +224,8 @@ function AdminUsersPage() {
         {/* Header */}
         <div className="px-4 lg:px-6 flex items-center justify-between gap-4 flex-wrap">
           <div>
-            <h1 className="text-2xl font-bold tracking-tight">Admin Portal</h1>
-            <p className="text-muted-foreground text-sm mt-0.5">{t('portal.manageDesc')}</p>
+            <h1 className="text-2xl font-bold tracking-tight">Команда организации</h1>
+            <p className="text-muted-foreground text-sm mt-0.5">Доступы действуют только внутри текущей организации.</p>
           </div>
           <Button onClick={() => setShowCreate(true)}>
             <PlusIcon className="h-4 w-4 mr-2" />
@@ -320,6 +325,7 @@ function AdminUsersPage() {
                 <TableRow>
                   <SortableHead label={t('portal.userColumn')} field="name" ordering={ordering} onSort={toggleSort} />
                   <TableHead>{t('portal.role')}</TableHead>
+                  <TableHead>Организация</TableHead>
                   <TableHead>{t('common.status')}</TableHead>
                   <SortableHead label={t('portal.joined')} field="created_at" ordering={ordering} onSort={toggleSort} />
                   <TableHead className="text-right">{t('common.actions')}</TableHead>
@@ -331,6 +337,7 @@ function AdminUsersPage() {
                     <TableRow key={i}>
                       <TableCell><div className="flex items-center gap-3"><Skeleton className="h-8 w-8 rounded-full" /><div className="space-y-1"><Skeleton className="h-3 w-32" /><Skeleton className="h-3 w-24" /></div></div></TableCell>
                       <TableCell><Skeleton className="h-5 w-20" /></TableCell>
+                      <TableCell><Skeleton className="h-5 w-28" /></TableCell>
                       <TableCell><Skeleton className="h-5 w-16" /></TableCell>
                       <TableCell><Skeleton className="h-4 w-20" /></TableCell>
                       <TableCell />
@@ -338,7 +345,7 @@ function AdminUsersPage() {
                   ))
                 ) : !users || users.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={5} className="text-center text-muted-foreground py-10">
+                    <TableCell colSpan={6} className="text-center text-muted-foreground py-10">
                       {t('portal.noUsers')}
                     </TableCell>
                   </TableRow>
@@ -362,6 +369,16 @@ function AdminUsersPage() {
                         <Badge variant={roleBadgeVariant(user.role)}>
                           {USER_ROLE_LABELS[user.role] ?? user.role}
                         </Badge>
+                      </TableCell>
+                      <TableCell>
+                        <div className="text-sm">
+                          <div className="font-medium">{user.organization_name ?? 'Без организации'}</div>
+                          <div className="text-xs text-muted-foreground">
+                            {user.organization_role === 'owner'
+                              ? 'Владелец'
+                              : user.organization_role === 'admin' ? 'Администратор' : 'Участник'}
+                          </div>
+                        </div>
                       </TableCell>
                       <TableCell>
                         <Badge
@@ -541,7 +558,7 @@ function AdminUsersPage() {
           <AlertDialogHeader>
             <AlertDialogTitle>{t('portal.deleteUser')}</AlertDialogTitle>
             <AlertDialogDescription>
-              <strong>{userToDelete?.name || userToDelete?.email}</strong> — {t('portal.deleteUserDesc')}
+              <strong>{userToDelete?.name || userToDelete?.email}</strong> — пользователь потеряет доступ к текущей организации.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

@@ -2,7 +2,7 @@
 import { createFileRoute } from '@tanstack/react-router'
 import { useLanguage } from '@/contexts/language-context'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { useState, useRef, useCallback, useMemo } from 'react'
+import { useState, useRef, useCallback, useMemo, useEffect } from 'react'
 import {
   UploadCloudIcon,
   SearchIcon,
@@ -47,6 +47,7 @@ import {
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
   DialogFooter,
@@ -104,6 +105,16 @@ import {
   deletePlaybook,
   processPlaybookFile,
   type Playbook,
+  fetchReplyTemplateCategories,
+  createReplyTemplateCategory,
+  updateReplyTemplateCategory,
+  deleteReplyTemplateCategory,
+  createReplyTemplate,
+  updateReplyTemplate,
+  deleteReplyTemplate,
+  type ReplyTemplate,
+  type ReplyTemplateCategory,
+  type ReplyTemplateChannel,
   fetchRoomPricing,
   createRoomPricing,
   updateRoomPricing,
@@ -120,12 +131,23 @@ import {
   saveCombinationType,
   type RoomCombinationGroup,
   type RoomCategory,
+  type User,
 } from '@/lib/api'
 import { DatePicker } from '@/components/date-picker'
+import { useAuth } from '@/contexts/auth-context'
 
 export const Route = createFileRoute('/_app/hotel-details')({
   component: HotelDetailsPage,
 })
+
+function canEditHotelPricing(user: User | null | undefined) {
+  return Boolean(
+    user?.is_superadmin ||
+    user?.is_admin ||
+    user?.current_organization_role === 'owner' ||
+    user?.current_organization_role === 'admin',
+  )
+}
 
 const CATEGORIES = [
   { value: 'rooms', label: 'Номера' },
@@ -372,8 +394,7 @@ function MediaCard({
 
 // ── Hotel Policy Tab ──────────────────────────────────────────────────────────
 
-// @ts-ignore - Unused function kept for future use
-function _HotelPolicyTab() {
+function HotelPolicyTab() {
   const queryClient = useQueryClient()
 
   // ── Profile & Location ──────────────────────────────────────────────────────
@@ -1072,7 +1093,9 @@ function parseContentBlocks(raw: string): ContentBlock[] {
     if (Array.isArray(parsed) && parsed.length > 0) {
       return parsed as ContentBlock[]
     }
-  } catch {}
+  } catch {
+    // Backward compatibility: non-JSON legacy content is wrapped below.
+  }
   // backward compat: wrap plain text as single block
   return [{ id: newBlockId(), title: '', content: raw }]
 }
@@ -1103,7 +1126,6 @@ function PlaybooksTab() {
   // Sync form when selected playbook changes
   if (selectedPlaybook && formSyncedId.current !== selectedPlaybook.id) {
     formSyncedId.current = selectedPlaybook.id
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     setForm({
       name: selectedPlaybook.name,
       trigger_description: selectedPlaybook.trigger_description,
@@ -1496,6 +1518,465 @@ function PlaybooksTab() {
   )
 }
 
+// ── Reply Templates Tab ───────────────────────────────────────────────────────
+
+const REPLY_TEMPLATE_CHANNEL_LABELS: Record<ReplyTemplateChannel, string> = {
+  all: 'Все каналы',
+  telegram: 'Telegram',
+  instagram: 'Instagram',
+  whatsapp: 'WhatsApp',
+}
+
+const EMPTY_TEMPLATE_FORM = {
+  title: '',
+  text: '',
+  channel: 'all' as ReplyTemplateChannel,
+  tags: '',
+  is_active: true,
+}
+
+function getApiErrorMessage(error: unknown, fallback: string) {
+  const data = (error as { data?: unknown })?.data
+  if (data && typeof data === 'object') {
+    const detail = (data as { detail?: unknown }).detail
+    if (typeof detail === 'string') return detail
+    const firstValue = Object.values(data as Record<string, unknown>)[0]
+    if (Array.isArray(firstValue) && typeof firstValue[0] === 'string') return firstValue[0]
+  }
+  return fallback
+}
+
+function ReplyTemplatesTab() {
+  const queryClient = useQueryClient()
+  const { user } = useAuth()
+  const orgSlug = user?.current_organization_slug ?? ''
+  const categoriesQueryKey = ['reply-template-categories', orgSlug] as const
+  const { data: categories = [], isLoading } = useQuery({
+    queryKey: categoriesQueryKey,
+    queryFn: fetchReplyTemplateCategories,
+    enabled: !!orgSlug,
+  })
+
+  const [selectedCategoryId, setSelectedCategoryId] = useState<number | null>(null)
+  const [categoryDialogOpen, setCategoryDialogOpen] = useState(false)
+  const [newCategoryName, setNewCategoryName] = useState('')
+  const [categoryError, setCategoryError] = useState('')
+  const [categoryName, setCategoryName] = useState('')
+  const [templateDialogOpen, setTemplateDialogOpen] = useState(false)
+  const [editingTemplate, setEditingTemplate] = useState<ReplyTemplate | null>(null)
+  const [templateForm, setTemplateForm] = useState(EMPTY_TEMPLATE_FORM)
+  const [categoryDeleteTarget, setCategoryDeleteTarget] = useState<ReplyTemplateCategory | null>(null)
+  const [templateDeleteTarget, setTemplateDeleteTarget] = useState<ReplyTemplate | null>(null)
+
+  const selectedCategory = useMemo(() => {
+    if (selectedCategoryId !== null) {
+      return categories.find((category) => category.id === selectedCategoryId) ?? categories[0] ?? null
+    }
+    return categories[0] ?? null
+  }, [categories, selectedCategoryId])
+
+  useEffect(() => {
+    if (!selectedCategoryId && categories[0]) {
+      setSelectedCategoryId(categories[0].id)
+    }
+  }, [categories, selectedCategoryId])
+
+  useEffect(() => {
+    setCategoryName(selectedCategory?.name ?? '')
+  }, [selectedCategory?.id, selectedCategory?.name])
+
+  const invalidateTemplates = () => {
+    queryClient.invalidateQueries({ queryKey: categoriesQueryKey })
+    queryClient.invalidateQueries({ queryKey: ['reply-templates'] })
+  }
+
+  const createCategoryMutation = useMutation({
+    mutationFn: createReplyTemplateCategory,
+    onSuccess: (created) => {
+      queryClient.setQueryData<ReplyTemplateCategory[]>(categoriesQueryKey, (existing = []) => {
+        const withoutDuplicate = existing.filter((category) => category.id !== created.id)
+        return [...withoutDuplicate, created].sort((a, b) => a.order - b.order || a.name.localeCompare(b.name))
+      })
+      invalidateTemplates()
+      setSelectedCategoryId(created.id)
+      setCategoryDialogOpen(false)
+      setNewCategoryName('')
+      setCategoryError('')
+      toast.success('Раздел добавлен')
+    },
+    onError: (error) => {
+      const message = getApiErrorMessage(error, 'Не удалось добавить раздел')
+      setCategoryError(message)
+      toast.error(message)
+    },
+  })
+
+  const updateCategoryMutation = useMutation({
+    mutationFn: ({ id, name }: { id: number; name: string }) => updateReplyTemplateCategory(id, { name }),
+    onSuccess: () => {
+      invalidateTemplates()
+      toast.success('Раздел сохранен')
+    },
+    onError: () => toast.error('Не удалось сохранить раздел'),
+  })
+
+  const deleteCategoryMutation = useMutation({
+    mutationFn: deleteReplyTemplateCategory,
+    onSuccess: () => {
+      invalidateTemplates()
+      setSelectedCategoryId(null)
+      setCategoryDeleteTarget(null)
+      toast.success('Раздел удален')
+    },
+    onError: () => toast.error('Не удалось удалить раздел'),
+  })
+
+  const createTemplateMutation = useMutation({
+    mutationFn: createReplyTemplate,
+    onSuccess: () => {
+      invalidateTemplates()
+      setTemplateDialogOpen(false)
+      toast.success('Шаблон добавлен')
+    },
+    onError: () => toast.error('Не удалось добавить шаблон'),
+  })
+
+  const updateTemplateMutation = useMutation({
+    mutationFn: ({ id, data }: { id: number; data: Parameters<typeof updateReplyTemplate>[1] }) => updateReplyTemplate(id, data),
+    onSuccess: () => {
+      invalidateTemplates()
+      setTemplateDialogOpen(false)
+      toast.success('Шаблон сохранен')
+    },
+    onError: () => toast.error('Не удалось сохранить шаблон'),
+  })
+
+  const deleteTemplateMutation = useMutation({
+    mutationFn: deleteReplyTemplate,
+    onSuccess: () => {
+      invalidateTemplates()
+      setTemplateDeleteTarget(null)
+      toast.success('Шаблон удален')
+    },
+    onError: () => toast.error('Не удалось удалить шаблон'),
+  })
+
+  const openCreateTemplate = () => {
+    setEditingTemplate(null)
+    setTemplateForm(EMPTY_TEMPLATE_FORM)
+    setTemplateDialogOpen(true)
+  }
+
+  const handleCreateCategory = () => {
+    const name = newCategoryName.trim()
+    setCategoryError('')
+    if (!name) {
+      const message = 'Введите название раздела'
+      setCategoryError(message)
+      toast.error(message)
+      return
+    }
+    createCategoryMutation.mutate({ name })
+  }
+
+  const openEditTemplate = (template: ReplyTemplate) => {
+    setEditingTemplate(template)
+    setTemplateForm({
+      title: template.title,
+      text: template.text,
+      channel: template.channel,
+      tags: template.tags.join(', '),
+      is_active: template.is_active,
+    })
+    setTemplateDialogOpen(true)
+  }
+
+  const handleTemplateSubmit = () => {
+    if (!selectedCategory) return
+    const title = templateForm.title.trim()
+    const text = templateForm.text.trim()
+    if (!title || !text) {
+      toast.error('Заполните название и текст шаблона')
+      return
+    }
+    const payload = {
+      category: selectedCategory.id,
+      title,
+      text,
+      channel: templateForm.channel,
+      tags: templateForm.tags.split(',').map((tag) => tag.trim()).filter(Boolean),
+      is_active: templateForm.is_active,
+    }
+
+    if (editingTemplate) {
+      updateTemplateMutation.mutate({ id: editingTemplate.id, data: payload })
+    } else {
+      createTemplateMutation.mutate(payload)
+    }
+  }
+
+  const sortedTemplates = [...(selectedCategory?.templates ?? [])].sort((a, b) => a.order - b.order || a.title.localeCompare(b.title))
+
+  return (
+    <div className="grid gap-4 lg:grid-cols-[240px_minmax(0,1fr)]">
+      <div className="space-y-2">
+        <Button
+          variant="outline"
+          size="sm"
+          className="w-full justify-start gap-2"
+          onClick={() => setCategoryDialogOpen(true)}
+          disabled={createCategoryMutation.isPending}
+        >
+          <PlusIcon className="h-4 w-4" />
+          Добавить раздел
+        </Button>
+        <div className="space-y-1">
+          {isLoading ? (
+            <div className="rounded-md border p-4 text-sm text-muted-foreground">Загрузка...</div>
+          ) : categories.length === 0 ? (
+            <div className="rounded-md border p-4 text-sm text-muted-foreground">Разделы пока не созданы</div>
+          ) : (
+            categories.map((category) => (
+              <button
+                key={category.id}
+                type="button"
+                onClick={() => setSelectedCategoryId(category.id)}
+                className={`flex w-full items-center justify-between rounded-md px-3 py-2 text-left text-sm transition-colors ${
+                  selectedCategory?.id === category.id
+                    ? 'bg-primary text-primary-foreground'
+                    : 'hover:bg-muted'
+                }`}
+              >
+                <span className="truncate">{category.name}</span>
+                <span className="text-xs opacity-75">{category.templates.length}</span>
+              </button>
+            ))
+          )}
+        </div>
+      </div>
+
+      <div className="min-w-0 space-y-4">
+        {selectedCategory ? (
+          <>
+            <div className="flex flex-col gap-3 rounded-md border bg-background p-4 sm:flex-row sm:items-end">
+              <div className="min-w-0 flex-1 space-y-1.5">
+                <Label>Раздел</Label>
+                <Input value={categoryName} onChange={(event) => setCategoryName(event.target.value)} />
+              </div>
+              <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  onClick={() => updateCategoryMutation.mutate({ id: selectedCategory.id, name: categoryName.trim() || selectedCategory.name })}
+                  disabled={updateCategoryMutation.isPending}
+                >
+                  Сохранить
+                </Button>
+                <Button variant="outline" onClick={openCreateTemplate}>
+                  <PlusIcon className="h-4 w-4" />
+                  Шаблон
+                </Button>
+                <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive" onClick={() => setCategoryDeleteTarget(selectedCategory)}>
+                  <Trash2Icon className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+
+            {sortedTemplates.length === 0 ? (
+              <div className="rounded-md border border-dashed p-8 text-center text-sm text-muted-foreground">
+                В этом разделе пока нет шаблонов
+              </div>
+            ) : (
+              <div className="grid gap-3">
+                {sortedTemplates.map((template) => (
+                  <div key={template.id} className="rounded-md border bg-background p-4">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0 space-y-2">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <h3 className="font-semibold">{template.title}</h3>
+                          <Badge variant="secondary">{REPLY_TEMPLATE_CHANNEL_LABELS[template.channel]}</Badge>
+                          {!template.is_active ? <Badge variant="outline">Выключен</Badge> : null}
+                        </div>
+                        <p className="whitespace-pre-wrap text-sm leading-relaxed text-muted-foreground">{template.text}</p>
+                        {template.tags.length > 0 ? (
+                          <div className="flex flex-wrap gap-1">
+                            {template.tags.map((tag) => (
+                              <Badge key={tag} variant="outline" className="text-[10px]">{tag}</Badge>
+                            ))}
+                          </div>
+                        ) : null}
+                      </div>
+                      <div className="flex shrink-0 gap-1">
+                        <Button variant="ghost" size="icon" onClick={() => openEditTemplate(template)} aria-label="Редактировать шаблон">
+                          <PencilIcon className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="text-destructive hover:text-destructive"
+                          onClick={() => setTemplateDeleteTarget(template)}
+                          aria-label="Удалить шаблон"
+                        >
+                          <Trash2Icon className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </>
+        ) : (
+          <div className="rounded-md border border-dashed p-8 text-center text-sm text-muted-foreground">
+            Добавьте первый раздел шаблонов
+          </div>
+        )}
+      </div>
+
+      <Dialog open={templateDialogOpen} onOpenChange={setTemplateDialogOpen}>
+        <DialogContent className="max-w-[95vw] sm:max-w-xl">
+          <DialogHeader>
+            <DialogTitle>{editingTemplate ? 'Редактировать шаблон' : 'Новый шаблон'}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="space-y-1.5">
+              <Label>Название</Label>
+              <Input
+                value={templateForm.title}
+                onChange={(event) => setTemplateForm((current) => ({ ...current, title: event.target.value }))}
+                placeholder="Например: Уточнить даты"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Канал</Label>
+              <Select
+                value={templateForm.channel}
+                onValueChange={(value) => setTemplateForm((current) => ({ ...current, channel: value as ReplyTemplateChannel }))}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {Object.entries(REPLY_TEMPLATE_CHANNEL_LABELS).map(([value, label]) => (
+                    <SelectItem key={value} value={value}>{label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <Label>Текст</Label>
+              <Textarea
+                value={templateForm.text}
+                onChange={(event) => setTemplateForm((current) => ({ ...current, text: event.target.value }))}
+                placeholder="Здравствуйте! Подскажите, пожалуйста, даты заезда и выезда..."
+                rows={6}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Теги</Label>
+              <Input
+                value={templateForm.tags}
+                onChange={(event) => setTemplateForm((current) => ({ ...current, tags: event.target.value }))}
+                placeholder="бронь, оплата, даты"
+              />
+            </div>
+            <label className="flex items-center justify-between rounded-md border p-3 text-sm">
+              <span>Активен</span>
+              <Switch
+                checked={templateForm.is_active}
+                onCheckedChange={(checked) => setTemplateForm((current) => ({ ...current, is_active: checked }))}
+              />
+            </label>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setTemplateDialogOpen(false)}>Отмена</Button>
+            <Button onClick={handleTemplateSubmit} disabled={createTemplateMutation.isPending || updateTemplateMutation.isPending}>
+              Сохранить
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={categoryDialogOpen} onOpenChange={setCategoryDialogOpen}>
+        <DialogContent className="max-w-[95vw] sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Новый раздел шаблонов</DialogTitle>
+            <DialogDescription>
+              Раздел поможет менеджерам быстрее находить нужные ответы в чате.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-1.5 py-2">
+            <Label>Название раздела</Label>
+            <Input
+              value={newCategoryName}
+              onChange={(event) => {
+                setNewCategoryName(event.target.value)
+                setCategoryError('')
+              }}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') {
+                  event.preventDefault()
+                  handleCreateCategory()
+                }
+              }}
+              placeholder="Например: Бронирование, Оплата, Заезд"
+              autoFocus
+            />
+            {categoryError ? (
+              <p className="text-sm text-destructive">{categoryError}</p>
+            ) : null}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setCategoryDialogOpen(false)}>Отмена</Button>
+            <Button onClick={handleCreateCategory} disabled={createCategoryMutation.isPending}>
+              {createCategoryMutation.isPending ? 'Добавляем...' : 'Добавить'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <AlertDialog open={!!categoryDeleteTarget} onOpenChange={(open) => { if (!open) setCategoryDeleteTarget(null) }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Удалить раздел?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Все шаблоны внутри раздела тоже будут удалены.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Отмена</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={() => categoryDeleteTarget && deleteCategoryMutation.mutate(categoryDeleteTarget.id)}
+            >
+              Удалить
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={!!templateDeleteTarget} onOpenChange={(open) => { if (!open) setTemplateDeleteTarget(null) }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Удалить шаблон?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Шаблон исчезнет из быстрых ответов в коммуникациях.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Отмена</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={() => templateDeleteTarget && deleteTemplateMutation.mutate(templateDeleteTarget.id)}
+            >
+              Удалить
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </div>
+  )
+}
+
 // ── Room Combinations Section ─────────────────────────────────────────────────
 
 function guestLabel(n: number): string {
@@ -1508,15 +1989,18 @@ function CombinationNoteCell({
   guestCount,
   combinationIndex,
   initialNote,
+  canEdit,
 }: {
   guestCount: number
   combinationIndex: number
   initialNote: string
+  canEdit: boolean
 }) {
   const queryClient = useQueryClient()
   const [value, setValue] = useState(initialNote)
 
   async function handleBlur() {
+    if (!canEdit) return
     if (value === initialNote) return
     try {
       await saveRoomCombinationNote(guestCount, combinationIndex, value)
@@ -1527,13 +2011,17 @@ function CombinationNoteCell({
   }
 
   return (
-    <input
-      className="w-full bg-transparent text-sm text-muted-foreground outline-none border-b border-transparent focus:border-border focus:text-foreground placeholder:text-muted-foreground/50 py-0.5"
-      value={value}
-      placeholder="Добавить примечание…"
-      onChange={(e) => setValue(e.target.value)}
-      onBlur={handleBlur}
-    />
+    canEdit ? (
+      <input
+        className="w-full bg-transparent text-sm text-muted-foreground outline-none border-b border-transparent focus:border-border focus:text-foreground placeholder:text-muted-foreground/50 py-0.5"
+        value={value}
+        placeholder="Добавить примечание…"
+        onChange={(e) => setValue(e.target.value)}
+        onBlur={handleBlur}
+      />
+    ) : (
+      <span className="block text-sm text-muted-foreground">{initialNote || '—'}</span>
+    )
   )
 }
 
@@ -1695,6 +2183,8 @@ function AddCombinationDialog({
 
 function RoomCombinationsSection() {
   const queryClient = useQueryClient()
+  const { user } = useAuth()
+  const canEditPricing = canEditHotelPricing(user)
   const [addOpen, setAddOpen] = useState(false)
   const { data, isLoading, refetch, isFetching } = useQuery({
     queryKey: ['room-combinations'],
@@ -1708,6 +2198,7 @@ function RoomCombinationsSection() {
     comboIndex: number,
     newType: 'Основной' | 'Альтернатива' | 'Семейный',
   ) {
+    if (!canEditPricing) return
     queryClient.setQueryData(
       ['room-combinations'],
       (old: { results: RoomCombinationGroup[] } | undefined) => {
@@ -1742,6 +2233,7 @@ function RoomCombinationsSection() {
   }
 
   async function handleDelete(combo: { id: number | null; is_custom: boolean; index: number }, guestCount: number) {
+    if (!canEditPricing) return
     queryClient.setQueryData(
       ['room-combinations'],
       (old: { results: RoomCombinationGroup[] } | undefined) => {
@@ -1791,18 +2283,22 @@ function RoomCombinationsSection() {
               : <RefreshCwIcon className="h-4 w-4 mr-1.5" />}
             Обновить
           </Button>
-          <Button size="sm" onClick={() => setAddOpen(true)}>
-            <PlusIcon className="h-4 w-4 mr-1.5" />
-            Добавить комбинацию
-          </Button>
+          {canEditPricing ? (
+            <Button size="sm" onClick={() => setAddOpen(true)}>
+              <PlusIcon className="h-4 w-4 mr-1.5" />
+              Добавить комбинацию
+            </Button>
+          ) : null}
         </div>
       </div>
 
-      <AddCombinationDialog
-        open={addOpen}
-        onOpenChange={setAddOpen}
-        onSaved={() => queryClient.invalidateQueries({ queryKey: ['room-combinations'] })}
-      />
+      {canEditPricing ? (
+        <AddCombinationDialog
+          open={addOpen}
+          onOpenChange={setAddOpen}
+          onSaved={() => queryClient.invalidateQueries({ queryKey: ['room-combinations'] })}
+        />
+      ) : null}
 
       {isLoading ? (
         <div className="text-sm text-muted-foreground py-4">Загрузка...</div>
@@ -1822,7 +2318,7 @@ function RoomCombinationsSection() {
                 <th className="px-3 py-2 text-right font-medium text-muted-foreground whitespace-nowrap">Полупансион</th>
                 <th className="px-3 py-2 text-right font-medium text-muted-foreground whitespace-nowrap">Полный пансион</th>
                 <th className="px-3 py-2 text-left font-medium text-muted-foreground">Примечания</th>
-                <th className="w-8" />
+                {canEditPricing ? <th className="w-8" /> : null}
               </tr>
             </thead>
             <tbody>
@@ -1865,34 +2361,40 @@ function RoomCombinationsSection() {
                     <td className="px-3 py-2.5 text-center tabular-nums font-medium">{group.guest_count}</td>
                     <td className="px-3 py-2.5 text-center tabular-nums">{combo.room_count}</td>
                     <td className="px-3 py-1.5">
-                      <Select
-                        value={combo.type}
-                        onValueChange={(v) =>
-                          handleTypeChange(
-                            group.guest_count,
-                            combo.index,
-                            v as 'Основной' | 'Альтернатива' | 'Семейный',
-                          )
-                        }
-                      >
-                        <SelectTrigger
-                          className={cn(
-                            'h-7 text-xs w-[140px] font-medium',
-                            combo.type === 'Основной'
-                              ? 'text-blue-600 border-blue-200 bg-blue-50 hover:bg-blue-100'
-                              : combo.type === 'Семейный'
-                              ? 'text-violet-600 border-violet-200 bg-violet-50 hover:bg-violet-100'
-                              : 'text-muted-foreground',
-                          )}
+                      {canEditPricing ? (
+                        <Select
+                          value={combo.type}
+                          onValueChange={(v) =>
+                            handleTypeChange(
+                              group.guest_count,
+                              combo.index,
+                              v as 'Основной' | 'Альтернатива' | 'Семейный',
+                            )
+                          }
                         >
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="Основной" className="text-xs text-blue-600">Основной</SelectItem>
-                          <SelectItem value="Альтернатива" className="text-xs">Альтернатива</SelectItem>
-                          <SelectItem value="Семейный" className="text-xs text-violet-600">Семейный</SelectItem>
-                        </SelectContent>
-                      </Select>
+                          <SelectTrigger
+                            className={cn(
+                              'h-7 text-xs w-[140px] font-medium',
+                              combo.type === 'Основной'
+                                ? 'text-blue-600 border-blue-200 bg-blue-50 hover:bg-blue-100'
+                                : combo.type === 'Семейный'
+                                ? 'text-violet-600 border-violet-200 bg-violet-50 hover:bg-violet-100'
+                                : 'text-muted-foreground',
+                            )}
+                          >
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="Основной" className="text-xs text-blue-600">Основной</SelectItem>
+                            <SelectItem value="Альтернатива" className="text-xs">Альтернатива</SelectItem>
+                            <SelectItem value="Семейный" className="text-xs text-violet-600">Семейный</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      ) : (
+                        <span className="inline-flex h-7 items-center rounded-md border bg-muted/30 px-2.5 text-xs font-medium text-muted-foreground">
+                          {combo.type}
+                        </span>
+                      )}
                     </td>
                     <td className="px-3 py-2.5 text-right tabular-nums">
                       {combo.prices?.standard != null ? combo.prices.standard.toLocaleString('ru-RU') : '—'}
@@ -1911,19 +2413,22 @@ function RoomCombinationsSection() {
                         guestCount={group.guest_count}
                         combinationIndex={combo.index}
                         initialNote={combo.note}
+                        canEdit={canEditPricing}
                       />
                     </td>
-                    <td className="px-2 py-2.5 text-center">
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        aria-label="Удалить"
-                        className="h-7 w-7 text-muted-foreground hover:text-destructive"
-                        onClick={() => handleDelete(combo, group.guest_count)}
-                      >
-                        <Trash2Icon className="h-3.5 w-3.5" />
-                      </Button>
-                    </td>
+                    {canEditPricing ? (
+                      <td className="px-2 py-2.5 text-center">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          aria-label="Удалить"
+                          className="h-7 w-7 text-muted-foreground hover:text-destructive"
+                          onClick={() => handleDelete(combo, group.guest_count)}
+                        >
+                          <Trash2Icon className="h-3.5 w-3.5" />
+                        </Button>
+                      </td>
+                    ) : null}
                   </tr>
                 ))
               )}
@@ -1967,6 +2472,8 @@ function formatPrice(val: string | null): string {
 
 function PricingTab() {
   const queryClient = useQueryClient()
+  const { user } = useAuth()
+  const canEditPricing = canEditHotelPricing(user)
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editingRow, setEditingRow] = useState<RoomPricing | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<RoomPricing | null>(null)
@@ -1984,6 +2491,7 @@ function PricingTab() {
   const [uploadResultOpen, setUploadResultOpen] = useState(false)
 
   async function handleExcelUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    if (!canEditPricing) return
     const file = e.target.files?.[0]
     if (!excelInputRef.current) return
     excelInputRef.current.value = ''
@@ -2074,12 +2582,14 @@ function PricingTab() {
   })
 
   function openAdd() {
+    if (!canEditPricing) return
     setEditingRow(null)
     setForm(EMPTY_PRICING)
     setDialogOpen(true)
   }
 
   function openEdit(row: RoomPricing) {
+    if (!canEditPricing) return
     setEditingRow(row)
     setForm({
       kategoria_nomera: row.kategoria_nomera,
@@ -2097,6 +2607,7 @@ function PricingTab() {
   }
 
   function handleSave() {
+    if (!canEditPricing) return
     if (!form.kategoria_nomera.trim()) {
       toast.error('Укажите категорию номера')
       return
@@ -2145,25 +2656,27 @@ function PricingTab() {
             Валюта: <span className="font-medium text-foreground">KGS</span> (Кыргызский сом)
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => excelInputRef.current?.click()}
-            disabled={isUploading}
-          >
-            {isUploading ? (
-              <Loader2Icon className="h-4 w-4 mr-1.5 animate-spin" />
-            ) : (
-              <UploadCloudIcon className="h-4 w-4 mr-1.5" />
-            )}
-            Загрузить Excel
-          </Button>
-          <Button onClick={openAdd} size="sm">
-            <PlusIcon className="h-4 w-4 mr-1.5" />
-            Добавить строку
-          </Button>
-        </div>
+        {canEditPricing ? (
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => excelInputRef.current?.click()}
+              disabled={isUploading}
+            >
+              {isUploading ? (
+                <Loader2Icon className="h-4 w-4 mr-1.5 animate-spin" />
+              ) : (
+                <UploadCloudIcon className="h-4 w-4 mr-1.5" />
+              )}
+              Загрузить Excel
+            </Button>
+            <Button onClick={openAdd} size="sm">
+              <PlusIcon className="h-4 w-4 mr-1.5" />
+              Добавить строку
+            </Button>
+          </div>
+        ) : null}
       </div>
 
       <div className="overflow-x-auto rounded-lg border">
@@ -2189,20 +2702,22 @@ function PricingTab() {
               <th className="px-3 py-2.5 text-right font-medium text-muted-foreground whitespace-nowrap">С завтраком</th>
               <th className="px-3 py-2.5 text-right font-medium text-muted-foreground whitespace-nowrap">Полупансион</th>
               <th className="px-3 py-2.5 text-right font-medium text-muted-foreground whitespace-nowrap">Полный пансион</th>
-              <th className="px-3 py-2.5 text-center font-medium text-muted-foreground whitespace-nowrap">Действия</th>
+              {canEditPricing ? (
+                <th className="px-3 py-2.5 text-center font-medium text-muted-foreground whitespace-nowrap">Действия</th>
+              ) : null}
             </tr>
           </thead>
           <tbody>
             {isLoading ? (
               <tr>
-                <td colSpan={11} className="px-3 py-8 text-center text-muted-foreground">
+                <td colSpan={canEditPricing ? 11 : 10} className="px-3 py-8 text-center text-muted-foreground">
                   Загрузка...
                 </td>
               </tr>
             ) : rows.length === 0 ? (
               <tr>
-                <td colSpan={11} className="px-3 py-8 text-center text-muted-foreground">
-                  Прайс-лист пуст. Добавьте первую строку.
+                <td colSpan={canEditPricing ? 11 : 10} className="px-3 py-8 text-center text-muted-foreground">
+                  {canEditPricing ? 'Прайс-лист пуст. Добавьте первую строку.' : 'Прайс-лист пуст.'}
                 </td>
               </tr>
             ) : (
@@ -2255,28 +2770,30 @@ function PricingTab() {
                   <td className="px-3 py-2.5 text-right tabular-nums">{formatPrice(row.s_zavtrakom)}</td>
                   <td className="px-3 py-2.5 text-right tabular-nums">{formatPrice(row.polupansion)}</td>
                   <td className="px-3 py-2.5 text-right tabular-nums">{formatPrice(row.polny_pansion)}</td>
-                  <td className="px-3 py-2.5 text-center">
-                    <div className="flex items-center justify-center gap-1">
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-7 w-7"
-                        aria-label="Edit"
-                        onClick={() => openEdit(row)}
-                      >
-                        <PencilIcon className="h-3.5 w-3.5" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-7 w-7 text-destructive hover:text-destructive"
-                        aria-label="Delete"
-                        onClick={() => setDeleteTarget(row)}
-                      >
-                        <Trash2Icon className="h-3.5 w-3.5" />
-                      </Button>
-                    </div>
-                  </td>
+                  {canEditPricing ? (
+                    <td className="px-3 py-2.5 text-center">
+                      <div className="flex items-center justify-center gap-1">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7"
+                          aria-label="Edit"
+                          onClick={() => openEdit(row)}
+                        >
+                          <PencilIcon className="h-3.5 w-3.5" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7 text-destructive hover:text-destructive"
+                          aria-label="Delete"
+                          onClick={() => setDeleteTarget(row)}
+                        >
+                          <Trash2Icon className="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
+                    </td>
+                  ) : null}
                 </tr>
                 )
               })
@@ -2550,9 +3067,13 @@ function PricingTab() {
 // ── Main Page ─────────────────────────────────────────────────────────────────
 
 function HotelDetailsPage() {
+  return <HotelDetailsPageContent />
+}
+
+function HotelDetailsPageContent() {
   const { t } = useLanguage()
   const queryClient = useQueryClient()
-  const [activeTab, setActiveTab] = useState<'photo' | 'video' | 'playbooks' | 'pricing'>('playbooks')
+  const [activeTab, setActiveTab] = useState<'photo' | 'video' | 'playbooks' | 'reply-templates' | 'pricing'>('playbooks')
   const [search, setSearch] = useState('')
   const [category, setКатегория] = useState('all')
   const [dialogOpen, setDialogOpen] = useState(false)
@@ -2615,7 +3136,7 @@ function HotelDetailsPage() {
 
   const openUpload = () => {
     setEditingItem(null)
-    const mediaType = activeTab === 'playbooks' || activeTab === 'pricing' ? 'photo' : activeTab as 'photo' | 'video'
+    const mediaType = activeTab === 'playbooks' || activeTab === 'reply-templates' || activeTab === 'pricing' ? 'photo' : activeTab as 'photo' | 'video'
     setForm({
       ...EMPTY_FORM,
       media_type: mediaType,
@@ -2746,6 +3267,10 @@ function HotelDetailsPage() {
                   <ZapIcon className="h-4 w-4" />
                   {t('hotelDetails.tabs.playbooks')}
                 </TabsTrigger>
+                <TabsTrigger value="reply-templates" className="gap-1.5">
+                  <FileTextIcon className="h-4 w-4" />
+                  Шаблоны
+                </TabsTrigger>
                 <TabsTrigger value="pricing" className="gap-1.5">
                   <DollarSignIcon className="h-4 w-4" />
                   {t('hotelDetails.tabs.pricing')}
@@ -2809,6 +3334,10 @@ function HotelDetailsPage() {
 
             <TabsContent value="playbooks">
               <PlaybooksTab />
+            </TabsContent>
+
+            <TabsContent value="reply-templates">
+              <ReplyTemplatesTab />
             </TabsContent>
 
             <TabsContent value="pricing">

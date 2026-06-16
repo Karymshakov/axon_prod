@@ -1,5 +1,4 @@
 import { useState } from 'react'
-import { useLanguage } from '@/contexts/language-context'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { CheckCircleIcon, PlusIcon, TrashIcon, CalendarIcon, AlertCircleIcon } from 'lucide-react'
 import { fetchTasks, createTask, completeTask, deleteTask, type Task } from '@/lib/api'
@@ -30,8 +29,19 @@ interface LeadTasksProps {
   leadId: number
 }
 
+const TASK_TYPE_LABELS: Record<string, string> = {
+  call: 'Звонок',
+  email: 'Email',
+  meeting: 'Встреча',
+  follow_up: 'Следующий контакт',
+  send_info: 'Отправить информацию',
+  send_case_study: 'Отправить пример',
+  request_meeting: 'Запросить встречу',
+  send_proposal: 'Отправить предложение',
+  other: 'Другое',
+}
+
 export function LeadTasks({ leadId }: LeadTasksProps) {
-  const { t } = useLanguage()
   const [dialogOpen, setDialogOpen] = useState(false)
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
@@ -51,10 +61,10 @@ export function LeadTasks({ leadId }: LeadTasksProps) {
       queryClient.invalidateQueries({ queryKey: ['lead-activities', leadId] })
       setDialogOpen(false)
       resetForm()
-      toast.success(t('leads.taskCreated'))
+      toast.success('Задача добавлена')
     },
     onError: () => {
-      toast.error(t('leads.taskCreateError'))
+      toast.error('Не удалось добавить задачу')
     },
   })
 
@@ -63,10 +73,10 @@ export function LeadTasks({ leadId }: LeadTasksProps) {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['tasks', leadId] })
       queryClient.invalidateQueries({ queryKey: ['lead-activities', leadId] })
-      toast.success(t('leads.taskCompleted'))
+      toast.success('Задача выполнена')
     },
     onError: () => {
-      toast.error(t('leads.taskCompleteError'))
+      toast.error('Не удалось выполнить задачу')
     },
   })
 
@@ -74,10 +84,10 @@ export function LeadTasks({ leadId }: LeadTasksProps) {
     mutationFn: deleteTask,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['tasks', leadId] })
-      toast.success(t('leads.taskDeleted'))
+      toast.success('Задача удалена')
     },
     onError: () => {
-      toast.error(t('leads.taskDeleteError'))
+      toast.error('Не удалось удалить задачу')
     },
   })
 
@@ -90,11 +100,11 @@ export function LeadTasks({ leadId }: LeadTasksProps) {
 
   const handleCreateTask = () => {
     if (!title.trim()) {
-      toast.error(t('leads.enterTaskTitle'))
+      toast.error('Введите название задачи')
       return
     }
     if (!dueDate) {
-      toast.error(t('leads.selectDueDate'))
+      toast.error('Выберите дату')
       return
     }
 
@@ -125,25 +135,25 @@ export function LeadTasks({ leadId }: LeadTasksProps) {
           <div className="flex items-center justify-between">
             <CardTitle className="flex items-center gap-2 text-base">
               <CalendarIcon className="h-4 w-4" />
-              {t('leads.tasksAndReminders')}
+              Задачи менеджера
             </CardTitle>
             <Button size="sm" onClick={() => setDialogOpen(true)}>
               <PlusIcon className="h-4 w-4 mr-1" />
-              {t('leads.addTask')}
+              Добавить задачу
             </Button>
           </div>
         </CardHeader>
         <CardContent className="space-y-4">
           {isLoading ? (
-            <p className="text-sm text-muted-foreground">{t('leads.loadingTasks')}</p>
+            <p className="text-sm text-muted-foreground">Загружаем задачи...</p>
           ) : tasks.length === 0 ? (
-            <p className="text-sm text-muted-foreground">{t('leads.noTasks')}</p>
+            <p className="text-sm text-muted-foreground">Задач пока нет.</p>
           ) : (
             <>
               {/* Pending tasks */}
               {pendingTasks.length > 0 ? (
                 <div className="space-y-2">
-                  <h4 className="text-sm font-medium">{t('leads.pending')} ({pendingTasks.length})</h4>
+                  <h4 className="text-sm font-medium">Активные ({pendingTasks.length})</h4>
                   <div className="space-y-2">
                     {pendingTasks.map((task: Task) => (
                       <div
@@ -157,7 +167,7 @@ export function LeadTasks({ leadId }: LeadTasksProps) {
                             className="h-6 w-6 shrink-0 mt-0.5"
                             onClick={() => completeMutation.mutate(task.id)}
                             disabled={completeMutation.isPending}
-                            aria-label="Complete task"
+                            aria-label="Выполнить задачу"
                           >
                             <CheckCircleIcon className="h-4 w-4" />
                           </Button>
@@ -165,12 +175,12 @@ export function LeadTasks({ leadId }: LeadTasksProps) {
                             <div className="flex items-center gap-2 flex-wrap">
                               <p className="text-sm font-medium">{task.title}</p>
                               <Badge variant="outline" className="text-xs">
-                                {task.task_type_display}
+                                {TASK_TYPE_LABELS[task.task_type] ?? task.task_type_display}
                               </Badge>
                               {task.is_overdue ? (
                                 <Badge variant="destructive" className="text-xs">
                                   <AlertCircleIcon className="h-3 w-3 mr-1" />
-                                  {t('leads.overdue')}
+                                  Просрочена
                                 </Badge>
                               ) : null}
                             </div>
@@ -180,7 +190,7 @@ export function LeadTasks({ leadId }: LeadTasksProps) {
                               </p>
                             ) : null}
                             <p className="text-xs text-muted-foreground mt-1">
-                              {t('leads.due')} {formatDate(task.due_date)}
+                              Срок: {formatDate(task.due_date)}
                             </p>
                           </div>
                           <Button
@@ -189,7 +199,7 @@ export function LeadTasks({ leadId }: LeadTasksProps) {
                             className="h-6 w-6 shrink-0"
                             onClick={() => deleteMutation.mutate(task.id)}
                             disabled={deleteMutation.isPending}
-                            aria-label="Delete task"
+                            aria-label="Удалить задачу"
                           >
                             <TrashIcon className="h-4 w-4" />
                           </Button>
@@ -204,7 +214,7 @@ export function LeadTasks({ leadId }: LeadTasksProps) {
               {completedTasks.length > 0 ? (
                 <div className="space-y-2">
                   <h4 className="text-sm font-medium text-muted-foreground">
-                    {t('leads.completedGoalsSection')} ({completedTasks.length})
+                    Выполненные ({completedTasks.length})
                   </h4>
                   <div className="space-y-2">
                     {completedTasks.map((task: Task) => (
@@ -214,7 +224,7 @@ export function LeadTasks({ leadId }: LeadTasksProps) {
                           <div className="flex-1 min-w-0">
                             <p className="text-sm font-medium line-through">{task.title}</p>
                             <p className="text-xs text-muted-foreground mt-1">
-                              {t('leads.completedOn')} {formatDate(task.completed_at!)}
+                              Выполнена: {formatDate(task.completed_at!)}
                             </p>
                           </div>
                           <Button
@@ -223,7 +233,7 @@ export function LeadTasks({ leadId }: LeadTasksProps) {
                             className="h-6 w-6 shrink-0"
                             onClick={() => deleteMutation.mutate(task.id)}
                             disabled={deleteMutation.isPending}
-                            aria-label="Delete task"
+                            aria-label="Удалить задачу"
                           >
                             <TrashIcon className="h-4 w-4" />
                           </Button>
@@ -242,20 +252,20 @@ export function LeadTasks({ leadId }: LeadTasksProps) {
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>{t('leads.addNewTask')}</DialogTitle>
+            <DialogTitle>Новая задача</DialogTitle>
             <DialogDescription>
-              {t('leads.taskDialogDesc')}
+              Задача появится в карточке лида и поможет не потерять следующий шаг.
             </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-4">
             <div className="space-y-2">
               <label htmlFor="task-title" className="text-sm font-medium">
-                {t('leads.taskTitle')}
+                Название
               </label>
               <Input
                 id="task-title"
-                placeholder={t('leads.taskTitlePlaceholder')}
+                placeholder="Например: уточнить даты и количество гостей"
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
               />
@@ -263,40 +273,40 @@ export function LeadTasks({ leadId }: LeadTasksProps) {
 
             <div className="space-y-2">
               <label htmlFor="task-type" className="text-sm font-medium">
-                {t('leads.taskType')}
+                Тип задачи
               </label>
               <Select value={taskType} onValueChange={(v) => setTaskType(v as typeof taskType)}>
                 <SelectTrigger id="task-type">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="call">{t('leads.taskTypeCall')}</SelectItem>
-                  <SelectItem value="email">{t('leads.taskTypeEmail')}</SelectItem>
-                  <SelectItem value="meeting">{t('leads.taskTypeMeeting')}</SelectItem>
-                  <SelectItem value="follow_up">{t('leads.taskTypeFollowUp')}</SelectItem>
-                  <SelectItem value="other">{t('leads.taskTypeOther')}</SelectItem>
+                  <SelectItem value="call">Звонок</SelectItem>
+                  <SelectItem value="email">Email</SelectItem>
+                  <SelectItem value="meeting">Встреча</SelectItem>
+                  <SelectItem value="follow_up">Следующий контакт</SelectItem>
+                  <SelectItem value="other">Другое</SelectItem>
                 </SelectContent>
               </Select>
             </div>
 
             <div className="space-y-2">
               <label htmlFor="due-date" className="text-sm font-medium">
-                {t('leads.dueDateLabel')}
+                Срок
               </label>
               <DatePicker
                 value={dueDate ? dueDate.toISOString().split('T')[0] : undefined}
                 onChange={(dateStr) => setDueDate(dateStr ? new Date(dateStr + 'T00:00:00') : null)}
-                placeholder={t('leads.selectDate')}
+                placeholder="Выберите дату"
               />
             </div>
 
             <div className="space-y-2">
               <label htmlFor="task-description" className="text-sm font-medium">
-                {t('leads.taskDescLabel')}
+                Описание
               </label>
               <Textarea
                 id="task-description"
-                placeholder={t('leads.taskDescPlaceholder')}
+                placeholder="Что именно нужно сделать менеджеру"
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
                 rows={3}
@@ -312,13 +322,13 @@ export function LeadTasks({ leadId }: LeadTasksProps) {
                 resetForm()
               }}
             >
-              {t('common.cancel')}
+              Отмена
             </Button>
             <Button
               onClick={handleCreateTask}
               disabled={createMutation.isPending}
             >
-              {t('leads.createTask')}
+              Создать задачу
             </Button>
           </DialogFooter>
         </DialogContent>

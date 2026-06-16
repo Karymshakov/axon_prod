@@ -26,12 +26,21 @@ import {
 import { useAuth } from '@/contexts/auth-context'
 import { useLanguage } from '@/contexts/language-context'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { fetchCommunicationsUnreadCounts, fetchOrganizations, switchOrganization, type Organization } from '@/lib/api'
+import { fetchCommunicationsUnreadCounts, fetchOrganizations, switchOrganization, type Organization, type User } from '@/lib/api'
 import { useState } from 'react'
 
 export const Route = createFileRoute('/_app')({
   component: AppLayout,
 })
+
+function isOrganizationAdmin(user: User | null | undefined) {
+  return Boolean(
+    user?.is_superadmin ||
+    user?.is_admin ||
+    user?.current_organization_role === 'owner' ||
+    user?.current_organization_role === 'admin',
+  )
+}
 
 function SidebarToggleButton() {
   const { toggleSidebar, state } = useSidebar()
@@ -60,6 +69,7 @@ function OrgSwitcher() {
   const [open, setOpen] = useState(false)
   const { state: sidebarState } = useSidebar()
   const isCollapsed = sidebarState === 'collapsed'
+  const canManageOrganization = isOrganizationAdmin(user)
 
   const { data: orgs = [] } = useQuery({
     queryKey: ['organizations'],
@@ -78,6 +88,7 @@ function OrgSwitcher() {
       current_organization_id: org.id,
       current_organization_slug: org.slug,
       current_organization_name: org.name,
+      current_organization_role: org.current_user_role,
     })
     queryClient.clear()
     setOpen(false)
@@ -119,13 +130,17 @@ function OrgSwitcher() {
               )}
             </DropdownMenuItem>
           ))}
-          <DropdownMenuSeparator />
-          <DropdownMenuItem asChild>
-            <Link to="/settings" search={{ tab: 'organization' }} className="gap-2 cursor-pointer">
-              <PlusCircleIcon className="h-3.5 w-3.5" />
-              <span>Управление организацией</span>
-            </Link>
-          </DropdownMenuItem>
+          {canManageOrganization && (
+            <>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem asChild>
+                <Link to="/settings" search={{ tab: 'organization' }} className="gap-2 cursor-pointer">
+                  <PlusCircleIcon className="h-3.5 w-3.5" />
+                  <span>Управление организацией</span>
+                </Link>
+              </DropdownMenuItem>
+            </>
+          )}
         </DropdownMenuContent>
       )}
     </DropdownMenu>
@@ -136,6 +151,7 @@ function UserMenu() {
   const { user, logout } = useAuth()
   const { t } = useLanguage()
   const navigate = useNavigate()
+  const canUseAdminTools = isOrganizationAdmin(user) || Boolean(user?.is_admin)
 
   const handleLogout = async () => {
     await logout()
@@ -173,7 +189,7 @@ function UserMenu() {
             <DropdownMenuSeparator />
           </>
         )}
-        {user?.is_admin && (
+        {canUseAdminTools && (
           <>
             <DropdownMenuItem onClick={() => navigate({ to: '/portal/users', search: { search: '', role: '', status: '', ordering: '-created_at' } })}>
               <ShieldIcon className="mr-2 h-4 w-4" />
@@ -196,8 +212,9 @@ function UserMenu() {
 }
 
 function AppLayout() {
-  const { isAuthenticated, isLoading } = useAuth()
+  const { isAuthenticated, isLoading, user } = useAuth()
   const { t } = useLanguage()
+  const canManageWorkspace = isOrganizationAdmin(user)
 
   const { data: unreadData } = useQuery({
     queryKey: ['communications-unread-counts'],
@@ -253,7 +270,7 @@ function AppLayout() {
                   </SidebarMenuItem>
                   <SidebarMenuItem>
                     <SidebarMenuButton asChild tooltip={t('nav.communications')}>
-                      <Link to="/communications">
+                      <Link to="/communications" search={{ leadId: undefined, channel: undefined }}>
                         <MessageSquareIcon />
                         <span>{t('nav.communications')}</span>
                         {totalUnread > 0 && (
@@ -264,14 +281,16 @@ function AppLayout() {
                       </Link>
                     </SidebarMenuButton>
                   </SidebarMenuItem>
-                  <SidebarMenuItem>
-                    <SidebarMenuButton asChild tooltip={t('nav.aiFlows')}>
-                      <Link to="/flows">
-                        <GitBranchIcon />
-                        <span>{t('nav.aiFlows')}</span>
-                      </Link>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
+                  {canManageWorkspace && (
+                    <SidebarMenuItem>
+                      <SidebarMenuButton asChild tooltip={t('nav.aiFlows')}>
+                        <Link to="/flows">
+                          <GitBranchIcon />
+                          <span>{t('nav.aiFlows')}</span>
+                        </Link>
+                      </SidebarMenuButton>
+                    </SidebarMenuItem>
+                  )}
                   <SidebarMenuItem>
                     <SidebarMenuButton asChild tooltip={t('nav.hotelDetails')}>
                       <Link to="/hotel-details">
@@ -282,7 +301,7 @@ function AppLayout() {
                   </SidebarMenuItem>
                   <SidebarMenuItem>
                     <SidebarMenuButton asChild tooltip={t('nav.settings')}>
-                      <Link to="/settings" search={{ tab: 'general' }}>
+                      <Link to="/settings" search={{ tab: canManageWorkspace ? 'general' : 'preferences' }}>
                         <SettingsIcon />
                         <span>{t('nav.settings')}</span>
                       </Link>

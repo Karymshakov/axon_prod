@@ -2,7 +2,7 @@ import { createFileRoute, Link } from '@tanstack/react-router'
 import { useLanguage } from '@/contexts/language-context'
 import { useQuery } from '@tanstack/react-query'
 import { TrendingUpIcon, UsersIcon, ArrowRightIcon, CheckCircleIcon, BadgeCheckIcon } from 'lucide-react'
-import { fetchLeadStats, fetchLeads, fetchPipelineStages, fetchLeadSourceStats } from '@/lib/api'
+import { fetchLeadStats, fetchLeads, fetchPipelineStages, fetchLeadSourceStats, getDiscoverySourceLabel, getLeadStatusLabel } from '@/lib/api'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -76,17 +76,18 @@ function DashboardPage() {
   const seenNames = new Map<string, number>() // name → index in uniqueStages
   if (stages) {
     for (const stage of stages) {
-      stageNameMap[stage.key] = stage.name
+      const displayName = getLeadStatusLabel(stage.key, stages)
+      stageNameMap[stage.key] = displayName
       if (stage.is_final) finalKeys.add(stage.key)
-      const idx = seenNames.get(stage.name)
+      const idx = seenNames.get(displayName)
       if (idx !== undefined) {
         if (!uniqueStages[idx].keys.includes(stage.key)) {
           uniqueStages[idx].keys.push(stage.key)
         }
         if (stage.is_final) uniqueStages[idx].is_final = true
       } else {
-        seenNames.set(stage.name, uniqueStages.length)
-        uniqueStages.push({ id: stage.id, name: stage.name, keys: [stage.key], is_final: stage.is_final })
+        seenNames.set(displayName, uniqueStages.length)
+        uniqueStages.push({ id: stage.id, name: displayName, keys: [stage.key], is_final: stage.is_final })
       }
     }
   }
@@ -266,7 +267,7 @@ function DashboardPage() {
                 </CardHeader>
                 <CardContent>
                   {(() => {
-                    const barData = sourceStats?.map(s => ({ source: s.source || 'Unknown', count: s.count })) ?? []
+                    const barData = sourceStats?.map(s => ({ source: getDiscoverySourceLabel(s.source), count: s.count })) ?? []
                     return barData.length === 0 ? (
                       <p className="text-sm text-muted-foreground">{t('dashboard.noSourceData')}</p>
                     ) : (
@@ -366,7 +367,7 @@ function DashboardPage() {
                           </div>
                           <div className="flex items-center gap-2 shrink-0 ml-2">
                             <Badge variant="outline" className="text-xs hidden sm:inline-flex">
-                              {stageNameMap[lead.status] ?? lead.status}
+                              {stageNameMap[lead.status] ?? getLeadStatusLabel(lead.status)}
                             </Badge>
                             <span className="text-xs text-muted-foreground">{formatRelativeTime(lead.created_at)}</span>
                           </div>

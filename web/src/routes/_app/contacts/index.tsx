@@ -12,7 +12,17 @@ import {
   XIcon,
   UserRoundIcon,
 } from 'lucide-react'
-import { fetchLeads, fetchPipelineStages, SOURCE_OPTIONS, type Lead } from '@/lib/api'
+import {
+  CONTACT_CHANNEL_OPTIONS,
+  fetchLeads,
+  fetchPipelineStages,
+  getContactChannelLabel,
+  getLeadStatusLabel,
+  resolveLeadContactChannel,
+  type Lead,
+} from '@/lib/api'
+import { useLeadDiscoverySources } from '@/hooks/use-lead-discovery-sources'
+import { LeadSourceBadge } from '@/components/lead-source-badge'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -60,21 +70,29 @@ function getInitials(name: string): string {
 
 const SEGMENT_CONFIG = {
   business: {
-    label: 'Business',
+    label: 'Бизнес',
     icon: BuildingIcon,
     borderClass: 'border-t-2 border-t-amber-400',
     badgeClass: 'bg-amber-50 text-amber-700 border-amber-200',
   },
   individual: {
-    label: 'Individual',
+    label: 'Гость',
     icon: UserRoundIcon,
     borderClass: 'border-t-2 border-t-sky-400',
     badgeClass: 'bg-sky-50 text-sky-700 border-sky-200',
   },
 } as const
 
-function ContactCard({ lead, stageName }: { lead: Lead; stageName: string }) {
-  const displayName = lead.contact_person || 'Unknown'
+function ContactCard({
+  lead,
+  stageName,
+  discoverySourceLabel,
+}: {
+  lead: Lead
+  stageName: string
+  discoverySourceLabel?: string
+}) {
+  const displayName = lead.contact_person || 'Без имени'
   const gradient = getAvatarGradient(displayName)
   const initials = getInitials(displayName)
   const segment = SEGMENT_CONFIG[lead.segment as keyof typeof SEGMENT_CONFIG] ?? SEGMENT_CONFIG.individual
@@ -133,7 +151,7 @@ function ContactCard({ lead, stageName }: { lead: Lead; stageName: string }) {
             </a>
           ) : null}
           {!lead.email && !lead.phone && !lead.mobile_phone ? (
-            <p className="text-xs text-muted-foreground italic">No contact details</p>
+            <p className="text-xs text-muted-foreground italic">Контакты не указаны</p>
           ) : null}
         </div>
 
@@ -144,10 +162,17 @@ function ContactCard({ lead, stageName }: { lead: Lead; stageName: string }) {
               {stageName}
             </Badge>
           ) : null}
-          {lead.source ? (
+          {resolveLeadContactChannel(lead) ? (
             <Badge variant="outline" className="text-xs px-2 py-0 h-5 font-normal">
-              {lead.source}
+              {getContactChannelLabel(resolveLeadContactChannel(lead))}
             </Badge>
+          ) : null}
+          {lead.discovery_source ? (
+            <LeadSourceBadge
+              source={lead.discovery_source}
+              label={discoverySourceLabel}
+              className="h-5 px-2 py-0 text-[10px]"
+            />
           ) : null}
         </div>
 
@@ -155,18 +180,18 @@ function ContactCard({ lead, stageName }: { lead: Lead; stageName: string }) {
         <div className="flex items-center justify-between pt-1 border-t border-border/50">
           {lead.last_contacted ? (
             <span className="text-xs text-muted-foreground">
-              Last contact{' '}
+              Последний контакт{' '}
               {new Date(lead.last_contacted).toLocaleDateString('ru-RU', {
                 month: 'short',
                 day: 'numeric',
               })}
             </span>
           ) : (
-            <span className="text-xs text-muted-foreground">Never contacted</span>
+            <span className="text-xs text-muted-foreground">Контакта еще не было</span>
           )}
           <Button asChild variant="ghost" size="sm" className="h-7 px-2 text-xs gap-1">
             <Link to="/leads/$leadId" params={{ leadId: String(lead.id) }}>
-              View
+              Открыть
               <ArrowRightIcon className="h-3 w-3" />
             </Link>
           </Button>
@@ -180,15 +205,18 @@ function ContactsPage() {
   const { t } = useLanguage()
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
-  const [sourceFilter, setSourceFilter] = useState('')
+  const [channelFilter, setChannelFilter] = useState('')
+  const [discoveryFilter, setDiscoveryFilter] = useState('')
+  const discoverySourceOptions = useLeadDiscoverySources()
 
   const queryParams = useMemo(() => {
     const p: Record<string, string> = {}
     if (statusFilter && statusFilter !== 'all') p.status = statusFilter
-    if (sourceFilter && sourceFilter !== 'all') p.source = sourceFilter
+    if (channelFilter && channelFilter !== 'all') p.contact_channel = channelFilter
+    if (discoveryFilter && discoveryFilter !== 'all') p.discovery_source = discoveryFilter
     if (search) p.search = search
     return p
-  }, [search, statusFilter, sourceFilter])
+  }, [search, statusFilter, channelFilter, discoveryFilter])
 
   const { data: leads = [], isLoading } = useQuery({
     queryKey: ['leads', queryParams],
@@ -202,24 +230,39 @@ function ContactsPage() {
 
   const stageMap = useMemo(() => {
     const map: Record<string, string> = {}
-    for (const s of stages) map[s.key] = s.name
+    for (const s of stages) map[s.key] = getLeadStatusLabel(s.key, stages)
     return map
   }, [stages])
+  const getDiscoverySourceOptionLabel = (source: string | null | undefined) =>
+    discoverySourceOptions.find((option) => option.value === source)?.label
+
+  const displayedLeads = useMemo(() => {
+    return leads.filter((lead) => {
+      if (channelFilter && channelFilter !== 'all') {
+        if (resolveLeadContactChannel(lead) !== channelFilter) return false
+      }
+      if (discoveryFilter && discoveryFilter !== 'all') {
+        if ((lead.discovery_source || '') !== discoveryFilter) return false
+      }
+      return true
+    })
+  }, [leads, channelFilter, discoveryFilter])
 
   const sortedLeads = useMemo(() => {
-    return [...leads].sort((a, b) => {
+    return [...displayedLeads].sort((a, b) => {
       const nameA = (a.contact_person || '').toLowerCase()
       const nameB = (b.contact_person || '').toLowerCase()
       return nameA.localeCompare(nameB)
     })
-  }, [leads])
+  }, [displayedLeads])
 
-  const hasFilters = search || (statusFilter && statusFilter !== 'all') || (sourceFilter && sourceFilter !== 'all')
+  const hasFilters = search || (statusFilter && statusFilter !== 'all') || (channelFilter && channelFilter !== 'all') || (discoveryFilter && discoveryFilter !== 'all')
 
   const clearFilters = () => {
     setSearch('')
     setStatusFilter('')
-    setSourceFilter('')
+    setChannelFilter('')
+    setDiscoveryFilter('')
   }
 
   return (
@@ -251,24 +294,37 @@ function ContactsPage() {
             </div>
             <Select value={statusFilter} onValueChange={setStatusFilter}>
               <SelectTrigger className="w-[150px] h-9">
-                <SelectValue placeholder="All Statuses" />
+                <SelectValue placeholder="Все статусы" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">All Statuses</SelectItem>
+                <SelectItem value="all">Все статусы</SelectItem>
                 {stages.map((stage) => (
                   <SelectItem key={stage.key} value={stage.key}>
-                    {stage.name}
+                    {getLeadStatusLabel(stage.key, stages)}
                   </SelectItem>
                 ))}
               </SelectContent>
             </Select>
-            <Select value={sourceFilter} onValueChange={setSourceFilter}>
+            <Select value={channelFilter} onValueChange={setChannelFilter}>
               <SelectTrigger className="w-[140px] h-9">
-                <SelectValue placeholder="All Sources" />
+                <SelectValue placeholder="Все каналы" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">All Sources</SelectItem>
-                {SOURCE_OPTIONS.map((opt) => (
+                <SelectItem value="all">Все каналы</SelectItem>
+                {CONTACT_CHANNEL_OPTIONS.map((opt) => (
+                  <SelectItem key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Select value={discoveryFilter} onValueChange={setDiscoveryFilter}>
+              <SelectTrigger className="w-[160px] h-9">
+                <SelectValue placeholder="Откуда узнал" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Любой источник</SelectItem>
+                {discoverySourceOptions.map((opt) => (
                   <SelectItem key={opt.value} value={opt.value}>
                     {opt.label}
                   </SelectItem>
@@ -278,7 +334,7 @@ function ContactsPage() {
             {hasFilters ? (
               <Button variant="ghost" size="sm" onClick={clearFilters} className="h-9 gap-1.5">
                 <XIcon className="h-3.5 w-3.5" />
-                Clear
+                Сбросить
               </Button>
             ) : null}
           </div>
@@ -305,16 +361,16 @@ function ContactsPage() {
               </h3>
               <p className="text-sm text-muted-foreground max-w-xs">
                 {hasFilters
-                  ? 'Try adjusting your search or filters.'
-                  : 'Contacts are created when you add leads. Head to the Leads page to add your first lead.'}
+                  ? 'Попробуйте изменить поиск или фильтры.'
+                  : 'Контакты появляются из лидов. Добавьте первого лида в разделе продаж.'}
               </p>
               {hasFilters ? (
                 <Button variant="outline" size="sm" onClick={clearFilters} className="mt-4">
-                  Clear filters
+                  Сбросить фильтры
                 </Button>
               ) : (
                 <Button asChild variant="outline" size="sm" className="mt-4">
-                  <Link to="/leads">Go to Leads</Link>
+                  <Link to="/leads">Перейти в лиды</Link>
                 </Button>
               )}
             </div>
@@ -324,7 +380,8 @@ function ContactsPage() {
                 <ContactCard
                   key={lead.id}
                   lead={lead}
-                  stageName={stageMap[lead.status] || lead.status}
+                  stageName={stageMap[lead.status] || getLeadStatusLabel(lead.status)}
+                  discoverySourceLabel={getDiscoverySourceOptionLabel(lead.discovery_source)}
                 />
               ))}
             </div>

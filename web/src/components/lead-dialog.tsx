@@ -2,7 +2,7 @@ import { useLanguage } from '@/contexts/language-context'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { TrashIcon } from 'lucide-react'
 import {
@@ -28,64 +28,50 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import {
-  Accordion,
-  AccordionContent,
-  AccordionItem,
-  AccordionTrigger,
-} from '@/components/ui/accordion'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Button } from '@/components/ui/button'
-import { Checkbox } from '@/components/ui/checkbox'
-import { createLead, updateLead, deleteLead, fetchSegments, fetchPipelineStages, SOURCE_OPTIONS, type Lead } from '@/lib/api'
-import { useQuery } from '@tanstack/react-query'
+import {
+  createLead,
+  deleteLead,
+  fetchPipelineStages,
+  fetchSegments,
+  getLeadStatusLabel,
+  updateLead,
+  type Lead,
+} from '@/lib/api'
 import { DatePicker } from '@/components/date-picker'
+import { useLeadDiscoverySources } from '@/hooks/use-lead-discovery-sources'
+
+const NONE_VALUE = '__none'
+
+const MEAL_PLAN_OPTIONS: Array<{ value: NonNullable<Lead['meal_plan']>; label: string }> = [
+  { value: 'none', label: 'Без питания' },
+  { value: 'breakfast', label: 'Завтрак' },
+  { value: 'lunch', label: 'Обед' },
+  { value: 'dinner', label: 'Ужин' },
+  { value: 'half_board_bl', label: 'Полупансион: завтрак + обед' },
+  { value: 'half_board_bd', label: 'Полупансион: завтрак + ужин' },
+  { value: 'full_board', label: 'Полный пансион' },
+]
 
 const leadSchema = z.object({
-  // Contact Details
   contact_person: z.string().optional(),
-  job_title: z.string().optional(),
   email: z.string().optional(),
-  secondary_email: z.string().optional(),
   phone: z.string().optional(),
-  mobile_phone: z.string().optional(),
-  office_phone: z.string().optional(),
-  website: z.string().optional(),
-  linkedin_url: z.string().optional(),
-  // Location
-  address: z.string().optional(),
-  city: z.string().optional(),
-  state_province: z.string().optional(),
-  postal_code: z.string().optional(),
-  country: z.string().optional(),
-  timezone: z.string().optional(),
-  // Lead Management
   segment: z.string().min(1),
   status: z.string().min(1),
-  source: z.string().optional(),
-  estimated_value: z.string().optional(),
-  notes: z.string().optional(),
-  last_contacted: z.date().nullable().optional(),
-  // Summary & Next Steps
+  discovery_source: z.string().optional(),
+  discovery_source_detail: z.string().optional(),
+  check_in_date: z.date().nullable().optional(),
+  check_out_date: z.date().nullable().optional(),
+  guest_count: z.number().nullable().optional(),
+  room_type_preference: z.string().optional(),
+  meal_plan: z.string().optional(),
   problem_description: z.string().optional(),
   next_steps: z.string().optional(),
-  // Communication Tracking
-  preferred_contact_method: z.string().optional(),
   preferred_contact_time: z.string().optional(),
-  language: z.string().optional(),
-  do_not_contact: z.boolean().optional(),
-  email_bounced: z.boolean().optional(),
-  // Sales Process
-  next_follow_up_date: z.date().nullable().optional(),
-  expected_close_date: z.date().nullable().optional(),
-  lost_reason: z.string().optional(),
-  competitor: z.string().optional(),
-  referral_source: z.string().optional(),
-  campaign_source: z.string().optional(),
-  // Social
-  telegram_chat_id: z.string().optional(),
-  telegram_username: z.string().optional(),
+  notes: z.string().optional(),
 })
 
 type LeadFormData = z.infer<typeof leadSchema>
@@ -98,10 +84,15 @@ interface LeadDialogProps {
   onClose: () => void
 }
 
+function toApiDate(value?: Date | null) {
+  return value ? value.toISOString().split('T')[0] : null
+}
+
 export function LeadDialog({ open, onOpenChange, lead, defaultSegment = 'individual', onClose }: LeadDialogProps) {
   const { t } = useLanguage()
   const queryClient = useQueryClient()
   const isEditing = !!lead
+  const discoverySourceOptions = useLeadDiscoverySources()
 
   const { data: segments = [] } = useQuery({
     queryKey: ['segments'],
@@ -116,49 +107,22 @@ export function LeadDialog({ open, onOpenChange, lead, defaultSegment = 'individ
   const form = useForm<LeadFormData>({
     resolver: zodResolver(leadSchema),
     values: {
-      // Contact Details
       contact_person: lead?.contact_person || '',
-      job_title: lead?.job_title || '',
       email: lead?.email || '',
-      secondary_email: lead?.secondary_email || '',
       phone: lead?.phone || '',
-      mobile_phone: lead?.mobile_phone || '',
-      office_phone: lead?.office_phone || '',
-      website: lead?.website || '',
-      linkedin_url: lead?.linkedin_url || '',
-      // Location
-      address: lead?.address || '',
-      city: lead?.city || '',
-      state_province: lead?.state_province || '',
-      postal_code: lead?.postal_code || '',
-      country: lead?.country || '',
-      timezone: lead?.timezone || '',
-      // Lead Management
       segment: lead?.segment || defaultSegment,
       status: lead?.status || 'new',
-      source: lead?.source || '',
-      estimated_value: lead?.estimated_value || '',
-      notes: lead?.notes || '',
-      last_contacted: lead?.last_contacted ? new Date(lead.last_contacted) : null,
-      // Summary & Next Steps
+      discovery_source: lead?.discovery_source || '',
+      discovery_source_detail: lead?.discovery_source_detail || '',
+      check_in_date: lead?.check_in_date ? new Date(`${lead.check_in_date}T00:00:00`) : null,
+      check_out_date: lead?.check_out_date ? new Date(`${lead.check_out_date}T00:00:00`) : null,
+      guest_count: lead?.guest_count ?? null,
+      room_type_preference: lead?.room_type_preference || '',
+      meal_plan: lead?.meal_plan || '',
       problem_description: lead?.problem_description || '',
       next_steps: lead?.next_steps || '',
-      // Communication Tracking
-      preferred_contact_method: lead?.preferred_contact_method || '',
       preferred_contact_time: lead?.preferred_contact_time || '',
-      language: lead?.language || '',
-      do_not_contact: lead?.do_not_contact || false,
-      email_bounced: lead?.email_bounced || false,
-      // Sales Process
-      next_follow_up_date: lead?.next_follow_up_date ? new Date(lead.next_follow_up_date) : null,
-      expected_close_date: lead?.expected_close_date ? new Date(lead.expected_close_date) : null,
-      lost_reason: lead?.lost_reason || '',
-      competitor: lead?.competitor || '',
-      referral_source: lead?.referral_source || '',
-      campaign_source: lead?.campaign_source || '',
-      // Social
-      telegram_chat_id: lead?.telegram_chat_id || '',
-      telegram_username: lead?.telegram_username || '',
+      notes: lead?.notes || '',
     },
   })
 
@@ -177,8 +141,7 @@ export function LeadDialog({ open, onOpenChange, lead, defaultSegment = 'individ
   })
 
   const updateMutation = useMutation({
-    mutationFn: ({ id, data }: { id: number; data: Partial<Lead> }) =>
-      updateLead(id, data as any),
+    mutationFn: ({ id, data }: { id: number; data: Partial<Lead> }) => updateLead(id, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['leads'] })
       queryClient.invalidateQueries({ queryKey: ['lead-stats'] })
@@ -207,19 +170,16 @@ export function LeadDialog({ open, onOpenChange, lead, defaultSegment = 'individ
   const onSubmit = (data: LeadFormData) => {
     const submitData = {
       ...data,
-      last_contacted: data.last_contacted
-        ? data.last_contacted.toISOString().split('T')[0]
-        : null,
-      next_follow_up_date: data.next_follow_up_date
-        ? data.next_follow_up_date.toISOString().split('T')[0]
-        : null,
-      expected_close_date: data.expected_close_date
-        ? data.expected_close_date.toISOString().split('T')[0]
-        : null,
+      discovery_source: data.discovery_source || '',
+      discovery_source_detail: data.discovery_source_detail || '',
+      check_in_date: toApiDate(data.check_in_date),
+      check_out_date: toApiDate(data.check_out_date),
+      guest_count: data.guest_count ?? null,
+      meal_plan: data.meal_plan || '',
     }
 
     if (isEditing) {
-      updateMutation.mutate({ id: lead.id, data: submitData as any })
+      updateMutation.mutate({ id: lead.id, data: submitData as Partial<Lead> })
     } else {
       createMutation.mutate(submitData as any)
     }
@@ -231,643 +191,325 @@ export function LeadDialog({ open, onOpenChange, lead, defaultSegment = 'individ
     }
   }
 
-  const handleOpenChange = (newOpen: boolean) => {
-    onOpenChange(newOpen)
-  }
-
   return (
-    <Sheet open={open} onOpenChange={handleOpenChange}>
-      <SheetContent className="w-full sm:max-w-2xl flex flex-col h-full overflow-hidden p-6">
+    <Sheet open={open} onOpenChange={onOpenChange}>
+      <SheetContent className="flex h-full w-full flex-col overflow-hidden p-6 sm:max-w-2xl">
         <SheetHeader>
           <SheetTitle>{isEditing ? t('leads.editLead') : t('leads.addNewLead')}</SheetTitle>
           <SheetDescription>
-            {isEditing
-              ? t('leads.updateLeadInfo')
-              : t('leads.addNewLeadDesc')}
+            {isEditing ? t('leads.updateLeadInfo') : t('leads.addNewLeadDesc')}
           </SheetDescription>
         </SheetHeader>
 
         <Form {...form}>
-          <form onSubmit={form.handleSubmit(onSubmit)} className="flex flex-col min-h-0 flex-1">
-          <div className="overflow-y-auto flex-1 space-y-4 pr-1">
-            {/* Core Fields */}
-            <div className="grid gap-4 md:grid-cols-2">
-              <FormField
-                control={form.control}
-                name="contact_person"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>{t('leads.contactPerson')}</FormLabel>
-                    <FormControl>
-                      <Input {...field} placeholder="Иван Иванов" />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
+          <form onSubmit={form.handleSubmit(onSubmit)} className="flex min-h-0 flex-1 flex-col">
+            <div className="min-h-0 flex-1 space-y-6 overflow-y-auto pr-1">
+              <section className="space-y-4">
+                <div className="grid gap-4 md:grid-cols-2">
+                  <FormField
+                    control={form.control}
+                    name="contact_person"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Имя гостя</FormLabel>
+                        <FormControl>
+                          <Input {...field} placeholder="Иван Иванов" />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
 
-              <FormField
-                control={form.control}
-                name="email"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>{t('common.email')}</FormLabel>
-                    <FormControl>
-                      <Input {...field} type="email" placeholder="ivan@example.com" />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
+                  <FormField
+                    control={form.control}
+                    name="phone"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>{t('common.phone')}</FormLabel>
+                        <FormControl>
+                          <Input {...field} placeholder="+7 999 123 45 67" />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
 
-              <FormField
-                control={form.control}
-                name="phone"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>{t('common.phone')}</FormLabel>
-                    <FormControl>
-                      <Input {...field} placeholder="+7 (999) 123-45-67" />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
+                  <FormField
+                    control={form.control}
+                    name="email"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>{t('common.email')}</FormLabel>
+                        <FormControl>
+                          <Input {...field} type="email" placeholder="ivan@example.com" />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
 
-              <FormField
-                control={form.control}
-                name="segment"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>{t('leads.clientType')}</FormLabel>
-                    <Select onValueChange={field.onChange} value={field.value}>
+                  <FormField
+                    control={form.control}
+                    name="preferred_contact_time"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Удобное время связи</FormLabel>
+                        <FormControl>
+                          <Input {...field} placeholder="Сегодня после 18:00" />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </div>
+              </section>
+
+              <section className="space-y-4">
+                <div className="grid gap-4 md:grid-cols-2">
+                  <FormField
+                    control={form.control}
+                    name="status"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>{t('common.status')}</FormLabel>
+                        <Select onValueChange={field.onChange} value={field.value}>
+                          <FormControl>
+                            <SelectTrigger className="w-full">
+                              <SelectValue placeholder="Выберите статус" />
+                            </SelectTrigger>
+                          </FormControl>
+                          <SelectContent>
+                            {pipelineStages.map((stage) => (
+                              <SelectItem key={stage.key} value={stage.key}>
+                                {getLeadStatusLabel(stage.key, pipelineStages)}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+
+                  <FormField
+                    control={form.control}
+                    name="segment"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Тип клиента</FormLabel>
+                        <Select onValueChange={field.onChange} value={field.value}>
+                          <FormControl>
+                            <SelectTrigger className="w-full">
+                              <SelectValue placeholder="Выберите тип" />
+                            </SelectTrigger>
+                          </FormControl>
+                          <SelectContent>
+                            {segments.map((seg) => (
+                              <SelectItem key={seg.key} value={seg.key}>
+                                {seg.name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+
+                  <FormField
+                    control={form.control}
+                    name="discovery_source"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Откуда узнал</FormLabel>
+                        <Select
+                          onValueChange={(value) => field.onChange(value === NONE_VALUE ? '' : value)}
+                          value={field.value || NONE_VALUE}
+                        >
+                          <FormControl>
+                            <SelectTrigger className="w-full">
+                              <SelectValue placeholder="Не указано" />
+                            </SelectTrigger>
+                          </FormControl>
+                          <SelectContent>
+                            <SelectItem value={NONE_VALUE}>Не указано</SelectItem>
+                            {discoverySourceOptions.map((opt) => (
+                              <SelectItem key={opt.value} value={opt.value}>
+                                {opt.label}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+
+                  <FormField
+                    control={form.control}
+                    name="discovery_source_detail"
+                    render={({ field }) => (
+                      <FormItem className="md:col-span-2">
+                        <FormLabel>Детали источника</FormLabel>
+                        <FormControl>
+                          <Input {...field} placeholder="Например: порекомендовала Анна, видел сторис, реклама в Instagram" />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </div>
+              </section>
+
+              <section className="space-y-4">
+                <div className="grid gap-4 md:grid-cols-2">
+                  <FormField
+                    control={form.control}
+                    name="check_in_date"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Заезд</FormLabel>
+                        <FormControl>
+                          <DatePicker
+                            value={field.value ? field.value.toISOString().split('T')[0] : undefined}
+                            onChange={(dateStr) => field.onChange(dateStr ? new Date(`${dateStr}T00:00:00`) : null)}
+                            placeholder="Выберите дату"
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+
+                  <FormField
+                    control={form.control}
+                    name="check_out_date"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Выезд</FormLabel>
+                        <FormControl>
+                          <DatePicker
+                            value={field.value ? field.value.toISOString().split('T')[0] : undefined}
+                            onChange={(dateStr) => field.onChange(dateStr ? new Date(`${dateStr}T00:00:00`) : null)}
+                            placeholder="Выберите дату"
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+
+                  <FormField
+                    control={form.control}
+                    name="guest_count"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Гостей</FormLabel>
+                        <FormControl>
+                          <Input
+                            type="number"
+                            min={1}
+                            value={field.value ?? ''}
+                            onChange={(event) => field.onChange(event.target.value === '' ? null : Number(event.target.value))}
+                            placeholder="2"
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+
+                  <FormField
+                    control={form.control}
+                    name="room_type_preference"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Номер</FormLabel>
+                        <FormControl>
+                          <Input {...field} placeholder="Стандарт, семейный, люкс" />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+
+                  <FormField
+                    control={form.control}
+                    name="meal_plan"
+                    render={({ field }) => (
+                      <FormItem className="md:col-span-2">
+                        <FormLabel>Питание</FormLabel>
+                        <Select
+                          onValueChange={(value) => field.onChange(value === NONE_VALUE ? '' : value)}
+                          value={field.value || NONE_VALUE}
+                        >
+                          <FormControl>
+                            <SelectTrigger className="w-full">
+                              <SelectValue placeholder="Не указано" />
+                            </SelectTrigger>
+                          </FormControl>
+                          <SelectContent>
+                            <SelectItem value={NONE_VALUE}>Не указано</SelectItem>
+                            {MEAL_PLAN_OPTIONS.map((opt) => (
+                              <SelectItem key={opt.value} value={opt.value}>
+                                {opt.label}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </div>
+              </section>
+
+              <section className="space-y-4">
+                <FormField
+                  control={form.control}
+                  name="problem_description"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>{t('leads.summary')}</FormLabel>
                       <FormControl>
-                        <SelectTrigger className="w-full">
-                          <SelectValue placeholder="Выберите тип клиента" />
-                        </SelectTrigger>
+                        <Textarea {...field} placeholder="Что хочет гость, какие даты и пожелания уже известны" rows={3} />
                       </FormControl>
-                      <SelectContent>
-                        {segments.map((seg) => (
-                          <SelectItem key={seg.key} value={seg.key}>
-                            {seg.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
 
-              <FormField
-                control={form.control}
-                name="status"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>{t('common.status')}</FormLabel>
-                    <Select onValueChange={field.onChange} value={field.value}>
+                <FormField
+                  control={form.control}
+                  name="next_steps"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>{t('leads.nextSteps')}</FormLabel>
                       <FormControl>
-                        <SelectTrigger className="w-full">
-                          <SelectValue placeholder="Выберите статус" />
-                        </SelectTrigger>
+                        <Textarea {...field} placeholder="Что нужно сделать дальше: уточнить даты, отправить цену, подтвердить оплату" rows={2} />
                       </FormControl>
-                      <SelectContent>
-                        {pipelineStages.map((stage) => (
-                          <SelectItem key={stage.key} value={stage.key}>
-                            {stage.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
 
-              <FormField
-                control={form.control}
-                name="source"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>{t('leads.source')}</FormLabel>
-                    <Select onValueChange={field.onChange} value={field.value || ''}>
+                <FormField
+                  control={form.control}
+                  name="notes"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>{t('common.notes')}</FormLabel>
                       <FormControl>
-                        <SelectTrigger className="w-full">
-                          <SelectValue placeholder="Выберите источник" />
-                        </SelectTrigger>
+                        <Textarea {...field} placeholder="Внутренние заметки для команды" rows={3} />
                       </FormControl>
-                      <SelectContent>
-                        {SOURCE_OPTIONS.map((opt) => (
-                          <SelectItem key={opt.value} value={opt.value}>
-                            {opt.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </section>
             </div>
 
-            {/* Summary & Next Steps */}
-            <FormField
-              control={form.control}
-              name="problem_description"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>{t('leads.summary')}</FormLabel>
-                  <FormControl>
-                    <Textarea
-                      {...field}
-                      placeholder="Краткое описание запроса лида..."
-                      rows={3}
-                    />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-
-            <FormField
-              control={form.control}
-              name="next_steps"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>{t('leads.nextSteps')}</FormLabel>
-                  <FormControl>
-                    <Textarea
-                      {...field}
-                      placeholder="Планируемые действия по лиду..."
-                      rows={2}
-                    />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-
-            {/* Collapsible Sections */}
-            <Accordion type="multiple" className="w-full">
-              {/* Contact Details */}
-              <AccordionItem value="contact">
-                <AccordionTrigger>{t('leads.contactDetails')}</AccordionTrigger>
-                <AccordionContent>
-                  <div className="grid gap-4 md:grid-cols-2 pt-2">
-                    <FormField
-                      control={form.control}
-                      name="job_title"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>{t('leads.jobTitle')}</FormLabel>
-                          <FormControl>
-                            <Input {...field} placeholder="Директор, менеджер и т.д." />
-                          </FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-
-                    <FormField
-                      control={form.control}
-                      name="secondary_email"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>{t('leads.secondaryEmail')}</FormLabel>
-                          <FormControl>
-                            <Input {...field} type="email" placeholder="dop@example.com" />
-                          </FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-
-                    <FormField
-                      control={form.control}
-                      name="mobile_phone"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>{t('leads.mobilePhone')}</FormLabel>
-                          <FormControl>
-                            <Input {...field} placeholder="+7 (999) 123-45-67" />
-                          </FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-
-                    <FormField
-                      control={form.control}
-                      name="office_phone"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>{t('leads.officePhone')}</FormLabel>
-                          <FormControl>
-                            <Input {...field} placeholder="+7 (999) 987-65-43" />
-                          </FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-
-                    <FormField
-                      control={form.control}
-                      name="website"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>{t('leads.website')}</FormLabel>
-                          <FormControl>
-                            <Input {...field} placeholder="https://example.com" />
-                          </FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-
-                    <FormField
-                      control={form.control}
-                      name="linkedin_url"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>{t('leads.linkedinUrl')}</FormLabel>
-                          <FormControl>
-                            <Input {...field} placeholder="https://linkedin.com/in/..." />
-                          </FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-                  </div>
-                </AccordionContent>
-              </AccordionItem>
-
-              {/* Location */}
-              <AccordionItem value="location">
-                <AccordionTrigger>{t('leads.location')}</AccordionTrigger>
-                <AccordionContent>
-                  <div className="grid gap-4 md:grid-cols-2 pt-2">
-                    <FormField
-                      control={form.control}
-                      name="address"
-                      render={({ field }) => (
-                        <FormItem className="md:col-span-2">
-                          <FormLabel>{t('leads.address')}</FormLabel>
-                          <FormControl>
-                            <Input {...field} placeholder="ул. Ленина, д. 1" />
-                          </FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-
-                    <FormField
-                      control={form.control}
-                      name="city"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>{t('leads.city')}</FormLabel>
-                          <FormControl>
-                            <Input {...field} placeholder="Москва" />
-                          </FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-
-                    <FormField
-                      control={form.control}
-                      name="state_province"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>{t('leads.stateProvince')}</FormLabel>
-                          <FormControl>
-                            <Input {...field} placeholder="Московская область" />
-                          </FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-
-                    <FormField
-                      control={form.control}
-                      name="postal_code"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>{t('leads.postalCode')}</FormLabel>
-                          <FormControl>
-                            <Input {...field} placeholder="101000" />
-                          </FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-
-                    <FormField
-                      control={form.control}
-                      name="country"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>{t('leads.country')}</FormLabel>
-                          <FormControl>
-                            <Input {...field} placeholder="Россия" />
-                          </FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-
-                    <FormField
-                      control={form.control}
-                      name="timezone"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>{t('leads.timezone')}</FormLabel>
-                          <FormControl>
-                            <Input {...field} placeholder="Europe/Moscow" />
-                          </FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-                  </div>
-                </AccordionContent>
-              </AccordionItem>
-
-              {/* Communication Tracking */}
-              <AccordionItem value="communication">
-                <AccordionTrigger>{t('leads.communicationPreferences')}</AccordionTrigger>
-                <AccordionContent>
-                  <div className="grid gap-4 md:grid-cols-2 pt-2">
-                    <FormField
-                      control={form.control}
-                      name="preferred_contact_method"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>{t('leads.preferredContactMethod')}</FormLabel>
-                          <FormControl>
-                            <Input {...field} placeholder="Email, телефон, Telegram" />
-                          </FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-
-                    <FormField
-                      control={form.control}
-                      name="preferred_contact_time"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>{t('leads.preferredContactTime')}</FormLabel>
-                          <FormControl>
-                            <Input {...field} placeholder="Утро, день, вечер" />
-                          </FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-
-                    <FormField
-                      control={form.control}
-                      name="language"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>{t('leads.leadLanguage')}</FormLabel>
-                          <FormControl>
-                            <Input {...field} placeholder="Русский, английский и т.д." />
-                          </FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-
-                    <div className="flex items-center space-x-4">
-                      <FormField
-                        control={form.control}
-                        name="do_not_contact"
-                        render={({ field }) => (
-                          <FormItem className="flex items-center space-x-2">
-                            <FormControl>
-                              <Checkbox
-                                checked={field.value}
-                                onCheckedChange={field.onChange}
-                              />
-                            </FormControl>
-                            <FormLabel className="!mt-0">{t('leads.doNotContact')}</FormLabel>
-                            <FormMessage />
-                          </FormItem>
-                        )}
-                      />
-
-                      <FormField
-                        control={form.control}
-                        name="email_bounced"
-                        render={({ field }) => (
-                          <FormItem className="flex items-center space-x-2">
-                            <FormControl>
-                              <Checkbox
-                                checked={field.value}
-                                onCheckedChange={field.onChange}
-                              />
-                            </FormControl>
-                            <FormLabel className="!mt-0">{t('leads.emailBounced')}</FormLabel>
-                            <FormMessage />
-                          </FormItem>
-                        )}
-                      />
-                    </div>
-                  </div>
-                </AccordionContent>
-              </AccordionItem>
-
-              {/* Sales Process */}
-              <AccordionItem value="sales">
-                <AccordionTrigger>{t('leads.salesProcess')}</AccordionTrigger>
-                <AccordionContent>
-                  <div className="grid gap-4 md:grid-cols-2 pt-2">
-                    <FormField
-                      control={form.control}
-                      name="campaign_source"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>{t('leads.campaignSource')}</FormLabel>
-                          <FormControl>
-                            <Input {...field} placeholder="Google Реклама, Email-рассылка" />
-                          </FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-
-                    <FormField
-                      control={form.control}
-                      name="referral_source"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>{t('leads.referralSource')}</FormLabel>
-                          <FormControl>
-                            <Input {...field} placeholder="Кто порекомендовал" />
-                          </FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-
-                    <FormField
-                      control={form.control}
-                      name="estimated_value"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>{t('leads.estimatedValue')}</FormLabel>
-                          <FormControl>
-                            <Input {...field} type="number" placeholder="50000" />
-                          </FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-
-                    <FormField
-                      control={form.control}
-                      name="last_contacted"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>{t('leads.lastContactedLabel')}</FormLabel>
-                          <FormControl>
-                            <DatePicker
-                              value={field.value ? field.value.toISOString().split('T')[0] : undefined}
-                              onChange={(dateStr) => field.onChange(dateStr ? new Date(dateStr + 'T00:00:00') : null)}
-                              placeholder="Выберите дату"
-                            />
-                          </FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-
-                    <FormField
-                      control={form.control}
-                      name="next_follow_up_date"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>{t('leads.nextFollowUpDate')}</FormLabel>
-                          <FormControl>
-                            <DatePicker
-                              value={field.value ? field.value.toISOString().split('T')[0] : undefined}
-                              onChange={(dateStr) => field.onChange(dateStr ? new Date(dateStr + 'T00:00:00') : null)}
-                              placeholder="Выберите дату"
-                            />
-                          </FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-
-                    <FormField
-                      control={form.control}
-                      name="expected_close_date"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>{t('leads.expectedCloseDate')}</FormLabel>
-                          <FormControl>
-                            <DatePicker
-                              value={field.value ? field.value.toISOString().split('T')[0] : undefined}
-                              onChange={(dateStr) => field.onChange(dateStr ? new Date(dateStr + 'T00:00:00') : null)}
-                              placeholder="Выберите дату"
-                            />
-                          </FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-
-                    <FormField
-                      control={form.control}
-                      name="lost_reason"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>{t('leads.lostReason')}</FormLabel>
-                          <FormControl>
-                            <Input {...field} placeholder="Причина отказа" />
-                          </FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-
-                    <FormField
-                      control={form.control}
-                      name="competitor"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>{t('leads.competitor')}</FormLabel>
-                          <FormControl>
-                            <Input {...field} placeholder="Какого конкурента выбрали" />
-                          </FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-                  </div>
-                </AccordionContent>
-              </AccordionItem>
-
-              {/* Social/Messaging */}
-              <AccordionItem value="social">
-                <AccordionTrigger>{t('leads.socialMessaging')}</AccordionTrigger>
-                <AccordionContent>
-                  <div className="grid gap-4 md:grid-cols-2 pt-2">
-                    <FormField
-                      control={form.control}
-                      name="telegram_username"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>{t('leads.telegramUsername')}</FormLabel>
-                          <FormControl>
-                            <Input {...field} placeholder="имя_пользователя (без @)" />
-                          </FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-
-                    <FormField
-                      control={form.control}
-                      name="telegram_chat_id"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>{t('leads.telegramChatId')}</FormLabel>
-                          <FormControl>
-                            <Input {...field} placeholder="123456789" />
-                          </FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-                  </div>
-                </AccordionContent>
-              </AccordionItem>
-            </Accordion>
-
-            <FormField
-              control={form.control}
-              name="notes"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>{t('common.notes')}</FormLabel>
-                  <FormControl>
-                    <Textarea
-                      {...field}
-                      placeholder="Дополнительные заметки о лиде..."
-                      rows={3}
-                    />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-
-          </div>
-            <SheetFooter className="gap-2 pt-4 border-t shrink-0">
+            <SheetFooter className="shrink-0 gap-2 border-t pt-4">
               {isEditing ? (
                 <Button
                   type="button"
@@ -880,17 +522,10 @@ export function LeadDialog({ open, onOpenChange, lead, defaultSegment = 'individ
                   {t('common.delete')}
                 </Button>
               ) : null}
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => handleOpenChange(false)}
-              >
+              <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
                 {t('common.cancel')}
               </Button>
-              <Button
-                type="submit"
-                disabled={createMutation.isPending || updateMutation.isPending}
-              >
+              <Button type="submit" disabled={createMutation.isPending || updateMutation.isPending}>
                 {isEditing ? t('leads.updateLead') : t('leads.createLead')}
               </Button>
             </SheetFooter>
