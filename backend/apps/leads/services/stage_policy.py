@@ -111,11 +111,12 @@ def get_stage_policy(
     allowed_tools = {str(tool).strip() for tool in raw_allowed if str(tool).strip()}
     if not allowed_tools:
         allowed_tools = _infer_allowed_tools_from_card(card)
-    if (
-        allowed_tools == set()
-        and _lead_has_booking_ready_for_handoff(lead, resolution)
-    ):
-        allowed_tools = {'transfer_to_manager'}
+    
+    if allowed_tools is not None:
+        allowed_tools = set(allowed_tools)
+        allowed_tools.add('get_room_images')
+        allowed_tools.add('transfer_to_manager')
+
     return StagePolicy(
         card_id=getattr(card, 'pk', None),
         card_title=getattr(card, 'title', '') or '',

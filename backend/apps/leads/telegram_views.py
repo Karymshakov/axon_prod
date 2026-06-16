@@ -526,25 +526,7 @@ def _delayed_ai_response(lead_id: int, activity_id: int, chat_id: str, text: str
             )
             logger.info(f"Sent AI auto-response to lead {lead.id} ({len(message_parts)} message(s))")
 
-            # Exact-time follow-ups are still useful, but generic proactive
-            # scheduling after every chat reply creates extra LLM pressure.
-            if (
-                config.proactive_outreach_enabled
-                and agent_service._has_promise_keywords(combined_text)
-            ):
-                import threading
-                _conv_summary = '\n'.join(
-                    m.get('content', '')[:200] for m in conversation_history[-4:]
-                ) if conversation_history else combined_text[:300]
-                threading.Thread(
-                    target=agent_service._schedule_next_followup,
-                    args=(lead.id, _conv_summary, sent_activity.id),
-                    daemon=True,
-                ).start()
-            elif config.proactive_outreach_enabled:
-                logger.info(
-                    f"Lead {lead.id}: skipped generic proactive follow-up scheduling in reactive chat"
-                )
+            agent_service.schedule_idle_or_promise_followup(lead, combined_text, conversation_history, sent_activity.id)
 
             add_diagnostic_step(
                 activity_id,
@@ -720,7 +702,7 @@ def _delayed_ai_response(lead_id: int, activity_id: int, chat_id: str, text: str
                         updated_fields.append('meal_plan')
 
                 if updated_fields:
-                    lead.save()
+                    lead.save(update_fields=updated_fields)
                     logger.info(f"Auto-extracted and updated fields for lead {lead.id}: {updated_fields}")
 
     except Exception as e:

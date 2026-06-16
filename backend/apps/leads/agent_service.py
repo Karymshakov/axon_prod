@@ -731,11 +731,12 @@ Return ONLY the message text, nothing else."""
                     logger.info(f'No follow-up scheduled for lead {lead_id} — conversation resolved')
                     return
 
-                hours = max(1, min(hours, 72))
-                follow_up_at = now + timedelta(hours=hours)
+                # Default proactive follow-up is now 10 minutes (0.16 hours) if lead goes silent
+                follow_up_at = now + timedelta(minutes=10)
+                hint = f"10-minute idle follow-up: {hint}"
                 logger.info(
-                    f'Scheduled proactive follow-up for lead {lead_id} at {follow_up_at} '
-                    f'({hours}h from now) — {hint[:80]}'
+                    f'Scheduled proactive 10-minute follow-up for lead {lead_id} at {follow_up_at} '
+                    f'— {hint[:80]}'
                 )
 
             # Multiple scheduling threads may finish out of order after rapid
@@ -768,6 +769,35 @@ Return ONLY the message text, nothing else."""
             )
         except Exception as e:
             logger.warning(f'_schedule_next_followup failed for lead {lead_id}: {e}')
+
+
+    def schedule_idle_or_promise_followup(self, lead: Lead, combined_text: str, conversation_history: list, sent_activity_id: int) -> None:
+        """
+        Schedule either an exact promise follow-up (using LLM in background thread)
+        if promise keywords are present, or a default 10-minute idle follow-up directly.
+        """
+        config = AIConfig.get_config(org=lead.organization)
+        if not config.proactive_outreach_enabled:
+            return
+
+        if self._has_promise_keywords(combined_text):
+            import threading
+            _conv_summary = '\n'.join(
+                m.get('content', '')[:200] for m in conversation_history[-4:]
+            ) if conversation_history else combined_text[:300]
+            threading.Thread(
+                target=self._schedule_next_followup,
+                args=(lead.id, _conv_summary, sent_activity_id),
+                daemon=True,
+            ).start()
+            logger.info(f"Lead {lead.id}: dispatched LLM promise follow-up scheduling")
+        else:
+            follow_up_at = timezone.now() + timedelta(minutes=10)
+            Lead.objects.filter(id=lead.id).update(
+                next_follow_up_at=follow_up_at,
+                next_follow_up_hint="Lead idle for 10 minutes after bot reply"
+            )
+            logger.info(f"Lead {lead.id}: scheduled 10-minute idle follow-up directly at {follow_up_at}")
 
     def execute_pending_auto_tasks(self, lead: Lead = None) -> dict:
         """
@@ -883,7 +913,7 @@ Return ONLY the message text, nothing else."""
                 should_follow_up, reason = self._should_follow_up(lead, config, force=force)
 
                 if not should_follow_up:
-                    logger.info(f"Skipping lead {lead.id} ({lead.contact_person}): {reason}")
+                    logger.debug(f"Skipping lead {lead.id} ({lead.contact_person}): {reason}")
                     results['skipped'] += 1
                     continue
 
@@ -1116,12 +1146,24 @@ Return ONLY the message text, nothing else."""
         # Scheduled follow-up context — if a specific follow-up time was agreed/scheduled
         scheduled_context = ''
         if lead.next_follow_up_hint:
-            scheduled_context = (
-                f'\n\nIMPORTANT — SCHEDULED FOLLOW-UP:\n'
-                f'This message is being sent at a scheduled time because: "{lead.next_follow_up_hint}".\n'
-                f'Make sure to address this context directly. For example, if you promised to tell them about rooms at 19:00, '
-                f'provide the rooms information or pick up the booking conversation exactly where it left off, referencing the scheduled time if appropriate.'
-            )
+            hint_str = lead.next_follow_up_hint
+            if "10-minute" in hint_str or "10 minutes" in hint_str or "idle" in hint_str:
+                scheduled_context = (
+                    f'\n\nIMPORTANT — 10-MINUTE IDLE NUDGE:\n'
+                    f'The guest has been silent for 10 minutes since your last response.\n'
+                    f'Act as a proactive, friendly, but highly focused sales manager.\n'
+                    f'Gently follow up to check if they are ready to proceed with booking or have any questions.\n'
+                    f'CRITICAL: Do NOT apologize for keeping them waiting, and do NOT apologize for the delay (you did not delay; the guest went silent). '
+                    f'Instead, focus on moving the booking forward naturally and presenting the value of Nomad Camp.'
+                )
+            else:
+                scheduled_context = (
+                    f'\n\nIMPORTANT — SCHEDULED FOLLOW-UP:\n'
+                    f'This message is being sent at a scheduled time because: "{lead.next_follow_up_hint}".\n'
+                    f'Make sure to address this context directly. For example, if you promised to tell them about rooms at 19:00, '
+                    f'provide the rooms information or pick up the booking conversation exactly where it left off, referencing the scheduled time if appropriate.\n'
+                    f'CRITICAL: Do NOT make submissive apologies for delays unless you actually delayed.'
+                )
 
         prompt = f"""You are an AI sales agent. Your goal is to move this lead toward conversion.
 
@@ -1199,8 +1241,8 @@ Return ONLY the message text, nothing else."""
             logger.warning(f"Failed to assemble booking prompt for follow-up, falling back: {e}")
             messages = [{"role": "system", "content": config.system_prompt}]
             messages.extend(context['conversation_history'][-10:])
-
         messages.append({"role": "user", "content": prompt})
+
 
         try:
             response = ai_service.generate_response_with_messages(messages)

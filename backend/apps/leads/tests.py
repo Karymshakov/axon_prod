@@ -861,7 +861,10 @@ class PreciseScheduledFollowupTests(TestCase):
         
         self.lead.refresh_from_db()
         self.assertIsNotNone(self.lead.next_follow_up_at)
-        self.assertEqual(self.lead.next_follow_up_hint, "Proactive follow-up in 12 hours")
+        self.assertEqual(self.lead.next_follow_up_hint, "10-minute idle follow-up: Proactive follow-up in 12 hours")
+        from django.utils import timezone
+        diff = self.lead.next_follow_up_at - timezone.now()
+        self.assertTrue(abs(diff.total_seconds() - 600) < 5)
 
     @patch('django.utils.timezone.now')
     @patch('django.db.close_old_connections')
@@ -1337,7 +1340,7 @@ class PreciseScheduledFollowupTests(TestCase):
         agent_service._schedule_next_followup(self.lead.id, "Guest already responded")
 
         self.lead.refresh_from_db()
-        self.assertEqual(self.lead.next_follow_up_at, dt(2026, 5, 25, 10, 5, 0, tzinfo=dt_tz.utc))
+        self.assertEqual(self.lead.next_follow_up_at, dt(2026, 5, 24, 10, 15, 0, tzinfo=dt_tz.utc))
         prompt = mock_client.chat.completions.create.call_args[1]['messages'][0]['content']
         self.assertIn('Ignore any old promise/request', prompt)
         self.assertIn('Fulfilled promise deadline', prompt)
