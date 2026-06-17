@@ -5,6 +5,9 @@ import logging
 from rest_framework import viewsets, status
 from rest_framework.decorators import action, api_view
 from rest_framework.response import Response
+from rest_framework.permissions import SAFE_METHODS, BasePermission
+from apps.organizations.permissions import IsOrganizationMember, IsOrganizationAdmin
+
 
 logger = logging.getLogger(__name__)
 
@@ -24,12 +27,13 @@ Rules:
 The result will be used directly by an AI assistant to answer customer questions, so be precise and complete."""
 from .models import (
     HotelProfile, HotelProfileLink, HotelPolicy, HotelFAQ, HandoverContact,
-    Playbook, RoomPricing, RoomCombinationNote,
+    Playbook, RoomPricing, RoomCombinationNote, ReplyTemplateCategory, ReplyTemplate,
 )
 from .serializers import (
     HotelProfileSerializer, HotelProfileLinkSerializer,
     HotelPolicySerializer, HotelFAQSerializer, HandoverContactSerializer,
     PlaybookSerializer, RoomPricingSerializer, RoomCombinationNoteSerializer,
+    ReplyTemplateCategorySerializer, ReplyTemplateSerializer,
 )
 from apps.organizations.mixins import OrganizationQuerysetMixin
 
@@ -957,3 +961,23 @@ def room_combination_note(request, guest_count, combination_index):
         defaults={'note': note_text},
     )
     return Response(RoomCombinationNoteSerializer(obj).data)
+
+
+class IsAdminOrReadOnlyMember(BasePermission):
+    def has_permission(self, request, view):
+        if request.method in SAFE_METHODS:
+            return IsOrganizationMember().has_permission(request, view)
+        return IsOrganizationAdmin().has_permission(request, view)
+
+
+class ReplyTemplateCategoryViewSet(OrganizationQuerysetMixin, viewsets.ModelViewSet):
+    queryset = ReplyTemplateCategory.objects.all()
+    serializer_class = ReplyTemplateCategorySerializer
+    permission_classes = [IsAdminOrReadOnlyMember]
+
+
+class ReplyTemplateViewSet(OrganizationQuerysetMixin, viewsets.ModelViewSet):
+    queryset = ReplyTemplate.objects.all()
+    serializer_class = ReplyTemplateSerializer
+    permission_classes = [IsAdminOrReadOnlyMember]
+

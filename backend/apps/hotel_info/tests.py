@@ -28,7 +28,7 @@ class HotelWorkspaceAccessTests(APITestCase):
         OrganizationMember.objects.create(
             organization=self.org,
             user=self.admin,
-            role=OrganizationMember.Role.MEMBER,
+            role=OrganizationMember.Role.ADMIN,
         )
         OrganizationMember.objects.create(
             organization=self.org,
@@ -85,8 +85,19 @@ class HotelWorkspaceAccessTests(APITestCase):
 
         self.assertEqual(response.status_code, 200)
 
-    def test_manager_can_create_reply_template_category(self):
+    def test_manager_cannot_create_reply_template_category(self):
         self.client.force_authenticate(user=self.manager)
+
+        response = self.client.post(
+            reverse('reply-template-category-list'),
+            {'name': 'Бронирование'},
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_admin_can_create_reply_template_category(self):
+        self.client.force_authenticate(user=self.admin)
 
         response = self.client.post(
             reverse('reply-template-category-list'),
@@ -97,8 +108,8 @@ class HotelWorkspaceAccessTests(APITestCase):
         self.assertEqual(response.status_code, 201)
         self.assertEqual(response.data['name'], 'Бронирование')
 
-    def test_manager_can_create_reply_template_in_new_category(self):
-        self.client.force_authenticate(user=self.manager)
+    def test_admin_can_create_reply_template_in_new_category(self):
+        self.client.force_authenticate(user=self.admin)
 
         category_response = self.client.post(
             reverse('reply-template-category-list'),
@@ -120,12 +131,14 @@ class HotelWorkspaceAccessTests(APITestCase):
 
         self.assertEqual(category_response.status_code, 201)
         self.assertEqual(template_response.status_code, 201)
+
+        self.client.force_authenticate(user=self.manager)
         categories_response = self.client.get(reverse('reply-template-category-list'))
         self.assertEqual(categories_response.status_code, 200)
         self.assertEqual(categories_response.data[0]['templates'][0]['title'], 'Уточнить даты')
 
     def test_channel_filter_includes_universal_reply_templates(self):
-        self.client.force_authenticate(user=self.manager)
+        self.client.force_authenticate(user=self.admin)
 
         category_response = self.client.post(
             reverse('reply-template-category-list'),
@@ -156,6 +169,7 @@ class HotelWorkspaceAccessTests(APITestCase):
             format='json',
         )
 
+        self.client.force_authenticate(user=self.manager)
         response = self.client.get(reverse('reply-template-list'), {'channel': 'telegram'})
 
         self.assertEqual(response.status_code, 200)

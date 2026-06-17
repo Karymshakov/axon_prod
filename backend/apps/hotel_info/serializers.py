@@ -1,7 +1,7 @@
 from rest_framework import serializers
 from .models import (
     HotelProfile, HotelProfileLink, HotelPolicy, HotelFAQ, HandoverContact,
-    Playbook, RoomPricing, RoomCombinationNote,
+    Playbook, RoomPricing, RoomCombinationNote, ReplyTemplateCategory, ReplyTemplate,
 )
 
 
@@ -74,3 +74,20 @@ class RoomPricingSerializer(serializers.ModelSerializer):
             'updated_at',
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']
+
+
+class ReplyTemplateSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ReplyTemplate
+        fields = ['id', 'category', 'title', 'text', 'channel', 'tags', 'order', 'is_active']
+        read_only_fields = ['id']
+
+
+class ReplyTemplateCategorySerializer(serializers.ModelSerializer):
+    templates = ReplyTemplateSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = ReplyTemplateCategory
+        fields = ['id', 'name', 'order', 'is_active', 'templates']
+        read_only_fields = ['id', 'templates']
+

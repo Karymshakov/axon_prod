@@ -32,7 +32,6 @@ if ReplyTemplateViewSet is not None:
 
 urlpatterns = [
     path('hotel-profile/', hotel_profile, name='hotel-profile'),
-    path('reply-template-categories/', reply_template_categories_shim, name='reply-template-category-list'),
     path('ai/prompt-preview/', prompt_preview, name='ai-prompt-preview'),
     path('room-combinations/', room_combinations, name='room-combinations'),
     path('room-combinations/room-types/', room_combination_room_types, name='room-combination-room-types'),
@@ -40,4 +39,10 @@ urlpatterns = [
     path('room-combinations/custom/<int:pk>/', delete_custom_combination, name='room-combination-delete-custom'),
     path('room-combinations/notes/<int:guest_count>/<int:combination_index>/', room_combination_note, name='room-combination-note'),
     path('room-combinations/hide/<int:guest_count>/<int:combination_index>/', hide_auto_combination, name='room-combination-hide'),
-] + router.urls
+]
+
+if ReplyTemplateCategoryViewSet is None:
+    urlpatterns.append(path('reply-template-categories/', reply_template_categories_shim, name='reply-template-category-list'))
+
+urlpatterns += router.urls
+
