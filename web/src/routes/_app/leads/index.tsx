@@ -409,6 +409,33 @@ function LeadsPage() {
     return parts.length ? parts.join(' · ') : '—'
   }
 
+  const formatBookingShortDate = (dateString: string | null) => {
+    if (!dateString) return null
+    return new Date(dateString).toLocaleDateString('ru-RU', {
+      day: 'numeric',
+      month: 'short',
+    })
+  }
+
+  const formatBookingDateRange = (lead: Lead) => {
+    const checkIn = formatBookingShortDate(lead.check_in_date)
+    const checkOut = formatBookingShortDate(lead.check_out_date)
+    const yearSource = lead.check_in_date || lead.check_out_date
+    const year = yearSource ? new Date(yearSource).getFullYear() : null
+
+    if (checkIn && checkOut) return `${checkIn} - ${checkOut}${year ? ` ${year}` : ''}`
+    if (checkIn) return `заезд ${checkIn}${year ? ` ${year}` : ''}`
+    if (checkOut) return `выезд ${checkOut}${year ? ` ${year}` : ''}`
+    return ''
+  }
+
+  const getBookingMeta = (lead: Lead) => {
+    const parts: string[] = []
+    if (lead.guest_count) parts.push(`${lead.guest_count} гост.`)
+    if (lead.room_type_preference) parts.push(lead.room_type_preference)
+    return parts.join(' · ')
+  }
+
   const getLeadSummary = (lead: Lead) =>
     lead.problem_description || lead.latest_note || lead.notes || lead.next_steps || ''
 
@@ -623,15 +650,15 @@ function LeadsPage() {
             {view === 'table' ? (
               <div className="px-4 lg:px-6 min-w-0">
                 <div className="rounded-md border overflow-x-auto bg-background">
-                  <Table className="min-w-[980px] w-full table-fixed">
+                  <Table className="min-w-[1120px] w-full table-fixed">
                     <colgroup>
-                      <col className="w-[250px]" />
+                      <col className="w-[260px]" />
+                      <col className="w-[145px]" />
                       <col className="w-[130px]" />
-                      <col className="w-[120px]" />
-                      <col className="w-[250px]" />
-                      <col className="w-[150px]" />
-                      <col className="w-[130px]" />
-                      <col className="w-[64px]" />
+                      <col className="w-[210px]" />
+                      <col className="w-[140px]" />
+                      <col className="w-[170px]" />
+                      <col className="w-[100px]" />
                     </colgroup>
                     <TableHeader>
                       <TableRow>
@@ -640,8 +667,8 @@ function LeadsPage() {
                         <TableHead>Канал</TableHead>
                         <TableHead>Бронирование</TableHead>
                         <TableHead>Откуда узнал</TableHead>
-                        <TableHead>Последний контакт</TableHead>
-                        <TableHead className="text-right">Действия</TableHead>
+                        <TableHead className="whitespace-nowrap">Последний контакт</TableHead>
+                        <TableHead className="whitespace-nowrap text-right pr-5">Действия</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -716,10 +743,25 @@ function LeadsPage() {
                                 {renderChannelBadge(lead)}
                               </div>
                             </TableCell>
-                            <TableCell className="py-3 align-top text-xs text-muted-foreground min-w-0">
-                              <span className="block truncate" title={formatBooking(lead)}>{formatBooking(lead)}</span>
+                            <TableCell className="py-3 align-top text-xs text-muted-foreground">
+                              {formatBookingDateRange(lead) || getBookingMeta(lead) ? (
+                                <div className="space-y-0.5" title={formatBooking(lead)}>
+                                  {formatBookingDateRange(lead) ? (
+                                    <span className="block font-medium leading-5 text-foreground/80">
+                                      {formatBookingDateRange(lead)}
+                                    </span>
+                                  ) : null}
+                                  {getBookingMeta(lead) ? (
+                                    <span className="block leading-5">
+                                      {getBookingMeta(lead)}
+                                    </span>
+                                  ) : null}
+                                </div>
+                              ) : (
+                                <span>—</span>
+                              )}
                               {lead.meal_plan && lead.meal_plan !== 'none' ? (
-                                <span className="mt-1 block truncate">Питание: {mealPlanLabelMap[lead.meal_plan] || lead.meal_plan}</span>
+                                <span className="mt-1 block leading-5">Питание: {mealPlanLabelMap[lead.meal_plan] || lead.meal_plan}</span>
                               ) : null}
                             </TableCell>
                             <TableCell className="py-3 align-top">
@@ -734,12 +776,13 @@ function LeadsPage() {
                                 <span className="text-xs text-muted-foreground">—</span>
                               )}
                             </TableCell>
-                            <TableCell className="py-3 align-top">{formatDate(lead.last_contacted)}</TableCell>
-                            <TableCell className="py-3 text-right align-top">
-                              <div className="flex justify-end gap-1" onClick={(e) => e.stopPropagation()}>
+                            <TableCell className="py-3 align-top whitespace-nowrap text-sm">{formatDate(lead.last_contacted)}</TableCell>
+                            <TableCell className="py-3 pr-4 text-right align-top">
+                              <div className="flex justify-end gap-2" onClick={(e) => e.stopPropagation()}>
                                 <Button
                                   variant="ghost"
                                   size="icon"
+                                  className="h-8 w-8"
                                   onClick={() => handleEditLead(lead)}
                                   aria-label="Редактировать"
                                 >
@@ -748,6 +791,7 @@ function LeadsPage() {
                                 <Button
                                   variant="ghost"
                                   size="icon"
+                                  className="h-8 w-8"
                                   onClick={() => handleDeleteClick(lead)}
                                   aria-label="Удалить"
                                 >
