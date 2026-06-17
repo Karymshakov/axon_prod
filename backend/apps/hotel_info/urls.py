@@ -17,6 +17,19 @@ router.register(r'handover-contacts', HandoverContactViewSet, basename='handover
 router.register(r'playbooks', PlaybookViewSet, basename='playbook')
 router.register(r'room-pricing', RoomPricingViewSet, basename='room-pricing')
 
+# Reply templates may be optional in some deploys; import/register defensively
+try:
+    from .views import ReplyTemplateCategoryViewSet, ReplyTemplateViewSet
+except Exception:
+    ReplyTemplateCategoryViewSet = None
+    ReplyTemplateViewSet = None
+
+if ReplyTemplateCategoryViewSet is not None:
+    router.register(r'reply-template-categories', ReplyTemplateCategoryViewSet, basename='reply-template-category')
+
+if ReplyTemplateViewSet is not None:
+    router.register(r'reply-templates', ReplyTemplateViewSet, basename='reply-template')
+
 urlpatterns = [
     path('hotel-profile/', hotel_profile, name='hotel-profile'),
     path('ai/prompt-preview/', prompt_preview, name='ai-prompt-preview'),
