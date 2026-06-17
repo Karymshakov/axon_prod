@@ -859,11 +859,31 @@ function CommunicationsPage() {
                       const isSent = activity.activity_type.endsWith('_sent')
 
                       // Message content resolution
-                      let messageText = activity.description
+                      let messageText = ''
                       if (isTelegram) {
                         messageText = getTelegramMessageText(activity)
                       } else if (isInstagram || isWhatsApp) {
-                        messageText = activity.metadata?.text as string || activity.description
+                        messageText = activity.metadata?.text as string || ''
+                      }
+
+                      // Filter out developer stubs / system notifications so they don't render as text bubbles
+                      const lowerText = messageText.toLowerCase().trim()
+                      const isPlaceholder =
+                        lowerText === '[image received]' ||
+                        lowerText === '[sticker received]' ||
+                        lowerText === '[attachment received]' ||
+                        lowerText === '[audio received]' ||
+                        lowerText === '[video received]' ||
+                        lowerText === '[file received]' ||
+                        lowerText === 'received photo from whatsapp' ||
+                        lowerText === 'received telegram photo' ||
+                        lowerText.startsWith('received photo from')
+
+                      if (isPlaceholder) {
+                        messageText = ''
+                      } else if (!messageText && !activity.metadata?.media_type) {
+                        // For non-media activities (e.g. status updates, notes), fallback to description
+                        messageText = activity.description
                       }
 
                       const mediaType = activity.metadata?.media_type as string | undefined
@@ -919,7 +939,7 @@ function CommunicationsPage() {
                             )}
 
                             {/* Text message */}
-                            {(!mediaType || messageText) && (
+                            {messageText && (
                               <div className="px-4 py-2.5">
                                 <p className="text-sm whitespace-pre-wrap break-words leading-relaxed">{messageText}</p>
                               </div>
