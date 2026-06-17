@@ -97,10 +97,10 @@ export function CopilotSuggestions({ leadId, onSelectSuggestion }: CopilotSugges
           variant="ghost"
           onClick={() => setIsCollapsed(false)}
           className="h-7 gap-1.5 rounded-md px-2 text-[11px] font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
-          title={isLoading ? 'ИИ готовит черновик' : 'Показать ИИ-черновик'}
+          title={isLoading ? 'ИИ-ассистент готовит ответ' : 'Показать ИИ-ассистент'}
         >
           <SparklesIcon className={`h-3.5 w-3.5 shrink-0 ${isLoading ? 'animate-pulse' : ''}`} />
-          <span>{isLoading ? 'ИИ думает' : 'ИИ-черновик'}</span>
+          <span>{isLoading ? 'ИИ думает' : 'ИИ-ассистент'}</span>
           <ChevronDownIcon className="h-3 w-3" />
         </Button>
       </div>
@@ -125,7 +125,7 @@ export function CopilotSuggestions({ leadId, onSelectSuggestion }: CopilotSugges
             className="h-7 text-xs text-purple-700 hover:text-purple-900 hover:bg-purple-100/60 dark:text-purple-300 gap-1"
           >
             <RefreshCwIcon className={`h-3 w-3 ${isLoading ? 'animate-spin' : ''}`} />
-            {suggestion ? 'Обновить черновик' : 'Предложить ответ'}
+            {suggestion ? 'Обновить ответ' : 'Предложить ответ'}
           </Button>
 
           <Button

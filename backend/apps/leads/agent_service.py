@@ -32,6 +32,13 @@ from .channel_ai_control import is_channel_ai_globally_paused
 
 logger = logging.getLogger(__name__)
 
+INBOUND_MESSAGE_ACTIVITY_TYPES = (
+    LeadActivity.TYPE_TELEGRAM_RECEIVED,
+    LeadActivity.TYPE_INSTAGRAM_RECEIVED,
+    LeadActivity.TYPE_WHATSAPP_RECEIVED,
+    LeadActivity.TYPE_RINGCENTRAL_SMS_RECEIVED,
+)
+
 # Keywords that indicate a time-based promise in any supported language
 _PROMISE_KEYWORDS = [
     # Russian
@@ -260,6 +267,16 @@ class AgentService:
         config = AIConfig.get_config()
         context = context or {}
 
+        latest_guest_activity = self._get_latest_guest_message_activity(lead)
+        if not latest_guest_activity:
+            logger.info("No inbound guest message found for lead %s; skipping AI suggestion", lead.id)
+            return None
+
+        latest_guest_message = self._get_activity_text(latest_guest_activity)
+        if not latest_guest_message:
+            logger.info("Latest inbound guest message for lead %s has no text; skipping AI suggestion", lead.id)
+            return None
+
         # Gather full lead context
         lead_context = self._gather_lead_context(lead)
 
@@ -286,6 +303,9 @@ LEAD CONTEXT:
 - Sentiment: {sentiment}
 - Urgency Level: {urgency}
 
+LATEST GUEST MESSAGE TO ANSWER:
+{latest_guest_message}
+
 {goals_context}
 {objection_context}
 {goal_instruction}
@@ -294,11 +314,13 @@ COMPANY PROFILE:
 {config.company_profile}
 
 INSTRUCTIONS:
-1. Generate a natural, conversational response (2-4 sentences)
-2. If handling an objection, address it empathetically but persistently
-3. Work toward the primary goal if specified
-4. Be warm and professional
-5. Include a clear next step or question
+1. Reply to the latest guest message above, not to manager notes, system events, or outgoing manager messages.
+2. Use outgoing manager messages only as context so you do not contradict or repeat them.
+3. Generate a natural, conversational response (2-4 sentences).
+4. If handling an objection, address it empathetically but persistently.
+5. Work toward the primary goal if specified.
+6. Be warm and professional.
+7. Include a clear next step or question.
 
 Return ONLY the message text, nothing else."""
 
@@ -321,6 +343,24 @@ Return ONLY the message text, nothing else."""
         except Exception as e:
             logger.error(f"Error generating response for lead {lead.id}: {e}", exc_info=True)
 
+        return None
+
+    def _get_activity_text(self, activity: LeadActivity) -> str:
+        metadata = activity.metadata or {}
+        return (metadata.get('text') or metadata.get('message') or activity.description or '').strip()
+
+    def _get_latest_guest_message_activity(self, lead: Lead) -> Optional[LeadActivity]:
+        from .media_utils import is_media_only_activity_metadata
+
+        activities = lead.activities.filter(
+            activity_type__in=INBOUND_MESSAGE_ACTIVITY_TYPES,
+        ).order_by('-created_at')[:20]
+
+        for activity in activities:
+            if is_media_only_activity_metadata(activity.metadata):
+                continue
+            if self._get_activity_text(activity):
+                return activity
         return None
 
     def _get_objection_rebuttal(self, objection_type: str) -> Optional[str]:

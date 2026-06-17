@@ -501,7 +501,7 @@ function SettingsPage() {
         <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
           <div className="space-y-2">
             <div className="flex flex-wrap items-center gap-2">
-              <span className="text-sm font-medium">Управление AI-ответами</span>
+              <span className="text-sm font-medium">Управление ИИ-ответами</span>
               <Badge className={isPaused ? 'bg-amber-500 text-white hover:bg-amber-500' : 'bg-emerald-600 text-white hover:bg-emerald-600'}>
                 {isPaused ? (
                   <><AlertTriangleIcon className="mr-1 h-3 w-3" />На паузе</>
@@ -512,7 +512,7 @@ function SettingsPage() {
             </div>
             <p className={`text-sm ${isPaused ? 'text-amber-900 dark:text-amber-100' : 'text-emerald-900 dark:text-emerald-100'}`}>
               {isPaused
-                ? `${channelLabel}: AI не отправляет ответы и не запускает активные автоматизации, пока вы не включите канал.`
+                ? `${channelLabel}: ИИ не отправляет ответы и не запускает активные автоматизации, пока вы не включите канал.`
                 : `${channelLabel}: AI отвечает и запускает автоматизации для подходящих диалогов.`}
             </p>
             <p className="text-xs text-muted-foreground">
