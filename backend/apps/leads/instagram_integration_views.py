@@ -215,6 +215,29 @@ def _get_app_config(org=None):
     return InstagramAppConfig.get_config(org=org)
 
 
+def _app_config_status(org=None) -> dict:
+    app_config = _get_app_config(org=org)
+    app_id = (
+        app_config.app_id
+        if app_config and app_config.app_id
+        else os.environ.get('INSTAGRAM_APP_ID', '')
+    ).strip()
+    app_secret_set = bool(
+        (app_config and app_config.app_secret)
+        or os.environ.get('INSTAGRAM_APP_SECRET', '').strip()
+    )
+    verify_token = (
+        app_config.webhook_verify_token
+        if app_config and app_config.webhook_verify_token
+        else ''
+    )
+    return {
+        'app_id': app_id,
+        'app_secret_set': app_secret_set,
+        'verify_token': verify_token,
+    }
+
+
 def _get_app_id(org=None) -> str:
     app_config = _get_app_config(org=org)
     val = (app_config.app_id if app_config and app_config.app_id else os.environ.get('INSTAGRAM_APP_ID', '')).strip()
@@ -449,6 +472,7 @@ def instagram_status(request):
     if oauth_state:
         embed_url = f'{embed_url}?state={urllib.parse.quote(oauth_state)}'
     diagnostics = _read_oauth_diagnostics(org)
+    app_config_status = _app_config_status(org)
     conn = InstagramConnection.get_config(org=org)
     if not conn:
         return Response({
@@ -462,6 +486,7 @@ def instagram_status(request):
             'oauth_last_callback_at': diagnostics.get('oauth_last_callback_at'),
             'oauth_last_status': diagnostics.get('oauth_last_status', ''),
             'oauth_last_error': diagnostics.get('oauth_last_error', ''),
+            **app_config_status,
         })
 
     # Auto-subscribe webhook in the background if not yet done.
@@ -497,6 +522,7 @@ def instagram_status(request):
         'oauth_last_callback_at': diagnostics.get('oauth_last_callback_at'),
         'oauth_last_status': diagnostics.get('oauth_last_status', ''),
         'oauth_last_error': diagnostics.get('oauth_last_error', ''),
+        **app_config_status,
     })
 
 
