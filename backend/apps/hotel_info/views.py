@@ -31,8 +31,6 @@ from .serializers import (
     HotelPolicySerializer, HotelFAQSerializer, HandoverContactSerializer,
     PlaybookSerializer, RoomPricingSerializer, RoomCombinationNoteSerializer,
 )
-from .models import ReplyTemplateCategory, ReplyTemplate
-from .serializers import ReplyTemplateCategorySerializer, ReplyTemplateSerializer
 from apps.organizations.mixins import OrganizationQuerysetMixin
 
 
@@ -149,42 +147,6 @@ class PlaybookViewSet(OrganizationQuerysetMixin, viewsets.ModelViewSet):
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
         return Response({'content': extracted.strip()})
-
-
-class ReplyTemplateCategoryViewSet(OrganizationQuerysetMixin, viewsets.ModelViewSet):
-    queryset = ReplyTemplateCategory.objects.all()
-    serializer_class = ReplyTemplateCategorySerializer
-
-    def get_queryset(self):
-        user = self.request.user
-        org = None if getattr(user, 'is_superadmin', False) else self._get_organization()
-        return ReplyTemplateCategory.objects.filter(organization=org)
-
-    def perform_create(self, serializer):
-        user = self.request.user
-        org = None if getattr(user, 'is_superadmin', False) else self._get_organization()
-        max_order = ReplyTemplateCategory.objects.filter(organization=org).count() if org else ReplyTemplateCategory.objects.count()
-        serializer.save(organization=org, order=max_order)
-
-
-class ReplyTemplateViewSet(OrganizationQuerysetMixin, viewsets.ModelViewSet):
-    queryset = ReplyTemplate.objects.all()
-    serializer_class = ReplyTemplateSerializer
-
-    def get_queryset(self):
-        user = self.request.user
-        org = None if getattr(user, 'is_superadmin', False) else self._get_organization()
-        qs = ReplyTemplate.objects.filter(organization=org, is_active=True)
-        channel = self.request.query_params.get('channel')
-        if channel:
-            qs = qs.filter(models.Q(channel=channel) | models.Q(channel='all'))
-        return qs
-
-    def perform_create(self, serializer):
-        user = self.request.user
-        org = None if getattr(user, 'is_superadmin', False) else self._get_organization()
-        max_order = ReplyTemplate.objects.filter(organization=org).count() if org else ReplyTemplate.objects.count()
-        serializer.save(organization=org, order=max_order)
 
     def _extract_image_openai(self, file_bytes: bytes, mime_type: str):
         """Extract text/tables from an image using AI vision."""
