@@ -651,14 +651,49 @@ def instagram_webhook(request):
                         ).start()
                     continue
 
-                # Determine a human-readable label for non-text messages
+                # Extract attachments and download image if present
+                attachments = message.get('attachments', [])
+                is_photo = False
+                media_metadata = {}
+                mid = message.get('mid')
+
+                if attachments:
+                    attachment_type = attachments[0].get('type', 'attachment')
+                    if attachment_type == 'image':
+                        is_photo = True
+                        if not message_text:
+                            message_text = '[Изображение получено]'
+                        payload = attachments[0].get('payload', {})
+                        photo_url = payload.get('url')
+                        if photo_url and mid:
+                            try:
+                                import os
+                                import requests
+                                mid_clean = re.sub(r'[^a-zA-Z0-9_\-]', '_', mid)
+                                from django.conf import settings
+                                incoming_dir = os.path.join(settings.MEDIA_ROOT, 'incoming_photos')
+                                os.makedirs(incoming_dir, exist_ok=True)
+
+                                local_filename = f"ig_{mid_clean}.jpg"
+                                dest_path = os.path.join(incoming_dir, local_filename)
+
+                                # Download file
+                                resp = requests.get(photo_url, timeout=15)
+                                if resp.ok:
+                                    with open(dest_path, 'wb') as f:
+                                        f.write(resp.content)
+                                    media_metadata = {
+                                        'media_type': 'photo',
+                                        'file_url': f"{settings.MEDIA_URL}incoming_photos/{local_filename}"
+                                    }
+                                    logger.info(f"Downloaded guest photo from Instagram: {media_metadata['file_url']}")
+                            except Exception as e:
+                                logger.error(f"Error downloading incoming Instagram photo: {e}", exc_info=True)
+
                 if not message_text:
-                    attachments = message.get('attachments', [])
                     if attachments:
                         attachment_type = attachments[0].get('type', 'attachment')
-                        if attachment_type == 'image':
-                            message_text = '[Изображение получено]'
-                        elif attachment_type == 'video':
+                        if attachment_type == 'video':
                             message_text = '[Видео получено]'
                         elif attachment_type == 'audio':
                             message_text = '[Аудио получено]'
@@ -746,17 +781,21 @@ def instagram_webhook(request):
                     continue
 
                 # Create activity for the received message
+                activity_metadata = {
+                    'message': message_text,
+                    'text': message_text,
+                    'message_id': mid,
+                    'sender_id': sender_id,
+                }
+                if media_metadata:
+                    activity_metadata.update(media_metadata)
+
                 current_activity = LeadActivity.objects.create(
                     lead=lead,
                     organization=lead.organization,
                     activity_type=LeadActivity.TYPE_INSTAGRAM_RECEIVED,
                     description=f'Received from Instagram: {message_text[:100]}{"..." if len(message_text) > 100 else ""}',
-                    metadata={
-                        'message': message_text,
-                        'text': message_text,
-                        'message_id': mid,
-                        'sender_id': sender_id,
-                    }
+                    metadata=activity_metadata
                 )
 
                 # Stamp last_contacted so the CRM reflects when the guest last wrote

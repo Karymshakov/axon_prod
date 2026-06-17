@@ -34,6 +34,18 @@ services:
       timeout: 5s
       retries: 5
 
+  # ─── Permissions Initialization ─────────────────────────────────────────────
+  init-permissions:
+    image: ${ALPINE_IMAGE:-mirror.gcr.io/library/alpine:latest}
+    container_name: axon_init_permissions
+    user: "root"
+    volumes:
+      - static_volume:/app/staticfiles
+      - media_volume:/app/media
+    command: sh -c "chown -R 8888:8888 /app/staticfiles /app/media"
+    networks:
+      - axon-net
+
   # ─── Django Backend (Gunicorn) ──────────────────────────────────────────────
   backend:
     build:
@@ -48,6 +60,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      init-permissions:
+        condition: service_completed_successfully
     env_file:
       - .env
     environment:
@@ -76,6 +90,8 @@ services:
         condition: service_healthy
       backend:
         condition: service_started
+      init-permissions:
+        condition: service_completed_successfully
     env_file:
       - .env
     environment:
@@ -103,6 +119,8 @@ services:
         condition: service_healthy
       backend:
         condition: service_started
+      init-permissions:
+        condition: service_completed_successfully
     env_file:
       - .env
     environment:

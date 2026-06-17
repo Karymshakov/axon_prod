@@ -603,7 +603,9 @@ def whatsapp_webhook(request):
                                 incoming_dir = os.path.join(settings.MEDIA_ROOT, 'incoming_photos')
                                 os.makedirs(incoming_dir, exist_ok=True)
 
-                                local_filename = f"wa_{message_id}.jpg"
+                                import re
+                                message_id_clean = re.sub(r'[^a-zA-Z0-9_\-]', '_', message_id)
+                                local_filename = f"wa_{message_id_clean}.jpg"
                                 dest_path = os.path.join(incoming_dir, local_filename)
 
                                 download_success = whatsapp_service.download_media(media_id, dest_path, org=_wa_org)
