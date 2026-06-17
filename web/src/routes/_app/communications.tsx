@@ -162,11 +162,22 @@ function getConversationDraftKey(leadId: number, channel: ConversationChannel) {
 }
 
 function getPreferredRecorderMimeType(channel: ConversationChannel) {
+  if (typeof MediaRecorder === 'undefined' || typeof MediaRecorder.isTypeSupported !== 'function') {
+    return ''
+  }
+
   const candidates = channel === 'whatsapp'
-    ? ['audio/ogg;codecs=opus', 'audio/mp4', 'audio/webm;codecs=opus', 'audio/webm']
+    ? ['audio/ogg;codecs=opus', 'audio/mp4']
     : ['audio/ogg;codecs=opus', 'audio/webm;codecs=opus', 'audio/webm', 'audio/mp4']
 
   return candidates.find((candidate) => MediaRecorder.isTypeSupported(candidate)) || ''
+}
+
+function canRecordVoiceForChannel(channel: ConversationChannel) {
+  if (channel === 'instagram') return false
+  if (typeof MediaRecorder === 'undefined') return false
+  if (channel === 'whatsapp') return Boolean(getPreferredRecorderMimeType(channel))
+  return true
 }
 
 function formatMediaTime(seconds: number) {
@@ -421,8 +432,8 @@ function CommunicationsPage() {
 
     try {
       const recorderMimeType = getPreferredRecorderMimeType(composerChannel)
-      if (composerChannel === 'whatsapp' && recorderMimeType.startsWith('audio/webm')) {
-        toast.error('Ваш браузер записывает voice как audio/webm, WhatsApp может не принять этот формат')
+      if (composerChannel === 'whatsapp' && !recorderMimeType) {
+        toast.error('Ваш браузер не умеет записывать голос в формате, который принимает WhatsApp')
         return
       }
 
@@ -591,6 +602,7 @@ function CommunicationsPage() {
     }
     return getLeadActiveChannel(selectedLead)
   }, [selectedLead, overrideChannel, availableChannels, activeChannelTab])
+  const canRecordVoice = canRecordVoiceForChannel(activeChannel)
 
   activeChannelRef.current = activeChannel
 
@@ -608,6 +620,17 @@ function CommunicationsPage() {
 
     suppressDraftSaveRef.current = true
     setMessage(localStorage.getItem(conversationDraftKey) ?? '')
+    const recorder = mediaRecorderRef.current
+    if (recorder && recorder.state !== 'inactive') {
+      recorder.onstop = null
+      recorder.stop()
+      recorder.stream.getTracks().forEach((track) => track.stop())
+    }
+    mediaRecorderRef.current = null
+    recordingChunksRef.current = []
+    clearRecordingTimer()
+    setIsRecordingVoice(false)
+    setRecordingSeconds(0)
     setAttachmentPreview((preview) => {
       if (preview) {
         URL.revokeObjectURL(preview)
@@ -1428,16 +1451,18 @@ function CommunicationsPage() {
                         Медиа
                       </Button>
 
-                      <Button
-                        variant={isRecordingVoice ? 'default' : 'outline'}
-                        size="sm"
-                        className={`h-8 gap-1.5 ${isRecordingVoice ? 'bg-red-600 text-white hover:bg-red-700' : 'text-muted-foreground hover:text-foreground'}`}
-                        onClick={isRecordingVoice ? handleStopVoiceRecording : handleStartVoiceRecording}
-                        type="button"
-                      >
-                        {isRecordingVoice ? <SquareIcon className="h-4 w-4" /> : <MicIcon className="h-4 w-4" />}
-                        {isRecordingVoice ? formatMediaTime(recordingSeconds) : 'Голос'}
-                      </Button>
+                      {canRecordVoice && (
+                        <Button
+                          variant={isRecordingVoice ? 'default' : 'outline'}
+                          size="sm"
+                          className={`h-8 gap-1.5 ${isRecordingVoice ? 'bg-red-600 text-white hover:bg-red-700' : 'text-muted-foreground hover:text-foreground'}`}
+                          onClick={isRecordingVoice ? handleStopVoiceRecording : handleStartVoiceRecording}
+                          type="button"
+                        >
+                          {isRecordingVoice ? <SquareIcon className="h-4 w-4" /> : <MicIcon className="h-4 w-4" />}
+                          {isRecordingVoice ? formatMediaTime(recordingSeconds) : 'Голос'}
+                        </Button>
+                      )}
                     </>
                   )}
                 </div>

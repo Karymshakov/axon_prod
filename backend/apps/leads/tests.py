@@ -2,7 +2,7 @@ from unittest.mock import AsyncMock, Mock, patch
 from urllib.parse import parse_qs, urlparse
 
 from django.contrib.auth import get_user_model
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from rest_framework.test import APIRequestFactory, force_authenticate
 
 from apps.organizations.models import Organization
@@ -3793,5 +3793,63 @@ class CommsMediaTests(TestCase):
         text_act = activities[1]
         self.assertEqual(text_act.metadata['text'], 'Instagram image send caption')
         self.assertEqual(text_act.metadata['message_id'], 'ig-text-100')
+
+
+class CleanupCommsMediaCommandTests(TestCase):
+    def setUp(self):
+        user_model = get_user_model()
+        self.owner = user_model.objects.create_user(
+            email='cleanup-media@example.com',
+            password='password123',
+            name='Cleanup Manager',
+            role='admin',
+        )
+        self.org = Organization.objects.create(name='Cleanup Org', slug='cleanup-org', owner=self.owner)
+        self.lead = Lead.objects.create(
+            organization=self.org,
+            contact_person='Cleanup Lead',
+            telegram_chat_id='cleanup-tg-123',
+        )
+
+    def test_cleanup_deletes_only_referenced_expired_files(self):
+        from datetime import timedelta
+
+        from django.core.management import call_command
+        from django.utils import timezone
+
+        with tempfile.TemporaryDirectory() as media_root, override_settings(MEDIA_ROOT=media_root, MEDIA_URL='/media/'):
+            comms_media_dir = os.path.join(media_root, 'comms_media')
+            os.makedirs(comms_media_dir, exist_ok=True)
+
+            expired_path = os.path.join(comms_media_dir, 'expired.jpg')
+            orphan_path = os.path.join(comms_media_dir, 'orphan.jpg')
+            fresh_path = os.path.join(comms_media_dir, 'fresh.jpg')
+            for path in (expired_path, orphan_path, fresh_path):
+                with open(path, 'wb') as file_obj:
+                    file_obj.write(b'media')
+
+            expired_activity = LeadActivity.objects.create(
+                organization=self.org,
+                lead=self.lead,
+                activity_type=LeadActivity.TYPE_TELEGRAM_RECEIVED,
+                description='[Фото получено]',
+                metadata={'media_type': 'photo', 'file_url': '/media/comms_media/expired.jpg'},
+            )
+            LeadActivity.objects.filter(id=expired_activity.id).update(
+                created_at=timezone.now() - timedelta(days=31)
+            )
+            LeadActivity.objects.create(
+                organization=self.org,
+                lead=self.lead,
+                activity_type=LeadActivity.TYPE_TELEGRAM_RECEIVED,
+                description='[Фото получено]',
+                metadata={'media_type': 'photo', 'file_url': '/media/comms_media/fresh.jpg'},
+            )
+
+            call_command('cleanup_comms_media', days=30)
+
+            self.assertFalse(os.path.exists(expired_path))
+            self.assertTrue(os.path.exists(orphan_path))
+            self.assertTrue(os.path.exists(fresh_path))
 
 

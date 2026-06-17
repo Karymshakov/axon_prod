@@ -5,6 +5,7 @@ from datetime import timedelta
 from pathlib import Path
 import sys
 import io
+from celery.schedules import crontab
 
 if sys.platform == 'win32' and not getattr(sys, '_utf8_wrapped', False):
     sys._utf8_wrapped = True
@@ -266,6 +267,11 @@ CELERY_BEAT_SCHEDULE = {
     'ai-agent-check': {
         'task': 'leads.run_agent_check',
         'schedule': AI_AGENT_BEAT_SECONDS,
+    },
+    'cleanup-expired-comms-media': {
+        'task': 'leads.cleanup_expired_comms_media',
+        'schedule': crontab(hour=3, minute=30),
+        'args': (30,),
     },
 }
 
