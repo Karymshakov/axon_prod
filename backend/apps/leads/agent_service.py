@@ -1220,7 +1220,7 @@ Return ONLY the message text, nothing else."""
             'room_type_preference': lead.room_type_preference,
             'meal_plan': lead.meal_plan,
             'source': lead.source,
-            'company_name': lead.company_name,
+            'company_name': getattr(lead, 'company_name', None) or lead.contact_person,
         }
 
         try:
