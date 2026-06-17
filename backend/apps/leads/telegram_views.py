@@ -768,8 +768,14 @@ def telegram_webhook(request):
         chat = message.get('chat', {})
         chat_id = str(chat.get('id', ''))
         text = message.get('text', '')
+        photo = message.get('photo')
+        caption = message.get('caption', '')
         from_user = message.get('from', {})
         username = from_user.get('username', '')
+
+        is_photo = bool(photo)
+        if is_photo and not text:
+            text = caption or '[Image received]'
 
         if not chat_id or not text:
             return Response({'ok': True})
@@ -857,20 +863,61 @@ def telegram_webhook(request):
             )
             return Response({'ok': True})
 
+        # Create media metadata if photo is present
+        media_metadata = {}
+        if is_photo:
+            try:
+                # Get largest photo size
+                largest_photo = photo[-1]
+                file_id = largest_photo.get('file_id')
+                file_unique_id = largest_photo.get('file_unique_id', 'photo')
+
+                # Check/create directory settings.MEDIA_ROOT / 'incoming_photos'
+                from django.conf import settings
+                incoming_dir = os.path.join(settings.MEDIA_ROOT, 'incoming_photos')
+                os.makedirs(incoming_dir, exist_ok=True)
+
+                # Secure unique filename
+                local_filename = f"tg_{message.get('message_id')}_{file_unique_id}.jpg"
+                dest_path = os.path.join(incoming_dir, local_filename)
+
+                # Download file using telegram_service
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                download_success = loop.run_until_complete(
+                    telegram_service.download_file(file_id, dest_path)
+                )
+                loop.close()
+
+                if download_success:
+                    media_metadata = {
+                        'media_type': 'photo',
+                        'file_url': f"{settings.MEDIA_URL}incoming_photos/{local_filename}"
+                    }
+                    logger.info(f"Downloaded guest photo from Telegram: {media_metadata['file_url']}")
+            except Exception as e:
+                logger.error(f"Error downloading incoming Telegram photo: {e}", exc_info=True)
+
         # Create activity for received message
+        metadata = {
+            'message': text,
+            'text': text,
+            'message_id': message.get('message_id'),
+            'chat_id': chat_id,
+            'username': username,
+            'from_user': from_user,
+        }
+        if media_metadata:
+            metadata.update(media_metadata)
+
+        desc = f"Received photo from {username or 'unknown'}" + (f": {caption}" if caption else "") if is_photo else f'Received from {username or "unknown"}: {text[:100]}{"..." if len(text) > 100 else ""}'
+
         current_activity = LeadActivity.objects.create(
             lead=lead,
             organization=lead.organization,
             activity_type='telegram_received',
-            description=f'Received from {username or "unknown"}: {text[:100]}{"..." if len(text) > 100 else ""}',
-            metadata={
-                'message': text,
-                'text': text,
-                'message_id': message.get('message_id'),
-                'chat_id': chat_id,
-                'username': username,
-                'from_user': from_user,
-            }
+            description=desc,
+            metadata=metadata
         )
         initialize_inbound_diagnostics(
             current_activity,

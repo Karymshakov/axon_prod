@@ -3595,3 +3595,146 @@ class AIConnectionAndIntentClassifierTests(TestCase):
             self.assertIn("менеджер", res.lower())
             self.assertIn("свяжется", res.lower())
             mock_exec.assert_called_once_with({'reason': 'sports_camp'}, lead=lead)
+
+
+from django.core.files.uploadedfile import SimpleUploadedFile
+import tempfile
+import os
+
+class CommsMediaTests(TestCase):
+    def setUp(self):
+        user_model = get_user_model()
+        self.owner = user_model.objects.create_user(
+            email='comms_media@example.com',
+            password='password123',
+            name='Media Manager',
+            role='admin',
+        )
+        self.org = Organization.objects.create(name='Media Org', slug='media-org', owner=self.owner)
+        self.owner.current_organization = self.org
+        self.owner.save(update_fields=['current_organization'])
+        self.lead = Lead.objects.create(
+            organization=self.org,
+            contact_person='Media Lead',
+            telegram_chat_id='tg-media-123',
+            whatsapp_phone='wa-media-123',
+        )
+        self.factory = APIRequestFactory()
+
+    def test_upload_comms_media(self):
+        from apps.leads.integration_views import upload_comms_media
+        from django.conf import settings
+        
+        file_content = b"fake image bytes"
+        uploaded_file = SimpleUploadedFile("test_photo.jpg", file_content, content_type="image/jpeg")
+        
+        request = self.factory.post('/api/leads/communications/upload-media/', {'file': uploaded_file}, format='multipart')
+        force_authenticate(request, user=self.owner)
+        
+        response = upload_comms_media(request)
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.data['success'])
+        self.assertIn('/media/comms_media/', response.data['file_url'])
+        
+        # Verify local file was created
+        rel_path = response.data['file_url']
+        if rel_path.startswith(settings.MEDIA_URL):
+            rel_path = rel_path[len(settings.MEDIA_URL):]
+        file_path = os.path.join(settings.MEDIA_ROOT, rel_path)
+        self.assertTrue(os.path.exists(file_path))
+        
+        # Clean up file
+        if os.path.exists(file_path):
+            os.remove(file_path)
+
+    @patch('apps.leads.integration_views.telegram_service.send_photo', new_callable=AsyncMock, return_value={'message_id': 88})
+    def test_send_telegram_photo_from_comms(self, send_photo_mock):
+        from apps.leads.integration_views import send_telegram_message_from_comms
+        from django.conf import settings
+        
+        # Create a temp file in comms_media to simulate uploaded file
+        comms_media_dir = os.path.join(settings.MEDIA_ROOT, 'comms_media')
+        os.makedirs(comms_media_dir, exist_ok=True)
+        file_path = os.path.join(comms_media_dir, "test_send.jpg")
+        with open(file_path, "wb") as f:
+            f.write(b"bytes")
+            
+        file_url = f"{settings.MEDIA_URL}comms_media/test_send.jpg"
+        
+        request = self.factory.post('/api/leads/communications/telegram/send/', {
+            'lead_id': self.lead.id,
+            'message': 'Check this photo out!',
+            'file_url': file_url
+        }, format='json')
+        force_authenticate(request, user=self.owner)
+        
+        response = send_telegram_message_from_comms(request)
+        self.assertEqual(response.status_code, 200)
+        
+        # Assert send_photo was called instead of send_message
+        send_photo_mock.assert_awaited_once_with(
+            self.lead.telegram_chat_id,
+            file_path,
+            caption='Check this photo out!'
+        )
+        
+        # Check activity
+        activity = LeadActivity.objects.filter(
+            lead=self.lead,
+            activity_type=LeadActivity.TYPE_TELEGRAM_SENT,
+        ).latest('id')
+        self.assertEqual(activity.metadata['media_type'], 'photo')
+        self.assertEqual(activity.metadata['file_url'], file_url)
+        self.assertEqual(activity.metadata['text'], 'Check this photo out!')
+        
+        # Clean up
+        if os.path.exists(file_path):
+            os.remove(file_path)
+
+    @patch('apps.leads.integration_views.whatsapp_service.is_configured', return_value=True)
+    @patch('apps.leads.integration_views.whatsapp_service.send_photo', return_value={'message_id': 'wa-photo-99'})
+    def test_send_whatsapp_photo_from_comms(self, send_photo_mock, _configured_mock):
+        from apps.leads.integration_views import send_whatsapp_message_from_comms
+        from django.conf import settings
+        
+        # Create a temp file in comms_media to simulate uploaded file
+        comms_media_dir = os.path.join(settings.MEDIA_ROOT, 'comms_media')
+        os.makedirs(comms_media_dir, exist_ok=True)
+        file_path = os.path.join(comms_media_dir, "test_wa_send.jpg")
+        with open(file_path, "wb") as f:
+            f.write(b"bytes")
+            
+        file_url = f"{settings.MEDIA_URL}comms_media/test_wa_send.jpg"
+        
+        request = self.factory.post('/api/leads/communications/whatsapp/send/', {
+            'lead_id': self.lead.id,
+            'message': 'WhatsApp image send caption',
+            'file_url': file_url
+        }, format='json')
+        force_authenticate(request, user=self.owner)
+        
+        response = send_whatsapp_message_from_comms(request)
+        self.assertEqual(response.status_code, 200)
+        
+        # Assert send_photo was called
+        send_photo_mock.assert_called_once_with(
+            self.lead.whatsapp_phone,
+            file_path,
+            caption='WhatsApp image send caption',
+            org=self.org,
+            raise_exception=True
+        )
+        
+        # Check activity
+        activity = LeadActivity.objects.filter(
+            lead=self.lead,
+            activity_type=LeadActivity.TYPE_WHATSAPP_SENT,
+        ).latest('id')
+        self.assertEqual(activity.metadata['media_type'], 'photo')
+        self.assertEqual(activity.metadata['file_url'], file_url)
+        self.assertEqual(activity.metadata['text'], 'WhatsApp image send caption')
+        
+        # Clean up
+        if os.path.exists(file_path):
+            os.remove(file_path)
+

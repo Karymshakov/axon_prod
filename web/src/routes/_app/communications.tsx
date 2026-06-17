@@ -17,7 +17,9 @@ import {
   InfoIcon,
   SlidersHorizontalIcon,
   ScrollTextIcon,
-  ArrowLeftIcon
+  ArrowLeftIcon,
+  PaperclipIcon,
+  XIcon
 } from 'lucide-react'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Input } from '@/components/ui/input'
@@ -35,6 +37,7 @@ import {
   sendTelegramMessageFromComms,
   sendInstagramMessageFromComms,
   sendWhatsAppMessageFromComms,
+  uploadCommsMedia,
   fetchLeadActivities,
   fetchCommunicationsUnreadCounts,
   markCommunicationsRead,
@@ -146,6 +149,30 @@ function CommunicationsPage() {
   const [isTogglingAi, setIsTogglingAi] = useState(false)
   const [isResettingAiMemory, setIsResettingAiMemory] = useState(false)
   const [resetTarget, setResetTarget] = useState<ResetTarget | null>(null)
+
+  const [attachment, setAttachment] = useState<File | null>(null)
+  const [attachmentPreview, setAttachmentPreview] = useState<string | null>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (file) {
+      setAttachment(file)
+      const reader = new FileReader()
+      reader.onloadend = () => {
+        setAttachmentPreview(reader.result as string)
+      }
+      reader.readAsDataURL(file)
+    }
+  }
+
+  const handleRemoveAttachment = () => {
+    setAttachment(null)
+    setAttachmentPreview(null)
+    if (fileInputRef.current) {
+      fileInputRef.current.value = ''
+    }
+  }
 
   // Channel override for leads with multiple communication channels
   const [overrideChannel, setOverrideChannel] = useState<ConversationChannel | null>(null)
@@ -432,25 +459,36 @@ function CommunicationsPage() {
 
   // Send message router
   const handleSendMessage = async () => {
-    if (!selectedLead || !message.trim()) {
-      toast.error('Пожалуйста, введите сообщение')
+    if (!selectedLead || (!message.trim() && !attachment)) {
+      toast.error('Пожалуйста, введите сообщение или прикрепите фото')
       return
     }
 
     setIsSending(true)
     try {
+      let fileUrl: string | undefined = undefined
+      if (attachment) {
+        const uploadRes = await uploadCommsMedia(attachment)
+        if (uploadRes && uploadRes.success) {
+          fileUrl = uploadRes.file_url
+        } else {
+          throw new Error('Не удалось загрузить изображение на сервер')
+        }
+      }
+
       let response
       if (activeChannel === 'telegram') {
-        response = await sendTelegramMessageFromComms(selectedLead.id, message)
+        response = await sendTelegramMessageFromComms(selectedLead.id, message, fileUrl)
       } else if (activeChannel === 'instagram') {
         response = await sendInstagramMessageFromComms(selectedLead.id, message)
       } else if (activeChannel === 'whatsapp') {
-        response = await sendWhatsAppMessageFromComms(selectedLead.id, message)
+        response = await sendWhatsAppMessageFromComms(selectedLead.id, message, fileUrl)
       }
 
       if (response?.success) {
         toast.success('Сообщение успешно отправлено')
         setMessage('')
+        handleRemoveAttachment()
         await refetchActivities()
       } else {
         toast.error(response?.error || 'Не удалось отправить сообщение')
@@ -948,7 +986,42 @@ function CommunicationsPage() {
                       </div>
                     </PopoverContent>
                   </Popover>
+
+                  {/* Attach File Button */}
+                  {(activeChannel === 'telegram' || activeChannel === 'whatsapp') && (
+                    <>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        ref={fileInputRef}
+                        onChange={handleFileChange}
+                        className="hidden"
+                      />
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className={`h-8 gap-1.5 ${attachment ? 'text-primary border-primary bg-primary/5' : 'text-muted-foreground hover:text-foreground'}`}
+                        onClick={() => fileInputRef.current?.click()}
+                      >
+                        <PaperclipIcon className="h-4 w-4" />
+                        Фото
+                      </Button>
+                    </>
+                  )}
                 </div>
+
+                {/* Attachment Preview */}
+                {attachmentPreview && (
+                  <div className="relative inline-block border rounded-xl overflow-hidden bg-muted p-1 max-w-[200px]">
+                    <img src={attachmentPreview} alt="Превью" className="max-h-28 rounded-lg object-cover" />
+                    <button
+                      onClick={handleRemoveAttachment}
+                      className="absolute top-2 right-2 bg-background/80 hover:bg-background rounded-full p-1 shadow-sm transition-colors text-muted-foreground hover:text-foreground"
+                    >
+                      <XIcon className="h-3 w-3" />
+                    </button>
+                  </div>
+                )}
 
                 {/* Chat text area input */}
                 <div className="flex gap-2 items-end">
@@ -968,7 +1041,7 @@ function CommunicationsPage() {
                   </div>
                   <Button
                     onClick={handleSendMessage}
-                    disabled={!message.trim() || isSending}
+                    disabled={(!message.trim() && !attachment) || isSending}
                     size="icon"
                     className="h-10 w-10 shrink-0 bg-primary hover:bg-primary/95 text-primary-foreground shadow"
                   >

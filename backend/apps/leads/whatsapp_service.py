@@ -1,3 +1,5 @@
+import os
+import mimetypes
 import logging
 import requests
 from typing import Optional
@@ -139,6 +141,124 @@ class WhatsAppService:
         except requests.exceptions.RequestException as e:
             logger.error(f"Failed to get WhatsApp phone number info: {e}")
             return None
+
+    def upload_media(self, file_path: str, mime_type: str = 'image/jpeg', org=None) -> Optional[str]:
+        """
+        Upload media to Meta WhatsApp Business API.
+
+        Returns:
+            Media ID if successful, None otherwise
+        """
+        if not self.is_configured(org):
+            logger.error("WhatsApp not configured")
+            return None
+        try:
+            url = f"https://graph.facebook.com/{GRAPH_API_VERSION}/{self.phone_number_id}/media"
+            headers = {
+                'Authorization': f'Bearer {self.access_token}',
+            }
+            with open(file_path, 'rb') as f:
+                files = {
+                    'file': (os.path.basename(file_path), f, mime_type)
+                }
+                data = {
+                    'messaging_product': 'whatsapp'
+                }
+                response = requests.post(url, headers=headers, files=files, data=data, timeout=20)
+                response.raise_for_status()
+                return response.json().get('id')
+        except Exception as e:
+            logger.error(f"Failed to upload WhatsApp media {file_path}: {e}", exc_info=True)
+            return None
+
+    def send_photo(self, recipient_phone: str, file_path: str, caption: str = None, org=None, raise_exception: bool = False) -> Optional[dict]:
+        """
+        Upload a local photo file and send it as a WhatsApp message.
+        """
+        if not self.is_configured(org):
+            logger.error("WhatsApp not configured")
+            return None
+
+        # Guess mime type or use default image/jpeg
+        mime_type, _ = mimetypes.guess_type(file_path)
+        if not mime_type:
+            mime_type = 'image/jpeg'
+
+        media_id = self.upload_media(file_path, mime_type=mime_type, org=org)
+        if not media_id:
+            logger.error("Failed to upload WhatsApp photo media")
+            if raise_exception:
+                raise Exception("Failed to upload media to WhatsApp Cloud API")
+            return None
+
+        try:
+            url = f"https://graph.facebook.com/{GRAPH_API_VERSION}/{self.phone_number_id}/messages"
+            headers = {
+                'Authorization': f'Bearer {self.access_token}',
+                'Content-Type': 'application/json'
+            }
+            formatted_phone = recipient_phone.replace('+', '').replace('-', '').replace(' ', '')
+
+            payload = {
+                "messaging_product": "whatsapp",
+                "recipient_type": "individual",
+                "to": formatted_phone,
+                "type": "image",
+                "image": {
+                    "id": media_id,
+                }
+            }
+            if caption:
+                payload["image"]["caption"] = caption
+
+            response = requests.post(url, json=payload, headers=headers, timeout=15)
+            response.raise_for_status()
+            result = response.json()
+            message_id = result.get('messages', [{}])[0].get('id')
+
+            return {
+                'recipient_phone': recipient_phone,
+                'message_id': message_id,
+                'media_id': media_id,
+            }
+        except Exception as e:
+            logger.error(f"Failed to send WhatsApp photo to {recipient_phone}: {e}")
+            if raise_exception:
+                raise
+            return None
+
+    def download_media(self, media_id: str, dest_path: str, org=None) -> bool:
+        """Download media from WhatsApp Cloud API using its media_id."""
+        if not self.is_configured(org):
+            logger.error("WhatsApp not configured")
+            return False
+        try:
+            headers = {
+                'Authorization': f'Bearer {self.access_token}',
+            }
+            # Step 1: Get media URL
+            url = f"https://graph.facebook.com/{GRAPH_API_VERSION}/{media_id}"
+            response = requests.get(url, headers=headers, timeout=10)
+            response.raise_for_status()
+            media_info = response.json()
+            download_url = media_info.get('url')
+            if not download_url:
+                logger.error(f"No media download URL found for ID {media_id}")
+                return False
+
+            # Step 2: Download media file
+            media_response = requests.get(download_url, headers=headers, timeout=20)
+            media_response.raise_for_status()
+
+            # Save the file
+            os.makedirs(os.path.dirname(dest_path), exist_ok=True)
+            with open(dest_path, 'wb') as f:
+                f.write(media_response.content)
+            logger.info(f"Successfully downloaded WhatsApp media {media_id} to {dest_path}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to download WhatsApp media {media_id}: {e}", exc_info=True)
+            return False
 
 
 # Singleton instance

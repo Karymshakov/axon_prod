@@ -276,11 +276,12 @@ def send_telegram_message_from_comms(request):
     """Send a Telegram message from the communications page."""
     lead_id = request.data.get('lead_id')
     message_text = request.data.get('message', '').strip()
+    file_url = request.data.get('file_url')
 
-    if not lead_id or not message_text:
+    if not lead_id or (not message_text and not file_url):
         return Response({
             'success': False,
-            'error': 'Lead ID and message are required'
+            'error': 'Lead ID and message (or file) are required'
         }, status=status.HTTP_400_BAD_REQUEST)
 
     try:
@@ -295,13 +296,35 @@ def send_telegram_message_from_comms(request):
                 'error': 'This lead does not have a Telegram chat ID configured'
             }, status=status.HTTP_400_BAD_REQUEST)
 
-        # Send message using async
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        result = loop.run_until_complete(
-            telegram_service.send_message(lead.telegram_chat_id, message_text)
-        )
-        loop.close()
+        # Send photo or message
+        if file_url:
+            from django.conf import settings
+            # Construct local file path
+            rel_path = file_url
+            if rel_path.startswith(settings.MEDIA_URL):
+                rel_path = rel_path[len(settings.MEDIA_URL):]
+            file_path = os.path.join(settings.MEDIA_ROOT, rel_path)
+
+            if not os.path.exists(file_path):
+                return Response({
+                    'success': False,
+                    'error': f'File not found: {file_url}'
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            result = loop.run_until_complete(
+                telegram_service.send_photo(lead.telegram_chat_id, file_path, caption=message_text or None)
+            )
+            loop.close()
+        else:
+            # Send message using async
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            result = loop.run_until_complete(
+                telegram_service.send_message(lead.telegram_chat_id, message_text)
+            )
+            loop.close()
 
         if not result:
             return Response({
@@ -325,16 +348,29 @@ def send_telegram_message_from_comms(request):
             )
 
         # Log activity
-        LeadActivity.objects.create(
-            lead=lead,
-            organization=lead.organization,
-            activity_type=LeadActivity.TYPE_TELEGRAM_SENT,
-            description=f"Sent Telegram message: {message_text[:100]}{'...' if len(message_text) > 100 else ''}",
-            metadata={
+        if file_url:
+            desc = f"Sent Telegram photo: {message_text[:100]}" if message_text else "Sent Telegram photo"
+            metadata = {
+                'message_id': result.get('message_id'),
+                'text': message_text,
+                'media_type': 'photo',
+                'file_url': file_url,
+                'is_manager_manual': True,
+            }
+        else:
+            desc = f"Sent Telegram message: {message_text[:100]}{'...' if len(message_text) > 100 else ''}"
+            metadata = {
                 'message_id': result.get('message_id'),
                 'text': message_text,
                 'is_manager_manual': True,
             }
+
+        LeadActivity.objects.create(
+            lead=lead,
+            organization=lead.organization,
+            activity_type=LeadActivity.TYPE_TELEGRAM_SENT,
+            description=desc,
+            metadata=metadata
         )
 
         return Response({
@@ -705,11 +741,12 @@ def send_whatsapp_message_from_comms(request):
     """Send a WhatsApp message from the communications page."""
     lead_id = request.data.get('lead_id')
     message_text = request.data.get('message', '').strip()
+    file_url = request.data.get('file_url')
 
-    if not lead_id or not message_text:
+    if not lead_id or (not message_text and not file_url):
         return Response({
             'success': False,
-            'error': 'Lead ID and message are required'
+            'error': 'Lead ID and message (or file) are required'
         }, status=status.HTTP_400_BAD_REQUEST)
 
     try:
@@ -732,8 +769,24 @@ def send_whatsapp_message_from_comms(request):
                 'error': 'WhatsApp is not configured. Please connect your WhatsApp Business Account in Settings.'
             }, status=status.HTTP_400_BAD_REQUEST)
 
-        # Send the message
-        result = whatsapp_service.send_message(lead.whatsapp_phone, message_text, org=org, raise_exception=True)
+        # Send message (photo or text)
+        if file_url:
+            from django.conf import settings
+            # Construct local file path
+            rel_path = file_url
+            if rel_path.startswith(settings.MEDIA_URL):
+                rel_path = rel_path[len(settings.MEDIA_URL):]
+            file_path = os.path.join(settings.MEDIA_ROOT, rel_path)
+
+            if not os.path.exists(file_path):
+                return Response({
+                    'success': False,
+                    'error': f'File not found: {file_url}'
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+            result = whatsapp_service.send_photo(lead.whatsapp_phone, file_path, caption=message_text or None, org=org, raise_exception=True)
+        else:
+            result = whatsapp_service.send_message(lead.whatsapp_phone, message_text, org=org, raise_exception=True)
 
         if not result:
             return Response({
@@ -757,16 +810,29 @@ def send_whatsapp_message_from_comms(request):
             )
 
         # Create activity record
-        LeadActivity.objects.create(
-            lead=lead,
-            organization=org,
-            activity_type=LeadActivity.TYPE_WHATSAPP_SENT,
-            description=f'WhatsApp message sent: {message_text[:100]}{"..." if len(message_text) > 100 else ""}',
-            metadata={
+        if file_url:
+            desc = f"WhatsApp photo sent: {message_text[:100]}" if message_text else "WhatsApp photo sent"
+            metadata = {
+                'message_id': result.get('message_id'),
+                'text': message_text,
+                'media_type': 'photo',
+                'file_url': file_url,
+                'is_manager_manual': True,
+            }
+        else:
+            desc = f'WhatsApp message sent: {message_text[:100]}{"..." if len(message_text) > 100 else ""}'
+            metadata = {
                 'message_id': result.get('message_id'),
                 'text': message_text,
                 'is_manager_manual': True,
             }
+
+        LeadActivity.objects.create(
+            lead=lead,
+            organization=org,
+            activity_type=LeadActivity.TYPE_WHATSAPP_SENT,
+            description=desc,
+            metadata=metadata
         )
 
         logger.info(f"Sent WhatsApp message to lead {lead.id}")
@@ -1313,3 +1379,49 @@ def ringcentral_ringout(request):
             'success': False,
             'error': str(e),
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['POST'])
+def upload_comms_media(request):
+    """
+    Upload a media file (e.g. photo) from the CRM communications panel.
+    Saves the file to settings.MEDIA_ROOT / 'comms_media' / and returns its URL.
+    """
+    import uuid
+    try:
+        from django.conf import settings
+        
+        uploaded_file = request.FILES.get('file')
+        if not uploaded_file:
+            return Response({
+                'success': False,
+                'error': 'No file provided'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Ensure directory exists
+        comms_media_dir = os.path.join(settings.MEDIA_ROOT, 'comms_media')
+        os.makedirs(comms_media_dir, exist_ok=True)
+
+        # Generate a secure unique filename
+        ext = os.path.splitext(uploaded_file.name)[1]
+        unique_filename = f"{uuid.uuid4()}{ext}"
+        file_path = os.path.join(comms_media_dir, unique_filename)
+
+        with open(file_path, 'wb+') as destination:
+            for chunk in uploaded_file.chunks():
+                destination.write(chunk)
+
+        # Construct file URL
+        file_url = f"{settings.MEDIA_URL}comms_media/{unique_filename}"
+
+        return Response({
+            'success': True,
+            'file_url': file_url
+        })
+    except Exception as e:
+        logger.error(f"Error uploading comms media: {e}", exc_info=True)
+        return Response({
+            'success': False,
+            'error': str(e)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+

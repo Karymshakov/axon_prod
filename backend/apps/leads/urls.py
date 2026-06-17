@@ -42,6 +42,7 @@ from .integration_views import (
     save_whatsapp_direct_config,
     resubscribe_instagram_webhook,
     send_whatsapp_message_from_comms,
+    upload_comms_media,
     send_telegram_to_customer,
     send_instagram_to_customer,
     send_whatsapp_to_customer,
@@ -117,4 +118,5 @@ urlpatterns = [
     path('integrations/ringcentral/reregister-webhook/', reregister_ringcentral_webhook, name='reregister-ringcentral-webhook'),
     path('communications/ringcentral/send-sms/', send_ringcentral_sms_from_comms, name='send-ringcentral-sms-comms'),
     path('communications/ringcentral/ringout/', ringcentral_ringout, name='ringcentral-ringout'),
+    path('communications/upload-media/', upload_comms_media, name='upload-comms-media'),
 ]

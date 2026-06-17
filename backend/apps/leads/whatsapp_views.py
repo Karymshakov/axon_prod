@@ -532,14 +532,21 @@ def whatsapp_webhook(request):
                         contact_lookup[wa_id] = contact.get('profile', {}).get('name', '')
 
                 for message in messages:
-                    # Only handle text messages for now
-                    if message.get('type') != 'text':
+                    msg_type = message.get('type')
+                    if msg_type not in ('text', 'image'):
                         continue
 
                     sender_phone = message.get('from', '')
                     message_id = message.get('id', '')
-                    message_text = message.get('text', {}).get('body', '')
                     contact_name = contact_lookup.get(sender_phone, '')
+
+                    is_photo = (msg_type == 'image')
+                    caption = ''
+                    if is_photo:
+                        caption = message.get('image', {}).get('caption', '')
+                        message_text = caption or '[Image received]'
+                    else:
+                        message_text = message.get('text', {}).get('body', '')
 
                     if not sender_phone or not message_text:
                         continue
@@ -585,19 +592,49 @@ def whatsapp_webhook(request):
                         logger.info(f"Skipping duplicate WhatsApp message {message_id}")
                         continue
 
+                    # Download media if photo
+                    media_metadata = {}
+                    if is_photo:
+                        try:
+                            media_id = message.get('image', {}).get('id')
+                            if media_id:
+                                import os
+                                from django.conf import settings
+                                incoming_dir = os.path.join(settings.MEDIA_ROOT, 'incoming_photos')
+                                os.makedirs(incoming_dir, exist_ok=True)
+
+                                local_filename = f"wa_{message_id}.jpg"
+                                dest_path = os.path.join(incoming_dir, local_filename)
+
+                                download_success = whatsapp_service.download_media(media_id, dest_path, org=_wa_org)
+                                if download_success:
+                                    media_metadata = {
+                                        'media_type': 'photo',
+                                        'file_url': f"{settings.MEDIA_URL}incoming_photos/{local_filename}"
+                                    }
+                                    logger.info(f"Downloaded guest photo from WhatsApp: {media_metadata['file_url']}")
+                        except Exception as e:
+                            logger.error(f"Error downloading incoming WhatsApp photo: {e}", exc_info=True)
+
                     # Create activity for received message
+                    metadata = {
+                        'message': message_text,
+                        'text': message_text,
+                        'message_id': message_id,
+                        'sender_phone': sender_phone,
+                        'contact_name': contact_name,
+                    }
+                    if media_metadata:
+                        metadata.update(media_metadata)
+
+                    desc = f"Received photo from WhatsApp" + (f": {caption}" if is_photo and caption else "") if is_photo else f'Received from WhatsApp: {message_text[:100]}{"..." if len(message_text) > 100 else ""}'
+
                     current_activity = LeadActivity.objects.create(
                         lead=lead,
                         organization=_wa_org,
                         activity_type=LeadActivity.TYPE_WHATSAPP_RECEIVED,
-                        description=f'Received from WhatsApp: {message_text[:100]}{"..." if len(message_text) > 100 else ""}',
-                        metadata={
-                            'message': message_text,
-                            'text': message_text,
-                            'message_id': message_id,
-                            'sender_phone': sender_phone,
-                            'contact_name': contact_name,
-                        }
+                        description=desc,
+                        metadata=metadata
                     )
                     initialize_inbound_diagnostics(
                         current_activity,

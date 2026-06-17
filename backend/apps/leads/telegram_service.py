@@ -264,6 +264,20 @@ class TelegramService:
             logger.error(f"Failed to get bot info: {e}")
             return None
 
+    async def download_file(self, file_id: str, dest_path: str) -> bool:
+        """Download a file from Telegram using its file_id."""
+        bot = await self._get_bot()
+        if not bot:
+            logger.error("Telegram bot not configured")
+            return False
+        try:
+            file_obj = await bot.get_file(file_id)
+            await file_obj.download_to_drive(dest_path)
+            return True
+        except Exception as e:
+            logger.error(f"Failed to download Telegram file {file_id}: {e}")
+            return False
+
 
 # Singleton instance
 telegram_service = TelegramService()

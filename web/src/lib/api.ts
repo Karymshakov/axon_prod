@@ -463,8 +463,8 @@ export interface SendTelegramMessageResponse {
   error?: string
 }
 
-export function sendTelegramMessageFromComms(leadId: number, message: string) {
-  return api.post<SendTelegramMessageResponse>('/communications/telegram/send/', { lead_id: leadId, message })
+export function sendTelegramMessageFromComms(leadId: number, message: string, fileUrl?: string) {
+  return api.post<SendTelegramMessageResponse>('/communications/telegram/send/', { lead_id: leadId, message, file_url: fileUrl })
 }
 
 // Instagram Integration types
@@ -571,8 +571,8 @@ export function saveWhatsAppAppCredentials(data: { app_id?: string; app_secret: 
   return api.post<{ success: boolean }>('/integrations/whatsapp/save-app-credentials/', data)
 }
 
-export function sendWhatsAppMessageFromComms(leadId: number, message: string) {
-  return api.post<SendWhatsAppMessageResponse>('/communications/whatsapp/send/', { lead_id: leadId, message })
+export function sendWhatsAppMessageFromComms(leadId: number, message: string, fileUrl?: string) {
+  return api.post<SendWhatsAppMessageResponse>('/communications/whatsapp/send/', { lead_id: leadId, message, file_url: fileUrl })
 }
 
 // Pipeline Stage types
@@ -2024,4 +2024,13 @@ export function superAdminImpersonate(userId: number) {
   return api.post<{ access: string; refresh: string; user_id: number; email: string }>(
     `/organizations/__superadmin/impersonate/${userId}/`, {}
   )
+}
+
+export function uploadCommsMedia(file: File) {
+  const formData = new FormData()
+  formData.append('file', file)
+  return apiFetch<{ success: boolean; file_url: string }>('/communications/upload-media/', {
+    method: 'POST',
+    body: formData,
+  })
 }
