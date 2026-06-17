@@ -1,7 +1,7 @@
 import { createFileRoute, useNavigate } from '@tanstack/react-router'
 import { useLanguage } from '@/contexts/language-context'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { useState, useMemo } from 'react'
+import { useEffect, useState, useMemo } from 'react'
 import { PlusIcon, PencilIcon, TrashIcon, LayoutGridIcon, LayoutListIcon, SearchIcon, XIcon, InstagramIcon, MessageSquareIcon, PhoneIcon } from 'lucide-react'
 import {
   CONTACT_CHANNEL_OPTIONS,
@@ -41,6 +41,7 @@ import { LeadDialog } from '@/components/lead-dialog'
 import { LeadDetailsSidebar } from '@/components/lead-details-sidebar'
 import { toast } from 'sonner'
 import { ConfirmationDialog } from '@/components/confirmation-dialog'
+import { useAuth } from '@/contexts/auth-context'
 import {
   DndContext,
   DragEndEvent,
@@ -69,6 +70,73 @@ const getStatusColor = (statusKey: string): 'default' | 'secondary' | 'destructi
   return colorMap[statusKey] || 'default'
 }
 
+type LeadsViewMode = 'table' | 'kanban'
+
+const KANBAN_STAGE_TONES = [
+  {
+    accent: 'bg-blue-500',
+    header: 'border-blue-200 bg-blue-50/70 text-blue-950 dark:border-blue-900/50 dark:bg-blue-950/20 dark:text-blue-100',
+    drop: 'border-blue-300 bg-blue-50/60 dark:border-blue-800 dark:bg-blue-950/20',
+  },
+  {
+    accent: 'bg-violet-500',
+    header: 'border-violet-200 bg-violet-50/70 text-violet-950 dark:border-violet-900/50 dark:bg-violet-950/20 dark:text-violet-100',
+    drop: 'border-violet-300 bg-violet-50/60 dark:border-violet-800 dark:bg-violet-950/20',
+  },
+  {
+    accent: 'bg-amber-500',
+    header: 'border-amber-200 bg-amber-50/70 text-amber-950 dark:border-amber-900/50 dark:bg-amber-950/20 dark:text-amber-100',
+    drop: 'border-amber-300 bg-amber-50/60 dark:border-amber-800 dark:bg-amber-950/20',
+  },
+  {
+    accent: 'bg-emerald-500',
+    header: 'border-emerald-200 bg-emerald-50/70 text-emerald-950 dark:border-emerald-900/50 dark:bg-emerald-950/20 dark:text-emerald-100',
+    drop: 'border-emerald-300 bg-emerald-50/60 dark:border-emerald-800 dark:bg-emerald-950/20',
+  },
+  {
+    accent: 'bg-slate-500',
+    header: 'border-slate-200 bg-slate-50/80 text-slate-950 dark:border-slate-800 dark:bg-slate-950/25 dark:text-slate-100',
+    drop: 'border-slate-300 bg-slate-50/60 dark:border-slate-700 dark:bg-slate-950/20',
+  },
+]
+
+function getKanbanStageTone(statusKey: string, index: number) {
+  const knownToneByKey: Record<string, number> = {
+    new: 0,
+    attempted: 1,
+    contacted: 1,
+    nurturing: 2,
+    converted: 3,
+    won: 3,
+    done: 3,
+    unqualified: 4,
+    lost: 4,
+  }
+  return KANBAN_STAGE_TONES[knownToneByKey[statusKey] ?? (index % KANBAN_STAGE_TONES.length)]
+}
+
+function getLeadsViewStorageKey(userId: number | undefined) {
+  if (!userId) return null
+  return `leads:view:${userId}`
+}
+
+function getLegacyLeadsViewStorageKey(userId: number | undefined, orgSlug: string | null | undefined) {
+  if (!userId) return null
+  return `leads:view:${userId}:${orgSlug || 'default'}`
+}
+
+function readStoredLeadsView(userId: number | undefined, orgSlug: string | null | undefined): LeadsViewMode | null {
+  if (typeof window === 'undefined') return null
+
+  const storageKey = getLeadsViewStorageKey(userId)
+  const legacyStorageKey = getLegacyLeadsViewStorageKey(userId, orgSlug)
+  const savedView = storageKey ? window.localStorage.getItem(storageKey) : null
+  const legacySavedView = legacyStorageKey ? window.localStorage.getItem(legacyStorageKey) : null
+  const view = savedView || legacySavedView
+
+  return view === 'table' || view === 'kanban' ? view : null
+}
+
 function DraggableLeadCard({
   lead,
   onEdit,
@@ -90,12 +158,19 @@ function DraggableLeadCard({
   const style = transform
     ? {
         transform: `translate3d(${transform.x}px, ${transform.y}px, 0)`,
-        opacity: isDragging ? 0.5 : 1,
+        opacity: isDragging ? 0.45 : 1,
+        transition: isDragging ? undefined : 'transform 200ms cubic-bezier(0.2, 0, 0, 1), opacity 140ms ease',
       }
     : undefined
 
   return (
-    <div ref={setNodeRef} style={style} {...attributes} {...listeners}>
+    <div
+      ref={setNodeRef}
+      style={style}
+      {...attributes}
+      {...listeners}
+      className={`touch-none will-change-transform ${isDragging ? 'scale-[0.98]' : 'transition-transform duration-200 ease-out'}`}
+    >
       <LeadCard
         lead={lead}
         onEdit={onEdit}
@@ -109,9 +184,11 @@ function DraggableLeadCard({
 
 function DroppableColumn({
   statusKey,
+  tone,
   children,
 }: {
   statusKey: string
+  tone: { drop: string }
   children: React.ReactNode
 }) {
   const { setNodeRef, isOver } = useDroppable({
@@ -122,8 +199,8 @@ function DroppableColumn({
   return (
     <div
       ref={setNodeRef}
-      className={`flex min-w-0 flex-col gap-3 rounded-lg border-2 border-dashed p-4 min-h-[200px] transition-colors ${
-        isOver ? 'border-primary bg-primary/5' : ''
+      className={`flex max-h-[calc(100vh-245px)] min-h-[240px] min-w-0 flex-1 flex-col gap-1.5 overflow-y-auto rounded-md border border-dashed p-2 transition-all duration-200 ${
+        isOver ? `${tone.drop} shadow-inner ring-2 ring-primary/25 scale-[1.01]` : 'border-border/70 bg-background/70'
       }`}
     >
       {children}
@@ -133,7 +210,10 @@ function DroppableColumn({
 
 function LeadsPage() {
   const { t } = useLanguage()
-  const [view, setView] = useState<'table' | 'kanban'>('table')
+  const { user } = useAuth()
+  const [view, setView] = useState<LeadsViewMode>(() => (
+    readStoredLeadsView(user?.id, user?.current_organization_slug) || 'table'
+  ))
   const [searchQuery, setSearchQuery] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
   const [channelFilter, setChannelFilter] = useState('')
@@ -148,6 +228,28 @@ function LeadsPage() {
   const queryClient = useQueryClient()
   const navigate = useNavigate()
   const discoverySourceOptions = useLeadDiscoverySources()
+  const viewStorageKey = useMemo(
+    () => getLeadsViewStorageKey(user?.id),
+    [user?.id],
+  )
+
+  useEffect(() => {
+    const savedView = readStoredLeadsView(user?.id, user?.current_organization_slug)
+    if (savedView) {
+      setView(savedView)
+      if (viewStorageKey) {
+        window.localStorage.setItem(viewStorageKey, savedView)
+      }
+    }
+  }, [user?.id, user?.current_organization_slug, viewStorageKey])
+
+  const handleViewChange = (nextView: string) => {
+    if (nextView !== 'table' && nextView !== 'kanban') return
+    setView(nextView)
+    if (viewStorageKey) {
+      window.localStorage.setItem(viewStorageKey, nextView)
+    }
+  }
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -211,12 +313,28 @@ function LeadsPage() {
   const updateLeadMutation = useMutation({
     mutationFn: ({ id, data }: { id: number; data: Record<string, unknown> }) =>
       updateLead(id, data),
+    onMutate: async ({ id, data }) => {
+      await queryClient.cancelQueries({ queryKey: ['leads'] })
+      const previousLeads = queryClient.getQueriesData<Lead[]>({ queryKey: ['leads'] })
+
+      queryClient.setQueriesData<Lead[]>({ queryKey: ['leads'] }, (currentLeads) => {
+        if (!currentLeads) return currentLeads
+        return currentLeads.map((lead) => (
+          lead.id === id ? { ...lead, ...data } : lead
+        ))
+      })
+
+      return { previousLeads }
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['leads'] })
       queryClient.invalidateQueries({ queryKey: ['lead-stats'] })
       toast.success('Лид обновлен')
     },
-    onError: () => {
+    onError: (_error, _variables, context) => {
+      context?.previousLeads.forEach(([queryKey, data]) => {
+        queryClient.setQueryData(queryKey, data)
+      })
       toast.error('Не удалось обновить лид')
     },
   })
@@ -389,6 +507,7 @@ function LeadsPage() {
       collisionDetection={closestCorners}
       onDragStart={handleDragStart}
       onDragEnd={handleDragEnd}
+      onDragCancel={() => setActiveLead(null)}
     >
       <div className="flex flex-1 flex-col min-w-0 bg-muted/40">
         <div className="flex flex-1 flex-col gap-2 min-w-0">
@@ -404,7 +523,7 @@ function LeadsPage() {
                     </p>
                   </div>
                   <div className="flex items-center gap-2">
-                    <ToggleGroup type="single" value={view} onValueChange={(v) => v && setView(v as 'table' | 'kanban')}>
+                    <ToggleGroup type="single" value={view} onValueChange={handleViewChange}>
                       <ToggleGroupItem value="table" aria-label="Список">
                         <LayoutListIcon className="h-4 w-4" />
                       </ToggleGroupItem>
@@ -646,18 +765,25 @@ function LeadsPage() {
               </div>
             ) : (
               <div className="px-4 lg:px-6">
-                <div className="flex gap-3 sm:gap-4 overflow-x-auto pb-2">
-                  {leadsByStatus.map((column) => (
-                    <div key={column.key} className="flex min-w-[240px] sm:min-w-[280px] flex-shrink-0 flex-col gap-3">
-                      <div className="flex items-center justify-between">
-                        <h3 className="text-sm sm:text-base font-semibold">{column.label}</h3>
-                        <span className="text-xs sm:text-sm text-muted-foreground">
-                          {column.leads.length}
-                        </span>
+                <div className="flex gap-2.5 overflow-x-auto pb-2">
+                  {leadsByStatus.map((column, index) => {
+                    const tone = getKanbanStageTone(column.key, index)
+                    return (
+                    <div key={column.key} className="flex min-w-[215px] flex-shrink-0 flex-col gap-1.5 sm:min-w-[235px]">
+                      <div className={`rounded-md border px-2.5 py-2 shadow-sm ${tone.header}`}>
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="flex min-w-0 items-center gap-2">
+                            <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${tone.accent}`} />
+                            <h3 className="truncate text-[13px] font-semibold">{column.label}</h3>
+                          </div>
+                          <span className="rounded-full bg-background/80 px-2 py-0.5 text-xs font-semibold text-muted-foreground">
+                            {column.leads.length}
+                          </span>
+                        </div>
                       </div>
-                      <DroppableColumn statusKey={column.key}>
+                      <DroppableColumn statusKey={column.key} tone={tone}>
                         {column.leads.length === 0 ? (
-                          <p className="text-center text-sm text-muted-foreground py-8">
+                          <p className="rounded-md border border-dashed bg-muted/30 px-3 py-5 text-center text-xs text-muted-foreground">
                             {t('leads.noLeads')}
                           </p>
                         ) : (
@@ -675,7 +801,8 @@ function LeadsPage() {
                         )}
                       </DroppableColumn>
                     </div>
-                  ))}
+                    )
+                  })}
                 </div>
               </div>
             )}

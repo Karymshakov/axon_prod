@@ -281,6 +281,8 @@ export interface Lead {
   unsubscribed_at: string | null
   // Sales Process
   next_follow_up_date: string | null
+  next_follow_up_at: string | null
+  next_follow_up_hint: string
   expected_close_date: string | null
   lost_reason: string
   competitor: string
@@ -316,6 +318,8 @@ export interface Lead {
   // Computed fields
   latest_note: string
   active_goals_count: number
+  active_tasks_count: number
+  overdue_tasks_count: number
   agent_context?: Record<string, any>
   last_contact_channel?: { channel: string; contact: string } | null
 }

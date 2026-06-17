@@ -1,3 +1,4 @@
+from django.utils import timezone
 from rest_framework import serializers
 from .models import Lead, PipelineStage, Segment, Customer, LeadNote, LeadActivity, Task, LeadGoal, AIConfig
 
@@ -40,6 +41,8 @@ class LeadSerializer(serializers.ModelSerializer):
     latest_note = serializers.SerializerMethodField()
     last_contact_channel = serializers.SerializerMethodField()
     active_goals_count = serializers.SerializerMethodField()
+    active_tasks_count = serializers.SerializerMethodField()
+    overdue_tasks_count = serializers.SerializerMethodField()
     current_objection_display = serializers.CharField(source='get_current_objection_display', read_only=True)
     assigned_to_name = serializers.SerializerMethodField()
 
@@ -59,6 +62,21 @@ class LeadSerializer(serializers.ModelSerializer):
 
     def get_active_goals_count(self, obj):
         return obj.goals.filter(status=LeadGoal.STATUS_ACTIVE).count()
+
+    def get_active_tasks_count(self, obj):
+        annotated_value = getattr(obj, 'active_tasks_count', None)
+        if annotated_value is not None:
+            return annotated_value
+        return obj.tasks.filter(status__in=[Task.STATUS_PENDING, Task.STATUS_IN_PROGRESS]).count()
+
+    def get_overdue_tasks_count(self, obj):
+        annotated_value = getattr(obj, 'overdue_tasks_count', None)
+        if annotated_value is not None:
+            return annotated_value
+        return obj.tasks.filter(
+            status__in=[Task.STATUS_PENDING, Task.STATUS_IN_PROGRESS],
+            due_date__lt=timezone.now().date(),
+        ).count()
 
     def get_assigned_to_name(self, obj):
         if obj.assigned_to:
@@ -148,6 +166,8 @@ class LeadSerializer(serializers.ModelSerializer):
             'unsubscribed_at',
             # Sales Process
             'next_follow_up_date',
+            'next_follow_up_at',
+            'next_follow_up_hint',
             'expected_close_date',
             'lost_reason',
             'competitor',
@@ -184,9 +204,11 @@ class LeadSerializer(serializers.ModelSerializer):
             'latest_note',
             'last_contact_channel',
             'active_goals_count',
+            'active_tasks_count',
+            'overdue_tasks_count',
             'agent_context',
         ]
-        read_only_fields = ['id', 'created_at', 'updated_at', 'latest_note', 'last_contact_channel', 'active_goals_count', 'assigned_to_name', 'ai_paused_at', 'ai_paused_by']
+        read_only_fields = ['id', 'created_at', 'updated_at', 'latest_note', 'last_contact_channel', 'active_goals_count', 'active_tasks_count', 'overdue_tasks_count', 'assigned_to_name', 'ai_paused_at', 'ai_paused_by', 'next_follow_up_at', 'next_follow_up_hint']
 
 
 class LeadNoteSerializer(serializers.ModelSerializer):

@@ -130,8 +130,27 @@ class LeadViewSet(OrganizationQuerysetMixin, viewsets.ModelViewSet):
 
     def get_queryset(self):
         user = self.request.user
-        base_qs = Lead.objects.select_related('assigned_to', 'organization').prefetch_related('customer').order_by(
-            F('last_contacted').desc(nulls_last=True)
+        active_task_statuses = [Task.STATUS_PENDING, Task.STATUS_IN_PROGRESS]
+        base_qs = (
+            Lead.objects
+            .select_related('assigned_to', 'organization')
+            .prefetch_related('customer')
+            .annotate(
+                active_tasks_count=Count(
+                    'tasks',
+                    filter=Q(tasks__status__in=active_task_statuses),
+                    distinct=True,
+                ),
+                overdue_tasks_count=Count(
+                    'tasks',
+                    filter=Q(
+                        tasks__status__in=active_task_statuses,
+                        tasks__due_date__lt=timezone.now().date(),
+                    ),
+                    distinct=True,
+                ),
+            )
+            .order_by(F('last_contacted').desc(nulls_last=True))
         )
         if getattr(user, 'is_superadmin', False):
             return base_qs

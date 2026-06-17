@@ -2,7 +2,7 @@
 import { createFileRoute, useNavigate } from '@tanstack/react-router'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useState, useRef, useCallback, useEffect } from 'react'
-import { PlusIcon, PencilIcon, TrashIcon, GripVerticalIcon, PlugIcon, CheckCircleIcon, BrainCircuitIcon, SparklesIcon, Building2Icon, EyeIcon, EyeOffIcon, Loader2Icon, UsersIcon, BuildingIcon, CrownIcon, ShieldCheckIcon, UserCircleIcon, DownloadIcon, DatabaseIcon, AlertTriangleIcon, PauseCircleIcon, PlayCircleIcon } from 'lucide-react'
+import { PlusIcon, PencilIcon, TrashIcon, GripVerticalIcon, PlugIcon, CheckCircleIcon, BrainCircuitIcon, SparklesIcon, Building2Icon, EyeIcon, EyeOffIcon, Loader2Icon, UsersIcon, BuildingIcon, CrownIcon, ShieldCheckIcon, UserCircleIcon, AlertTriangleIcon, PauseCircleIcon, PlayCircleIcon } from 'lucide-react'
 import { ApiError } from '@/lib/api'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Label } from '@/components/ui/label'
@@ -41,7 +41,6 @@ import {
   removeOrgMember,
   updateOrganization,
   deleteOrganization,
-  exportDevDatabase,
   type PipelineStage,
   type Segment,
   type UpdateAIConfigData,
@@ -74,14 +73,10 @@ import { type Language } from '@/lib/translations'
 import { useAuth } from '@/contexts/auth-context'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import {
-  buildInternalToolsVisibilityOrgSettings,
   buildLeadDiscoverySourcesOrgSettings,
   createLeadDiscoverySourceValue,
-  getDefaultInternalToolsVisibility,
   getDefaultLeadDiscoverySourceOptions,
-  getInternalToolsVisibilitySettings,
   getLeadDiscoverySourceOptions,
-  type InternalToolsVisibilitySettings,
   type LeadDiscoverySourceOption,
 } from '@/lib/org-settings'
 
@@ -193,12 +188,6 @@ function SettingsPage() {
   const [inviteError, setInviteError] = useState('')
   const [orgName, setOrgName] = useState('')
   const [orgNameSaving, setOrgNameSaving] = useState(false)
-  const [isExportingDevDatabase, setIsExportingDevDatabase] = useState(false)
-  const [devExportSuccessMessage, setDevExportSuccessMessage] = useState('')
-  const [devExportErrorMessage, setDevExportErrorMessage] = useState('')
-  const [internalToolsVisibility, setInternalToolsVisibility] = useState<InternalToolsVisibilitySettings>(
-    getDefaultInternalToolsVisibility,
-  )
   const [leadDiscoverySources, setLeadDiscoverySources] = useState<LeadDiscoverySourceOption[]>(
     getDefaultLeadDiscoverySourceOptions,
   )
@@ -569,47 +558,16 @@ function SettingsPage() {
   }, [currentOrg?.name])
 
   useEffect(() => {
-    setInternalToolsVisibility(getInternalToolsVisibilitySettings(currentOrg?.org_settings))
     setLeadDiscoverySources(getLeadDiscoverySourceOptions(currentOrg?.org_settings))
   }, [currentOrg?.org_settings])
 
-  const canManageInternalToolsVisibility = isOwnerOrAdmin
-  const canAccessDevDatabaseExport = isOwnerOrAdmin && internalToolsVisibility.showDevDatabaseExport
   const activeTab = !isOwnerOrAdmin
     ? 'preferences'
     : tab === 'team'
       ? 'general'
-    : !canAccessDevDatabaseExport && tab === 'dev-database-export'
+    : tab === 'dev-database-export'
       ? 'general'
       : tab
-
-  const updateInternalToolsVisibilityMutation = useMutation({
-    mutationFn: async (nextVisibility: InternalToolsVisibilitySettings) => {
-      if (!orgSlug) {
-        throw new Error('Organization is required')
-      }
-
-      return updateOrganization(orgSlug, {
-        org_settings: buildInternalToolsVisibilityOrgSettings(currentOrg?.org_settings, nextVisibility),
-      })
-    },
-    onSuccess: (updatedOrganization) => {
-      queryClient.setQueryData(['organizations'], (existing: typeof orgs | undefined) => {
-        if (!existing) {
-          return [updatedOrganization]
-        }
-
-        const nextOrganizations = existing.map((organization) => (
-          organization.slug === updatedOrganization.slug ? updatedOrganization : organization
-        ))
-        return nextOrganizations.some((organization) => organization.slug === updatedOrganization.slug)
-          ? nextOrganizations
-          : [...nextOrganizations, updatedOrganization]
-      })
-      void queryClient.invalidateQueries({ queryKey: ['organizations'] })
-      toast.success('Видимость инструментов разработчика обновлена')
-    },
-  })
 
   const updateLeadDiscoverySourcesMutation = useMutation({
     mutationFn: async (nextSources: LeadDiscoverySourceOption[]) => {
@@ -693,22 +651,6 @@ function SettingsPage() {
     navigate({ to: '/login' })
   }
 
-  const handleInternalToolsVisibilityChange = (
-    key: keyof InternalToolsVisibilitySettings,
-    checked: boolean,
-  ) => {
-    const previousVisibility = internalToolsVisibility
-    const nextVisibility = { ...previousVisibility, [key]: checked }
-
-    setInternalToolsVisibility(nextVisibility)
-    updateInternalToolsVisibilityMutation.mutate(nextVisibility, {
-      onError: () => {
-        setInternalToolsVisibility(previousVisibility)
-        toast.error('Не удалось обновить видимость инструментов разработчика')
-      },
-    })
-  }
-
   const saveLeadDiscoverySources = (nextSources: LeadDiscoverySourceOption[]) => {
     setLeadDiscoverySources(nextSources)
     updateLeadDiscoverySourcesMutation.mutate(nextSources)
@@ -763,30 +705,6 @@ function SettingsPage() {
     setEditingDiscoverySourceValue(null)
     setDiscoverySourceError('')
     saveLeadDiscoverySources(getDefaultLeadDiscoverySourceOptions())
-  }
-
-  const handleExportDevDatabase = async () => {
-    setIsExportingDevDatabase(true)
-    setDevExportErrorMessage('')
-    setDevExportSuccessMessage('')
-
-    try {
-      const result = await exportDevDatabase()
-      const successMessage = `Download started: ${result.filename}`
-      setDevExportSuccessMessage(successMessage)
-      toast.success(successMessage)
-    } catch (error) {
-      let message = 'Failed to prepare the development database export. Please try again.'
-
-      if (error instanceof ApiError && typeof error.data === 'object' && error.data !== null && 'detail' in error.data) {
-        message = String((error.data as { detail?: string }).detail || message)
-      }
-
-      setDevExportErrorMessage(message)
-      toast.error(message)
-    } finally {
-      setIsExportingDevDatabase(false)
-    }
   }
 
   function RoleBadge({ role }: { role: string }) {
@@ -1294,13 +1212,6 @@ function SettingsPage() {
                     <TabsTrigger value="organization">Организация</TabsTrigger>
                   </>
                 )}
-                {canAccessDevDatabaseExport && (
-                  <TabsTrigger value="dev-database-export">
-                    <DatabaseIcon className="mr-2 h-4 w-4" />
-                    Dev Database Export
-                  </TabsTrigger>
-                )}
-
               </TabsList>
 
               <TabsContent value="general" className="space-y-6">
@@ -2636,88 +2547,6 @@ function SettingsPage() {
                   </CardContent>
                 </Card>
 
-                {canManageInternalToolsVisibility && (
-                  <Card>
-                    <CardHeader>
-                      <CardTitle>Дополнительно</CardTitle>
-                      <CardDescription>
-                        Управляйте тем, видны ли внутренние рабочие инструменты в интерфейсе этой организации.
-                      </CardDescription>
-                    </CardHeader>
-                    <CardContent className="space-y-5">
-                      <div className="rounded-xl border bg-muted/40 p-4 text-sm text-muted-foreground">
-                        Эти элементы управления только показывают или скрывают внутренние инструменты в интерфейсе продукта. Они не блокируют прямые ссылки в этой версии.
-                      </div>
-
-                      <div className="space-y-4">
-                        <div className="flex flex-col gap-4 rounded-xl border p-4 sm:flex-row sm:items-center sm:justify-between">
-                          <div className="space-y-1">
-                            <div className="flex flex-wrap items-center gap-2">
-                              <Label htmlFor="show-ai-diagnostics" className="text-sm font-medium">Показывать AI-диагностику</Label>
-                              <Badge variant={internalToolsVisibility.showAiDiagnostics ? 'default' : 'secondary'}>
-                                {internalToolsVisibility.showAiDiagnostics ? 'Вкл' : 'Выкл'}
-                              </Badge>
-                            </div>
-                            <p className="text-sm text-muted-foreground">
-                              Показывает или скрывает панель AI-диагностики в разделе Коммуникаций.
-                            </p>
-                          </div>
-                          <Switch
-                            id="show-ai-diagnostics"
-                            checked={internalToolsVisibility.showAiDiagnostics}
-                            disabled={updateInternalToolsVisibilityMutation.isPending}
-                            onCheckedChange={(checked) => handleInternalToolsVisibilityChange('showAiDiagnostics', checked)}
-                          />
-                        </div>
-
-                        <div className="flex flex-col gap-4 rounded-xl border p-4 sm:flex-row sm:items-center sm:justify-between">
-                          <div className="space-y-1">
-                            <div className="flex flex-wrap items-center gap-2">
-                              <Label htmlFor="show-dev-database-export" className="text-sm font-medium">Показывать экспорт БД разработчика</Label>
-                              <Badge variant={internalToolsVisibility.showDevDatabaseExport ? 'default' : 'secondary'}>
-                                {internalToolsVisibility.showDevDatabaseExport ? 'Вкл' : 'Выкл'}
-                              </Badge>
-                            </div>
-                            <p className="text-sm text-muted-foreground">
-                              Показывает или скрывает страницу экспорта базы данных разработчика в меню Настроек.
-                            </p>
-                          </div>
-                          <Switch
-                            id="show-dev-database-export"
-                            checked={internalToolsVisibility.showDevDatabaseExport}
-                            disabled={updateInternalToolsVisibilityMutation.isPending}
-                            onCheckedChange={(checked) => handleInternalToolsVisibilityChange('showDevDatabaseExport', checked)}
-                          />
-                        </div>
-
-                        <div className="flex flex-col gap-4 rounded-xl border p-4 sm:flex-row sm:items-center sm:justify-between">
-                          <div className="space-y-1">
-                            <div className="flex flex-wrap items-center gap-2">
-                              <Label htmlFor="show-reset-ai-memory" className="text-sm font-medium">Показывать сброс памяти AI</Label>
-                              <Badge variant={internalToolsVisibility.showResetAiMemory ? 'default' : 'secondary'}>
-                                {internalToolsVisibility.showResetAiMemory ? 'Вкл' : 'Выкл'}
-                              </Badge>
-                            </div>
-                            <p className="text-sm text-muted-foreground">
-                              Показывает или скрывает кнопку сброса памяти AI в разделе Коммуникаций.
-                            </p>
-                          </div>
-                          <Switch
-                            id="show-reset-ai-memory"
-                            checked={internalToolsVisibility.showResetAiMemory}
-                            disabled={updateInternalToolsVisibilityMutation.isPending}
-                            onCheckedChange={(checked) => handleInternalToolsVisibilityChange('showResetAiMemory', checked)}
-                          />
-                        </div>
-                      </div>
-
-                      <p className="text-xs text-muted-foreground">
-                        Изменения сохраняются автоматически для этой организации.
-                      </p>
-                    </CardContent>
-                  </Card>
-                )}
-
                 {isOwner && (
                   <Card className="border-destructive/40">
                     <CardHeader>
@@ -2748,79 +2577,6 @@ function SettingsPage() {
                   </Card>
                 )}
               </TabsContent>
-
-              {canAccessDevDatabaseExport && (
-                <TabsContent value="dev-database-export" className="space-y-6">
-                  <div className="grid max-w-4xl gap-6">
-                    <Card>
-                      <CardHeader>
-                        <CardTitle className="flex items-center gap-2">
-                          <DatabaseIcon className="h-5 w-5" />
-                          Экспорт базы данных разработки
-                        </CardTitle>
-                        <CardDescription>
-                          Создайте полный снимок текущей базы данных разработки для локального восстановления.
-                        </CardDescription>
-                      </CardHeader>
-                      <CardContent className="space-y-6">
-                        <div className="rounded-xl border bg-muted/40 p-4">
-                          <p className="text-sm text-muted-foreground">
-                            Этот экспорт упаковывает полную базу данных разработки в архив для восстановления, чтобы локальную среду можно было воссоздать как можно ближе к текущему состоянию разработки.
-                          </p>
-                        </div>
-
-                        <div className="grid gap-3 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950 dark:border-amber-900/60 dark:bg-amber-950/20 dark:text-amber-100">
-                          <p className="font-medium">Важное примечание</p>
-                          <p>
-                            Этот архив содержит только данные базы данных. Переменные среды, ключи API и другие учетные данные служб не экспортируются и могут по-прежнему требовать локальной настройки.
-                          </p>
-                        </div>
-
-                        <div className="grid gap-3 rounded-xl border p-4 text-sm text-muted-foreground">
-                          <p className="font-medium text-foreground">Что включено</p>
-                          <ul className="list-disc space-y-1 pl-5">
-                            <li>Все текущие записи базы данных разработки</li>
-                            <li>Первичные ключи и связи, необходимые для восстановления</li>
-                            <li>Руководство по восстановлению внутри скачанного архива</li>
-                          </ul>
-                        </div>
-
-                        <div className="flex flex-wrap gap-3">
-                          <Button
-                            onClick={handleExportDevDatabase}
-                            disabled={isExportingDevDatabase}
-                            className="min-h-11"
-                          >
-                            {isExportingDevDatabase ? (
-                              <>
-                                <Loader2Icon className="mr-2 h-4 w-4 animate-spin" />
-                                Подготовка экспорта...
-                              </>
-                            ) : (
-                              <>
-                                <DownloadIcon className="mr-2 h-4 w-4" />
-                                Экспортировать БД разработки
-                              </>
-                            )}
-                          </Button>
-                        </div>
-
-                        {devExportSuccessMessage && (
-                          <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900 dark:border-emerald-900/60 dark:bg-emerald-950/20 dark:text-emerald-100">
-                            {devExportSuccessMessage}
-                          </div>
-                        )}
-
-                        {devExportErrorMessage && (
-                          <div className="rounded-xl border border-destructive/40 bg-destructive/10 p-4 text-sm text-destructive">
-                            {devExportErrorMessage}
-                          </div>
-                        )}
-                      </CardContent>
-                    </Card>
-                  </div>
-                </TabsContent>
-              )}
 
             </Tabs>
           </div>
