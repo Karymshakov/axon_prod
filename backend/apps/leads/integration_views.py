@@ -47,6 +47,27 @@ def _media_label(media_type: str) -> str:
     }.get(media_type, 'file')
 
 
+def _sender_metadata(request) -> dict:
+    user = getattr(request, 'user', None)
+    if not getattr(user, 'is_authenticated', False):
+        return {
+            'sent_by_name': 'Unknown',
+            'sent_by_email': '',
+            'sent_by_initials': '',
+        }
+
+    name = (getattr(user, 'name', '') or '').strip()
+    email = (getattr(user, 'email', '') or '').strip()
+    display = name or email or 'Менеджер'
+    parts = [part[0] for part in display.replace('@', ' ').replace('.', ' ').split() if part]
+    initials = ''.join(parts[:2]).upper()
+    return {
+        'sent_by_name': display,
+        'sent_by_email': email,
+        'sent_by_initials': initials,
+    }
+
+
 class _OrgNotSet:
     """Sentinel: user is authenticated but has no current_organization set."""
 
@@ -334,6 +355,11 @@ def send_telegram_message_from_comms(request):
         if file_url:
             file_path, mime_type = _resolve_media_file(file_url)
             media_type = _request_media_type(request, file_path, mime_type)
+            if media_type == 'audio' and mime_type and mime_type.startswith('audio/webm'):
+                return Response({
+                    'success': False,
+                    'error': 'WhatsApp Cloud API обычно не принимает audio/webm. Загрузите аудио в формате .ogg/.mp3/.m4a или отправьте голосовое через Telegram.'
+                }, status=status.HTTP_400_BAD_REQUEST)
 
             if not os.path.exists(file_path):
                 return Response({
@@ -376,7 +402,8 @@ def send_telegram_message_from_comms(request):
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
         # Pause AI since manager sent manual message
-        user_name = request.user.name or request.user.email if request.user.is_authenticated else 'Unknown'
+        sender_meta = _sender_metadata(request)
+        user_name = sender_meta['sent_by_name']
         if not lead.ai_paused:
             lead.ai_paused = True
             lead.ai_paused_at = timezone.now()
@@ -387,7 +414,7 @@ def send_telegram_message_from_comms(request):
                 organization=lead.organization,
                 activity_type=LeadActivity.TYPE_LEAD_UPDATED,
                 description=f'🙋 {user_name} took manual control — AI paused',
-                metadata={'action': 'ai_paused', 'user': user_name},
+                metadata={'action': 'ai_paused', 'user': user_name, **sender_meta},
             )
 
         # Log activity
@@ -401,6 +428,7 @@ def send_telegram_message_from_comms(request):
                 'file_url': file_url,
                 'is_voice': is_voice,
                 'is_manager_manual': True,
+                **sender_meta,
             }
         else:
             desc = f"Sent Telegram message: {message_text[:100]}{'...' if len(message_text) > 100 else ''}"
@@ -408,6 +436,7 @@ def send_telegram_message_from_comms(request):
                 'message_id': result.get('message_id'),
                 'text': message_text,
                 'is_manager_manual': True,
+                **sender_meta,
             }
 
         LeadActivity.objects.create(
@@ -732,6 +761,11 @@ def send_instagram_message_from_comms(request):
         if file_url:
             file_path, mime_type = _resolve_media_file(file_url)
             media_type = _request_media_type(request, file_path, mime_type)
+            if media_type == 'audio':
+                return Response({
+                    'success': False,
+                    'error': 'Instagram API не поддерживает отправку аудио/голосовых через Direct. Отправьте текст, фото или видео.'
+                }, status=status.HTTP_400_BAD_REQUEST)
             absolute_url = request.build_absolute_uri(file_url)
             attachment_type = {
                 'photo': 'image',
@@ -758,7 +792,8 @@ def send_instagram_message_from_comms(request):
             result = text_result
 
         # Pause AI since manager sent manual message
-        user_name = request.user.name or request.user.email if request.user.is_authenticated else 'Unknown'
+        sender_meta = _sender_metadata(request)
+        user_name = sender_meta['sent_by_name']
         if not lead.ai_paused:
             lead.ai_paused = True
             lead.ai_paused_at = timezone.now()
@@ -769,7 +804,7 @@ def send_instagram_message_from_comms(request):
                 organization=org,
                 activity_type=LeadActivity.TYPE_LEAD_UPDATED,
                 description=f'🙋 {user_name} took manual control — AI paused',
-                metadata={'action': 'ai_paused', 'user': user_name},
+                metadata={'action': 'ai_paused', 'user': user_name, **sender_meta},
             )
 
         # Log activity — echo_origin='crm' lets the webhook echo handler identify
@@ -789,6 +824,7 @@ def send_instagram_message_from_comms(request):
                     'is_voice': is_voice,
                     'echo_origin': LeadActivity.ECHO_ORIGIN_CRM,
                     'is_manager_manual': True,
+                    **sender_meta,
                 }
             )
 
@@ -804,6 +840,7 @@ def send_instagram_message_from_comms(request):
                     'text': message_text,
                     'echo_origin': LeadActivity.ECHO_ORIGIN_CRM,
                     'is_manager_manual': True,
+                    **sender_meta,
                 }
             )
 
@@ -897,7 +934,8 @@ def send_whatsapp_message_from_comms(request):
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
         # Pause AI since manager sent manual message
-        user_name = request.user.name or request.user.email if request.user.is_authenticated else 'Unknown'
+        sender_meta = _sender_metadata(request)
+        user_name = sender_meta['sent_by_name']
         if not lead.ai_paused:
             lead.ai_paused = True
             lead.ai_paused_at = timezone.now()
@@ -908,7 +946,7 @@ def send_whatsapp_message_from_comms(request):
                 organization=org,
                 activity_type=LeadActivity.TYPE_LEAD_UPDATED,
                 description=f'🙋 {user_name} took manual control — AI paused',
-                metadata={'action': 'ai_paused', 'user': user_name},
+                metadata={'action': 'ai_paused', 'user': user_name, **sender_meta},
             )
 
         # Create activity record
@@ -922,6 +960,7 @@ def send_whatsapp_message_from_comms(request):
                 'file_url': file_url,
                 'is_voice': is_voice,
                 'is_manager_manual': True,
+                **sender_meta,
             }
         else:
             desc = f'WhatsApp message sent: {message_text[:100]}{"..." if len(message_text) > 100 else ""}'
@@ -929,6 +968,7 @@ def send_whatsapp_message_from_comms(request):
                 'message_id': result.get('message_id'),
                 'text': message_text,
                 'is_manager_manual': True,
+                **sender_meta,
             }
 
         LeadActivity.objects.create(

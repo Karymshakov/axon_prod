@@ -157,6 +157,18 @@ function inferFileMediaType(file: File): CommsMediaType {
   return 'document'
 }
 
+function getConversationDraftKey(leadId: number, channel: ConversationChannel) {
+  return `communications:draft:${leadId}:${channel}`
+}
+
+function getPreferredRecorderMimeType(channel: ConversationChannel) {
+  const candidates = channel === 'whatsapp'
+    ? ['audio/ogg;codecs=opus', 'audio/mp4', 'audio/webm;codecs=opus', 'audio/webm']
+    : ['audio/ogg;codecs=opus', 'audio/webm;codecs=opus', 'audio/webm', 'audio/mp4']
+
+  return candidates.find((candidate) => MediaRecorder.isTypeSupported(candidate)) || ''
+}
+
 function formatMediaTime(seconds: number) {
   if (!Number.isFinite(seconds) || seconds <= 0) return '0:00'
   const totalSeconds = Math.floor(seconds)
@@ -339,6 +351,8 @@ function CommunicationsPage() {
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const recordingChunksRef = useRef<Blob[]>([])
   const recordingTimerRef = useRef<number | null>(null)
+  const activeChannelRef = useRef<ConversationChannel>('telegram')
+  const suppressDraftSaveRef = useRef(false)
 
   const clearRecordingTimer = () => {
     if (recordingTimerRef.current !== null) {
@@ -348,11 +362,28 @@ function CommunicationsPage() {
   }
 
   const setAttachmentFromFile = (file: File, isVoice = false) => {
+    const nextMediaType = inferFileMediaType(file)
+    const composerChannel = activeChannelRef.current
+    if (composerChannel === 'instagram' && nextMediaType === 'audio') {
+      toast.error('Instagram API не поддерживает отправку аудио и голосовых через Direct')
+      if (fileInputRef.current) {
+        fileInputRef.current.value = ''
+      }
+      return
+    }
+    if (composerChannel === 'whatsapp' && nextMediaType === 'audio' && file.type.startsWith('audio/webm')) {
+      toast.error('WhatsApp обычно не принимает audio/webm. Загрузите .ogg, .mp3 или .m4a')
+      if (fileInputRef.current) {
+        fileInputRef.current.value = ''
+      }
+      return
+    }
+
     if (attachmentPreview) {
       URL.revokeObjectURL(attachmentPreview)
     }
     setAttachment(file)
-    setAttachmentMediaType(inferFileMediaType(file))
+    setAttachmentMediaType(nextMediaType)
     setAttachmentIsVoice(isVoice)
     setAttachmentPreview(URL.createObjectURL(file))
   }
@@ -378,14 +409,27 @@ function CommunicationsPage() {
   }
 
   const handleStartVoiceRecording = async () => {
+    const composerChannel = activeChannelRef.current
+    if (composerChannel === 'instagram') {
+      toast.error('Instagram API не поддерживает отправку голосовых через Direct')
+      return
+    }
     if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
       toast.error('Запись голоса не поддерживается в этом браузере')
       return
     }
 
     try {
+      const recorderMimeType = getPreferredRecorderMimeType(composerChannel)
+      if (composerChannel === 'whatsapp' && recorderMimeType.startsWith('audio/webm')) {
+        toast.error('Ваш браузер записывает voice как audio/webm, WhatsApp может не принять этот формат')
+        return
+      }
+
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-      const recorder = new MediaRecorder(stream)
+      const recorder = recorderMimeType
+        ? new MediaRecorder(stream, { mimeType: recorderMimeType })
+        : new MediaRecorder(stream)
       recordingChunksRef.current = []
       recorder.ondataavailable = (event) => {
         if (event.data.size > 0) {
@@ -395,9 +439,9 @@ function CommunicationsPage() {
       recorder.onstop = () => {
         const mimeType = recorder.mimeType || 'audio/webm'
         const blob = new Blob(recordingChunksRef.current, { type: mimeType })
-        const extension = mimeType.includes('ogg') ? 'ogg' : 'webm'
+        const extension = mimeType.includes('ogg') ? 'ogg' : mimeType.includes('mp4') ? 'm4a' : 'webm'
         const file = new File([blob], `voice-message.${extension}`, { type: mimeType })
-        setAttachmentFromFile(file, true)
+        setAttachmentFromFile(file, mimeType.includes('ogg'))
         stream.getTracks().forEach((track) => track.stop())
         recordingChunksRef.current = []
       }
@@ -547,6 +591,50 @@ function CommunicationsPage() {
     }
     return getLeadActiveChannel(selectedLead)
   }, [selectedLead, overrideChannel, availableChannels, activeChannelTab])
+
+  activeChannelRef.current = activeChannel
+
+  const conversationDraftKey = selectedLead ? getConversationDraftKey(selectedLead.id, activeChannel) : null
+
+  useEffect(() => {
+    if (!conversationDraftKey) {
+      suppressDraftSaveRef.current = true
+      setMessage('')
+      window.setTimeout(() => {
+        suppressDraftSaveRef.current = false
+      }, 0)
+      return
+    }
+
+    suppressDraftSaveRef.current = true
+    setMessage(localStorage.getItem(conversationDraftKey) ?? '')
+    setAttachmentPreview((preview) => {
+      if (preview) {
+        URL.revokeObjectURL(preview)
+      }
+      return null
+    })
+    setAttachment(null)
+    setAttachmentMediaType(null)
+    setAttachmentIsVoice(false)
+    if (fileInputRef.current) {
+      fileInputRef.current.value = ''
+    }
+    window.setTimeout(() => {
+      suppressDraftSaveRef.current = false
+    }, 0)
+  }, [conversationDraftKey])
+
+  useEffect(() => {
+    if (!conversationDraftKey) return
+    if (suppressDraftSaveRef.current) return
+
+    if (message.trim()) {
+      localStorage.setItem(conversationDraftKey, message)
+    } else {
+      localStorage.removeItem(conversationDraftKey)
+    }
+  }, [conversationDraftKey, message])
 
   // Filter messages based on active channel
   const conversationMessages = useMemo(() => {
@@ -750,6 +838,9 @@ function CommunicationsPage() {
 
       if (response?.success) {
         toast.success('Сообщение успешно отправлено')
+        if (conversationDraftKey) {
+          localStorage.removeItem(conversationDraftKey)
+        }
         setMessage('')
         handleRemoveAttachment()
         await refetchActivities()
