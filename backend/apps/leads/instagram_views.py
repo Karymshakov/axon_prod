@@ -656,9 +656,18 @@ def instagram_webhook(request):
                     attachments = message.get('attachments', [])
                     if attachments:
                         attachment_type = attachments[0].get('type', 'attachment')
-                        message_text = f'[{attachment_type.capitalize()} received]'
+                        if attachment_type == 'image':
+                            message_text = '[Изображение получено]'
+                        elif attachment_type == 'video':
+                            message_text = '[Видео получено]'
+                        elif attachment_type == 'audio':
+                            message_text = '[Аудио получено]'
+                        elif attachment_type == 'file':
+                            message_text = '[Файл получен]'
+                        else:
+                            message_text = f'[Получено: {attachment_type}]'
                     elif message.get('sticker_id'):
-                        message_text = '[Sticker received]'
+                        message_text = '[Стикер получен]'
                     else:
                         # Unsupported event type — skip silently
                         continue

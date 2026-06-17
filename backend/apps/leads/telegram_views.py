@@ -775,7 +775,7 @@ def telegram_webhook(request):
 
         is_photo = bool(photo)
         if is_photo and not text:
-            text = caption or '[Image received]'
+            text = caption or '[Изображение получено]'
 
         if not chat_id or not text:
             return Response({'ok': True})

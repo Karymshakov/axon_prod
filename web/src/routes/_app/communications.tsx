@@ -89,6 +89,23 @@ type ResetTarget = {
   channel: ConversationChannel
 }
 
+function resolveMediaUrl(url: string | null | undefined): string {
+  if (!url) return ''
+  if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('data:')) {
+    return url
+  }
+  const apiBase = import.meta.env.VITE_API_BASE_URL || ''
+  if (apiBase.startsWith('http://') || apiBase.startsWith('https://')) {
+    try {
+      const origin = new URL(apiBase).origin
+      return `${origin}${url}`
+    } catch {
+      // fallback
+    }
+  }
+  return url
+}
+
 function getTelegramMessageText(activity: { description: string; metadata: Record<string, unknown> | null }) {
   const metadata = activity.metadata ?? {}
   const directText = typeof metadata.text === 'string'
@@ -875,6 +892,11 @@ function CommunicationsPage() {
                         lowerText === '[audio received]' ||
                         lowerText === '[video received]' ||
                         lowerText === '[file received]' ||
+                        lowerText === '[изображение получено]' ||
+                        lowerText === '[стикер получен]' ||
+                        lowerText === '[аудио получено]' ||
+                        lowerText === '[видео получено]' ||
+                        lowerText === '[файл получен]' ||
                         lowerText === 'received photo from whatsapp' ||
                         lowerText === 'received telegram photo' ||
                         lowerText.startsWith('received photo from')
@@ -890,7 +912,8 @@ function CommunicationsPage() {
                       const fileUrl = activity.metadata?.file_url as string | undefined
                       const fileUrls = activity.metadata?.file_urls as string[] | undefined
                       const mediaTitle = activity.metadata?.media_title as string | undefined
-                      const photoUrls = fileUrls && fileUrls.length > 0 ? fileUrls : (fileUrl ? [fileUrl] : [])
+                      const rawPhotoUrls = fileUrls && fileUrls.length > 0 ? fileUrls : (fileUrl ? [fileUrl] : [])
+                      const photoUrls = rawPhotoUrls.map(resolveMediaUrl)
 
                       const timestamp = new Date(activity.created_at).toLocaleString('ru-RU', {
                         month: 'short',

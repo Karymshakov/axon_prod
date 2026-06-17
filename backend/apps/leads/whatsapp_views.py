@@ -544,7 +544,7 @@ def whatsapp_webhook(request):
                     caption = ''
                     if is_photo:
                         caption = message.get('image', {}).get('caption', '')
-                        message_text = caption or '[Image received]'
+                        message_text = caption or '[Изображение получено]'
                     else:
                         message_text = message.get('text', {}).get('body', '')
 
