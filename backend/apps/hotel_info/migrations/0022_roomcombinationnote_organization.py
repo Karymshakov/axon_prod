@@ -13,7 +13,7 @@ def assign_existing_notes_to_first_org(apps, schema_editor):
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('hotel_info', '0021_reply_templates'),
+        ('hotel_info', '0020_playbook_expires_at'),
         ('organizations', '0004_organization_deleted_at_organization_is_deleted'),
     ]
 
