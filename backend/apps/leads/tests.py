@@ -3738,3 +3738,60 @@ class CommsMediaTests(TestCase):
         if os.path.exists(file_path):
             os.remove(file_path)
 
+    @patch('apps.leads.integration_views.instagram_service.is_configured', return_value=True)
+    @patch('apps.leads.integration_views.instagram_service.send_image_url', return_value={'message_id': 'ig-photo-99'})
+    @patch('apps.leads.integration_views.instagram_service.send_message', return_value={'message_id': 'ig-text-100'})
+    def test_send_instagram_photo_from_comms(self, send_message_mock, send_image_url_mock, _configured_mock):
+        from apps.leads.integration_views import send_instagram_message_from_comms
+        from django.conf import settings
+        
+        self.lead.instagram_user_id = 'ig-user-123'
+        self.lead.save()
+            
+        file_url = f"{settings.MEDIA_URL}comms_media/test_ig_send.jpg"
+        
+        request = self.factory.post('/api/leads/communications/instagram/send/', {
+            'lead_id': self.lead.id,
+            'message': 'Instagram image send caption',
+            'file_url': file_url
+        }, format='json')
+        force_authenticate(request, user=self.owner)
+        
+        response = send_instagram_message_from_comms(request)
+        self.assertEqual(response.status_code, 200)
+        
+        # Assert send_image_url was called with absolute URL
+        expected_absolute_url = request.build_absolute_uri(file_url)
+        send_image_url_mock.assert_called_once_with(
+            self.lead.instagram_user_id,
+            expected_absolute_url,
+            org=self.org
+        )
+        
+        # Assert send_message was also called since a caption was provided
+        send_message_mock.assert_called_once_with(
+            self.lead.instagram_user_id,
+            'Instagram image send caption',
+            org=self.org,
+            raise_exception=True
+        )
+        
+        # Check activity
+        activities = LeadActivity.objects.filter(
+            lead=self.lead,
+            activity_type=LeadActivity.TYPE_INSTAGRAM_SENT,
+        ).order_by('id')
+        self.assertEqual(len(activities), 2)
+        
+        # First activity: Photo
+        photo_act = activities[0]
+        self.assertEqual(photo_act.metadata['media_type'], 'photo')
+        self.assertEqual(photo_act.metadata['file_url'], file_url)
+        self.assertEqual(photo_act.metadata['message_id'], 'ig-photo-99')
+        
+        # Second activity: Text
+        text_act = activities[1]
+        self.assertEqual(text_act.metadata['text'], 'Instagram image send caption')
+        self.assertEqual(text_act.metadata['message_id'], 'ig-text-100')
+
+

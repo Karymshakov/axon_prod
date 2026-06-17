@@ -651,11 +651,12 @@ def send_instagram_message_from_comms(request):
     """Send an Instagram DM from the communications page."""
     lead_id = request.data.get('lead_id')
     message_text = request.data.get('message', '').strip()
+    file_url = request.data.get('file_url')
 
-    if not lead_id or not message_text:
+    if not lead_id or (not message_text and not file_url):
         return Response({
             'success': False,
-            'error': 'Lead ID and message are required'
+            'error': 'Lead ID and message (or file) are required'
         }, status=status.HTTP_400_BAD_REQUEST)
 
     try:
@@ -678,14 +679,28 @@ def send_instagram_message_from_comms(request):
                 'error': 'Instagram is not configured. Please connect your Instagram Business Account in Settings.'
             }, status=status.HTTP_400_BAD_REQUEST)
 
-        # Send message
-        result = instagram_service.send_message(lead.instagram_user_id, message_text, org=org, raise_exception=True)
+        # Send photo and/or message
+        result = None
+        photo_result = None
+        if file_url:
+            absolute_url = request.build_absolute_uri(file_url)
+            photo_result = instagram_service.send_image_url(lead.instagram_user_id, absolute_url, org=org)
+            if not photo_result:
+                return Response({
+                    'success': False,
+                    'error': 'Failed to send photo via Instagram'
+                }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            result = photo_result
 
-        if not result:
-            return Response({
-                'success': False,
-                'error': 'Failed to send message via Instagram'
-            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        text_result = None
+        if message_text:
+            text_result = instagram_service.send_message(lead.instagram_user_id, message_text, org=org, raise_exception=True)
+            if not text_result:
+                return Response({
+                    'success': False,
+                    'error': 'Failed to send message via Instagram'
+                }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            result = text_result
 
         # Pause AI since manager sent manual message
         user_name = request.user.name or request.user.email if request.user.is_authenticated else 'Unknown'
@@ -704,23 +719,40 @@ def send_instagram_message_from_comms(request):
 
         # Log activity — echo_origin='crm' lets the webhook echo handler identify
         # this message ID as a CRM send, not a native Instagram app takeover.
-        LeadActivity.objects.create(
-            lead=lead,
-            organization=org,
-            activity_type=LeadActivity.TYPE_INSTAGRAM_SENT,
-            description=f"Sent Instagram message: {message_text[:100]}{'...' if len(message_text) > 100 else ''}",
-            echo_origin=LeadActivity.ECHO_ORIGIN_CRM,
-            metadata={
-                'message_id': result.get('message_id'),
-                'text': message_text,
-                'echo_origin': LeadActivity.ECHO_ORIGIN_CRM,
-                'is_manager_manual': True,
-            }
-        )
+        if file_url:
+            LeadActivity.objects.create(
+                lead=lead,
+                organization=org,
+                activity_type=LeadActivity.TYPE_INSTAGRAM_SENT,
+                description="Sent Instagram photo",
+                echo_origin=LeadActivity.ECHO_ORIGIN_CRM,
+                metadata={
+                    'message_id': photo_result.get('message_id'),
+                    'media_type': 'photo',
+                    'file_url': file_url,
+                    'echo_origin': LeadActivity.ECHO_ORIGIN_CRM,
+                    'is_manager_manual': True,
+                }
+            )
+
+        if message_text:
+            LeadActivity.objects.create(
+                lead=lead,
+                organization=org,
+                activity_type=LeadActivity.TYPE_INSTAGRAM_SENT,
+                description=f"Sent Instagram message: {message_text[:100]}{'...' if len(message_text) > 100 else ''}",
+                echo_origin=LeadActivity.ECHO_ORIGIN_CRM,
+                metadata={
+                    'message_id': text_result.get('message_id'),
+                    'text': message_text,
+                    'echo_origin': LeadActivity.ECHO_ORIGIN_CRM,
+                    'is_manager_manual': True,
+                }
+            )
 
         return Response({
             'success': True,
-            'message_id': result.get('message_id'),
+            'message_id': result.get('message_id') if result else None,
         })
 
     except Lead.DoesNotExist:

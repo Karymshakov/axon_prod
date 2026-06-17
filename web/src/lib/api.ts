@@ -522,8 +522,8 @@ export function resubscribeInstagramWebhook() {
   return api.post<{ success: boolean }>('/integrations/instagram/resubscribe-webhook/', {})
 }
 
-export function sendInstagramMessageFromComms(leadId: number, message: string) {
-  return api.post<SendInstagramMessageResponse>('/communications/instagram/send/', { lead_id: leadId, message })
+export function sendInstagramMessageFromComms(leadId: number, message: string, fileUrl?: string) {
+  return api.post<SendInstagramMessageResponse>('/communications/instagram/send/', { lead_id: leadId, message, file_url: fileUrl })
 }
 
 // WhatsApp Integration types

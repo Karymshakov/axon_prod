@@ -480,7 +480,7 @@ function CommunicationsPage() {
       if (activeChannel === 'telegram') {
         response = await sendTelegramMessageFromComms(selectedLead.id, message, fileUrl)
       } else if (activeChannel === 'instagram') {
-        response = await sendInstagramMessageFromComms(selectedLead.id, message)
+        response = await sendInstagramMessageFromComms(selectedLead.id, message, fileUrl)
       } else if (activeChannel === 'whatsapp') {
         response = await sendWhatsAppMessageFromComms(selectedLead.id, message, fileUrl)
       }
@@ -988,7 +988,7 @@ function CommunicationsPage() {
                   </Popover>
 
                   {/* Attach File Button */}
-                  {(activeChannel === 'telegram' || activeChannel === 'whatsapp') && (
+                  {(activeChannel === 'telegram' || activeChannel === 'whatsapp' || activeChannel === 'instagram') && (
                     <>
                       <input
                         type="file"
