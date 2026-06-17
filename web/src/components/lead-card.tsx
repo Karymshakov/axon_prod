@@ -1,11 +1,10 @@
-import { AlertTriangleIcon, CalendarDaysIcon, CheckSquareIcon, ClockIcon, FileTextIcon, HandIcon, InstagramIcon, MessageSquareIcon, PhoneIcon, TargetIcon } from 'lucide-react'
+import { AlertTriangleIcon, CalendarDaysIcon, CheckSquareIcon, FileTextIcon, HandIcon, InstagramIcon, MessageSquareIcon, PhoneIcon } from 'lucide-react'
 import { useNavigate } from '@tanstack/react-router'
 import type { MouseEvent } from 'react'
 import { getContactChannelLabel, resolveLeadContactChannel, type Lead } from '@/lib/api'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { LeadSourceBadge } from '@/components/lead-source-badge'
 
 export const INTENT_TIER_CONFIG = {
   booking_intent: { label: 'Намерение забронировать', className: 'bg-green-100 text-green-800 border-green-200' },
@@ -27,19 +26,14 @@ interface LeadCardProps {
   onEdit: (lead: Lead) => void
   onOpen?: (lead: Lead) => void
   onOpenChat?: (lead: Lead) => void
-  discoverySourceLabel?: string
 }
 
-export function LeadCard({ lead, onOpen, onOpenChat, discoverySourceLabel }: LeadCardProps) {
+export function LeadCard({ lead, onOpen, onOpenChat }: LeadCardProps) {
   const navigate = useNavigate()
   const channel = resolveLeadContactChannel(lead)
   const contactPhone = lead.phone || lead.mobile_phone || lead.whatsapp_phone
-  const summary = lead.problem_description || lead.latest_note || lead.notes || lead.next_steps || ''
   const activeTasksCount = lead.active_tasks_count || 0
   const overdueTasksCount = lead.overdue_tasks_count || 0
-  const hasFollowUp = Boolean(lead.next_follow_up_at || lead.next_follow_up_date)
-  const followUpDate = lead.next_follow_up_at || lead.next_follow_up_date
-  const isFollowUpOverdue = followUpDate ? new Date(followUpDate) < new Date() : false
 
   const formatDate = (dateString: string | null) => {
     if (!dateString) return null
@@ -80,37 +74,17 @@ export function LeadCard({ lead, onOpen, onOpenChat, discoverySourceLabel }: Lea
       icon: <CheckSquareIcon className="h-3 w-3" />,
       label: activeTasksCount,
     } : null,
-    hasFollowUp ? {
-      key: 'follow-up',
-      title: lead.next_follow_up_hint || `Follow-up: ${formatDate(followUpDate)}`,
-      className: isFollowUpOverdue
-        ? 'border-orange-200 bg-orange-50 text-orange-700 dark:border-orange-900/50 dark:bg-orange-950/20 dark:text-orange-300'
-        : 'border-indigo-200 bg-indigo-50 text-indigo-700 dark:border-indigo-900/50 dark:bg-indigo-950/20 dark:text-indigo-300',
-      icon: <ClockIcon className="h-3 w-3" />,
-      label: 'FU',
-    } : null,
-    lead.active_goals_count > 0 ? {
-      key: 'goals',
-      title: `Активные цели: ${lead.active_goals_count}`,
-      className: 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/50 dark:bg-emerald-950/20 dark:text-emerald-300',
-      icon: <TargetIcon className="h-3 w-3" />,
-      label: lead.active_goals_count,
-    } : null,
   ].filter(Boolean)
   const stateMarkerClass = overdueTasksCount > 0
     ? 'bg-red-500'
-    : hasFollowUp
-      ? isFollowUpOverdue ? 'bg-orange-500' : 'bg-indigo-500'
-      : activeTasksCount > 0
-        ? 'bg-amber-500'
-        : lead.active_goals_count > 0
-          ? 'bg-emerald-500'
-          : 'bg-border'
+    : activeTasksCount > 0
+      ? 'bg-amber-500'
+      : 'bg-border'
 
   return (
-    <Card className="group relative cursor-pointer overflow-hidden rounded-md border bg-card shadow-sm transition hover:border-primary/30 hover:shadow-md" onClick={handleOpen}>
+    <Card className="group relative cursor-pointer overflow-hidden rounded-md border bg-card shadow-sm transition-[border-color,box-shadow,transform] duration-150 hover:-translate-y-0.5 hover:border-primary/30 hover:shadow-md" onClick={handleOpen}>
       <span className={`absolute inset-y-0 left-0 w-1 ${stateMarkerClass}`} />
-      <CardContent className="p-2.5 pl-3">
+      <CardContent className="p-2 pl-3">
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-1.5">
@@ -121,11 +95,6 @@ export function LeadCard({ lead, onOpen, onOpenChat, discoverySourceLabel }: Lea
                 </span>
               ) : null}
             </div>
-            {summary ? (
-              <p className="mt-0.5 line-clamp-1 text-[11px] leading-4 text-muted-foreground" title={summary}>
-                {summary}
-              </p>
-            ) : null}
           </div>
           <Button
             variant="ghost"
@@ -182,9 +151,6 @@ export function LeadCard({ lead, onOpen, onOpenChat, discoverySourceLabel }: Lea
           {lead.instagram_intent_tier ? (
             <InstagramIntentBadge tier={lead.instagram_intent_tier} />
           ) : null}
-          {lead.discovery_source ? (
-            <LeadSourceBadge source={lead.discovery_source} label={discoverySourceLabel} />
-          ) : null}
         </div>
 
         {stateBadges.length > 0 ? (
@@ -216,12 +182,6 @@ export function LeadCard({ lead, onOpen, onOpenChat, discoverySourceLabel }: Lea
             </div>
           ) : null}
         </div>
-
-        {lead.last_contacted ? (
-          <div className="mt-1.5 border-t pt-1.5 text-[10px] leading-4 text-muted-foreground">
-            Последний контакт: {formatDate(lead.last_contacted)}
-          </div>
-        ) : null}
 
       </CardContent>
     </Card>

@@ -142,13 +142,11 @@ function DraggableLeadCard({
   onEdit,
   onOpen,
   onOpenChat,
-  discoverySourceLabel,
 }: {
   lead: Lead
   onEdit: (lead: Lead) => void
   onOpen: (lead: Lead) => void
   onOpenChat: (lead: Lead) => void
-  discoverySourceLabel?: string
 }) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: `lead-${lead.id}`,
@@ -159,7 +157,7 @@ function DraggableLeadCard({
     ? {
         transform: `translate3d(${transform.x}px, ${transform.y}px, 0)`,
         opacity: isDragging ? 0.45 : 1,
-        transition: isDragging ? undefined : 'transform 200ms cubic-bezier(0.2, 0, 0, 1), opacity 140ms ease',
+        transition: isDragging ? undefined : 'transform 220ms cubic-bezier(0.2, 0, 0, 1), opacity 140ms ease',
       }
     : undefined
 
@@ -169,14 +167,13 @@ function DraggableLeadCard({
       style={style}
       {...attributes}
       {...listeners}
-      className={`touch-none will-change-transform ${isDragging ? 'scale-[0.98]' : 'transition-transform duration-200 ease-out'}`}
+      className={`touch-none will-change-transform ${isDragging ? 'scale-[0.98] cursor-grabbing' : 'transition-transform duration-200 ease-out'}`}
     >
       <LeadCard
         lead={lead}
         onEdit={onEdit}
         onOpen={onOpen}
         onOpenChat={onOpenChat}
-        discoverySourceLabel={discoverySourceLabel}
       />
     </div>
   )
@@ -769,7 +766,7 @@ function LeadsPage() {
                   {leadsByStatus.map((column, index) => {
                     const tone = getKanbanStageTone(column.key, index)
                     return (
-                    <div key={column.key} className="flex min-w-[215px] flex-shrink-0 flex-col gap-1.5 sm:min-w-[235px]">
+                    <div key={column.key} className="flex w-[200px] flex-none flex-col gap-1.5 sm:w-[212px] lg:w-[220px]">
                       <div className={`rounded-md border px-2.5 py-2 shadow-sm ${tone.header}`}>
                         <div className="flex items-center justify-between gap-2">
                           <div className="flex min-w-0 items-center gap-2">
@@ -794,7 +791,6 @@ function LeadsPage() {
                               onEdit={handleEditLead}
                               onOpen={handleLeadClick}
                               onOpenChat={openLeadChat}
-                              discoverySourceLabel={getDiscoverySourceOptionLabel(lead.discovery_source)}
 
                             />
                           ))
@@ -836,15 +832,16 @@ function LeadsPage() {
         />
       </div>
 
-      <DragOverlay>
+      <DragOverlay dropAnimation={{ duration: 220, easing: 'cubic-bezier(0.2, 0, 0, 1)' }}>
         {activeLead ? (
-          <LeadCard
-            lead={activeLead}
-            onEdit={() => {}}
-            onOpen={() => {}}
-            onOpenChat={() => {}}
-            discoverySourceLabel={getDiscoverySourceOptionLabel(activeLead.discovery_source)}
-          />
+          <div className="rotate-1 scale-[1.02] opacity-95 shadow-2xl">
+            <LeadCard
+              lead={activeLead}
+              onEdit={() => {}}
+              onOpen={() => {}}
+              onOpenChat={() => {}}
+            />
+          </div>
         ) : null}
       </DragOverlay>
     </DndContext>
