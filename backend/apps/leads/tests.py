@@ -346,17 +346,31 @@ class GlobalChannelAiPauseTests(TestCase):
         request = self.factory.post('/api/leads/communications/telegram/send/', {'lead_id': self.lead.id, 'message': 'Manual telegram reply'}, format='json')
         force_authenticate(request, user=self.owner)
 
+        self.assertFalse(self.lead.ai_paused)
         response = send_telegram_message_from_comms(request)
 
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response.data['success'])
         send_mock.assert_awaited_once()
 
+        self.lead.refresh_from_db()
+        self.assertTrue(self.lead.ai_paused)
+        self.assertEqual(self.lead.ai_paused_by, self.owner.name)
+        self.assertIsNotNone(self.lead.ai_paused_at)
+
+        pause_activity = LeadActivity.objects.filter(
+            lead=self.lead,
+            activity_type=LeadActivity.TYPE_LEAD_UPDATED,
+            metadata__action='ai_paused'
+        ).latest('id')
+        self.assertEqual(pause_activity.metadata['user'], self.owner.name)
+
     @patch('apps.leads.integration_views.instagram_service.send_message', return_value={'message_id': 'ig-mid-1'})
     def test_manual_instagram_send_still_works_while_globally_paused(self, send_mock):
         request = self.factory.post('/api/leads/communications/instagram/send/', {'lead_id': self.lead.id, 'message': 'Manual instagram reply'}, format='json')
         force_authenticate(request, user=self.owner)
 
+        self.assertFalse(self.lead.ai_paused)
         response = send_instagram_message_from_comms(request)
 
         self.assertEqual(response.status_code, 200)
@@ -369,17 +383,42 @@ class GlobalChannelAiPauseTests(TestCase):
         ).latest('id')
         self.assertEqual(sent_activity.organization, self.org)
 
+        self.lead.refresh_from_db()
+        self.assertTrue(self.lead.ai_paused)
+        self.assertEqual(self.lead.ai_paused_by, self.owner.name)
+        self.assertIsNotNone(self.lead.ai_paused_at)
+
+        pause_activity = LeadActivity.objects.filter(
+            lead=self.lead,
+            activity_type=LeadActivity.TYPE_LEAD_UPDATED,
+            metadata__action='ai_paused'
+        ).latest('id')
+        self.assertEqual(pause_activity.metadata['user'], self.owner.name)
+
     @patch('apps.leads.integration_views.whatsapp_service.is_configured', return_value=True)
     @patch('apps.leads.integration_views.whatsapp_service.send_message', return_value={'message_id': 'wa-mid-1'})
     def test_manual_whatsapp_send_still_works_while_globally_paused(self, send_mock, _configured_mock):
         request = self.factory.post('/api/leads/communications/whatsapp/send/', {'lead_id': self.lead.id, 'message': 'Manual whatsapp reply'}, format='json')
         force_authenticate(request, user=self.owner)
 
+        self.assertFalse(self.lead.ai_paused)
         response = send_whatsapp_message_from_comms(request)
 
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response.data['success'])
         send_mock.assert_called_once_with(self.lead.whatsapp_phone, 'Manual whatsapp reply', org=self.org, raise_exception=True)
+
+        self.lead.refresh_from_db()
+        self.assertTrue(self.lead.ai_paused)
+        self.assertEqual(self.lead.ai_paused_by, self.owner.name)
+        self.assertIsNotNone(self.lead.ai_paused_at)
+
+        pause_activity = LeadActivity.objects.filter(
+            lead=self.lead,
+            activity_type=LeadActivity.TYPE_LEAD_UPDATED,
+            metadata__action='ai_paused'
+        ).latest('id')
+        self.assertEqual(pause_activity.metadata['user'], self.owner.name)
 
 class PassiveAiIntakeTests(TestCase):
     def setUp(self):

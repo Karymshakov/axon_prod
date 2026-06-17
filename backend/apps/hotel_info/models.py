@@ -232,6 +232,8 @@ class ReplyTemplateCategory(models.Model):
     name = models.CharField(max_length=100)
     order = models.PositiveIntegerField(default=0)
     is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         ordering = ['order', 'id']
@@ -251,6 +253,8 @@ class ReplyTemplate(models.Model):
     tags = models.JSONField(default=list, blank=True)
     order = models.PositiveIntegerField(default=0)
     is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         ordering = ['order', 'id']

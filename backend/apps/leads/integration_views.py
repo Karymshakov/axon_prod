@@ -2,6 +2,7 @@ import asyncio
 import os
 import logging
 import requests
+from django.utils import timezone
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from rest_framework import status
@@ -307,6 +308,21 @@ def send_telegram_message_from_comms(request):
                 'success': False,
                 'error': 'Failed to send message. Check bot configuration.'
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        # Pause AI since manager sent manual message
+        user_name = request.user.name or request.user.email if request.user.is_authenticated else 'Unknown'
+        if not lead.ai_paused:
+            lead.ai_paused = True
+            lead.ai_paused_at = timezone.now()
+            lead.ai_paused_by = user_name
+            lead.save(update_fields=['ai_paused', 'ai_paused_at', 'ai_paused_by'])
+            LeadActivity.objects.create(
+                lead=lead,
+                organization=lead.organization,
+                activity_type=LeadActivity.TYPE_LEAD_UPDATED,
+                description=f'🙋 {user_name} took manual control — AI paused',
+                metadata={'action': 'ai_paused', 'user': user_name},
+            )
 
         # Log activity
         LeadActivity.objects.create(
@@ -635,6 +651,21 @@ def send_instagram_message_from_comms(request):
                 'error': 'Failed to send message via Instagram'
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
+        # Pause AI since manager sent manual message
+        user_name = request.user.name or request.user.email if request.user.is_authenticated else 'Unknown'
+        if not lead.ai_paused:
+            lead.ai_paused = True
+            lead.ai_paused_at = timezone.now()
+            lead.ai_paused_by = user_name
+            lead.save(update_fields=['ai_paused', 'ai_paused_at', 'ai_paused_by'])
+            LeadActivity.objects.create(
+                lead=lead,
+                organization=org,
+                activity_type=LeadActivity.TYPE_LEAD_UPDATED,
+                description=f'🙋 {user_name} took manual control — AI paused',
+                metadata={'action': 'ai_paused', 'user': user_name},
+            )
+
         # Log activity — echo_origin='crm' lets the webhook echo handler identify
         # this message ID as a CRM send, not a native Instagram app takeover.
         LeadActivity.objects.create(
@@ -709,6 +740,21 @@ def send_whatsapp_message_from_comms(request):
                 'success': False,
                 'error': 'Failed to send message via WhatsApp'
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        # Pause AI since manager sent manual message
+        user_name = request.user.name or request.user.email if request.user.is_authenticated else 'Unknown'
+        if not lead.ai_paused:
+            lead.ai_paused = True
+            lead.ai_paused_at = timezone.now()
+            lead.ai_paused_by = user_name
+            lead.save(update_fields=['ai_paused', 'ai_paused_at', 'ai_paused_by'])
+            LeadActivity.objects.create(
+                lead=lead,
+                organization=org,
+                activity_type=LeadActivity.TYPE_LEAD_UPDATED,
+                description=f'🙋 {user_name} took manual control — AI paused',
+                metadata={'action': 'ai_paused', 'user': user_name},
+            )
 
         # Create activity record
         LeadActivity.objects.create(
