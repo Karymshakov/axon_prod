@@ -1,5 +1,7 @@
 import { Lead, fetchLeadNotes, fetchPipelineStages, fetchSegments, getContactChannelLabel, getLeadStatusLabel, resolveLeadContactChannel } from '@/lib/api'
 import { useQuery } from '@tanstack/react-query'
+import { LeadSourceBadge } from '@/components/lead-source-badge'
+import { useLeadDiscoverySources } from '@/hooks/use-lead-discovery-sources'
 import {
   Sheet,
   SheetContent,
@@ -27,18 +29,18 @@ const STATUS_COLORS: Record<string, 'default' | 'secondary' | 'destructive' | 'o
   converted: 'default',
 }
 
-const getLeadSummary = (lead: Lead) => {
+const getLeadDescription = (lead: Lead) => {
   const candidates = [
     lead.problem_description,
     lead.latest_note,
     lead.notes,
-    lead.next_steps,
   ]
 
   return candidates.find((value) => value?.trim())?.trim() || ''
 }
 
 export function LeadDetailsSidebar({ lead, open, onClose, onEdit, onOpenFull }: LeadDetailsSidebarProps) {
+  const discoverySourceOptions = useLeadDiscoverySources()
   const { data: notes = [] } = useQuery({
     queryKey: ['lead-notes', lead?.id],
     queryFn: () => fetchLeadNotes(lead!.id),
@@ -89,8 +91,10 @@ export function LeadDetailsSidebar({ lead, open, onClose, onEdit, onOpenFull }: 
   const stageName = getLeadStatusLabel(lead.status, stages)
   const segmentName = segments.find((segment) => segment.key === lead.segment)?.name
     || (lead.segment === 'individual' ? 'Индивидуальный' : lead.segment_display)
-  const summaryText = getLeadSummary(lead)
+  const descriptionText = getLeadDescription(lead)
+  const nextStepsText = lead.next_steps?.trim() || ''
   const channelLabel = getContactChannelLabel(resolveLeadContactChannel(lead))
+  const discoverySourceLabel = discoverySourceOptions.find((option) => option.value === lead.discovery_source)?.label
 
   return (
     <Sheet open={open} onOpenChange={(isOpen) => !isOpen && onClose()}>
@@ -132,12 +136,21 @@ export function LeadDetailsSidebar({ lead, open, onClose, onEdit, onOpenFull }: 
 
         <div className="mt-6 space-y-4">
 
-          {/* 1. Краткое описание */}
-          {summaryText ? (
+          {/* 1. Описание */}
+          {descriptionText ? (
             <div className="rounded-xl border bg-muted/20 p-4">
-              <div className="mb-2 text-sm font-semibold">Кратко</div>
+              <div className="mb-2 text-sm font-semibold">Описание</div>
               <div className="text-sm leading-6 text-muted-foreground whitespace-pre-wrap">
-                {summaryText}
+                {descriptionText}
+              </div>
+            </div>
+          ) : null}
+
+          {nextStepsText && nextStepsText !== descriptionText ? (
+            <div className="rounded-xl border bg-muted/20 p-4">
+              <div className="mb-2 text-sm font-semibold">Следующие шаги</div>
+              <div className="text-sm leading-6 text-muted-foreground whitespace-pre-wrap">
+                {nextStepsText}
               </div>
             </div>
           ) : null}
@@ -254,6 +267,17 @@ export function LeadDetailsSidebar({ lead, open, onClose, onEdit, onOpenFull }: 
                <span className="font-medium text-muted-foreground">Канал обращения</span>
                <span>{channelLabel}</span>
              </div>
+             {lead.discovery_source ? (
+               <div className="flex items-start justify-between gap-4 px-3 py-2">
+                 <span className="font-medium text-muted-foreground">Откуда узнал</span>
+                 <div className="flex max-w-[62%] flex-col items-end gap-1 text-right">
+                   <LeadSourceBadge source={lead.discovery_source} label={discoverySourceLabel} />
+                   {lead.discovery_source_detail ? (
+                     <span className="text-xs leading-5 text-muted-foreground">{lead.discovery_source_detail}</span>
+                   ) : null}
+                 </div>
+               </div>
+             ) : null}
             <div className="flex items-center justify-between px-3 py-2">
               <span className="font-medium text-muted-foreground">Статус</span>
               <Badge variant={STATUS_COLORS[lead.status] || 'secondary'}>{stageName}</Badge>
