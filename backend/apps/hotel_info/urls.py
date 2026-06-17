@@ -4,7 +4,7 @@ from .views import (
     hotel_profile, prompt_preview,
     room_combinations, room_combination_note,
     room_combination_room_types, create_custom_combination, delete_custom_combination,
-    hide_auto_combination,
+    hide_auto_combination, reply_template_categories_shim,
     HotelProfileLinkViewSet, HotelPolicyViewSet, HotelFAQViewSet, HandoverContactViewSet,
     PlaybookViewSet, RoomPricingViewSet,
 )
