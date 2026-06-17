@@ -32,6 +32,7 @@ if ReplyTemplateViewSet is not None:
 
 urlpatterns = [
     path('hotel-profile/', hotel_profile, name='hotel-profile'),
+    path('reply-template-categories/', reply_template_categories_shim, name='reply-template-category-list'),
     path('ai/prompt-preview/', prompt_preview, name='ai-prompt-preview'),
     path('room-combinations/', room_combinations, name='room-combinations'),
     path('room-combinations/room-types/', room_combination_room_types, name='room-combination-room-types'),

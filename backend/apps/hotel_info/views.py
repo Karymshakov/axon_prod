@@ -45,6 +45,16 @@ def _get_org(request):
     return org
 
 
+@api_view(['GET'])
+def reply_template_categories_shim(request):
+    """Temporary shim: return empty list for reply template categories.
+
+    This prevents 404 on deployments where ReplyTemplate models/viewsets
+    are not available. Replace with real implementation later.
+    """
+    return Response([])
+
+
 @api_view(['GET', 'PATCH'])
 def hotel_profile(request):
     """Retrieve or partially update the org-scoped HotelProfile."""
