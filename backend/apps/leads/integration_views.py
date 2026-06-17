@@ -1,4 +1,5 @@
 import asyncio
+import mimetypes
 import os
 import logging
 import requests
@@ -12,6 +13,38 @@ from .whatsapp_service import whatsapp_service
 from .ringcentral_service import ringcentral_service
 from .models import TelegramConfig, RingCentralConfig, AIConfig, InstagramAppConfig, WhatsAppAppConfig
 from .serializers import AIConfigSerializer
+from .media_utils import infer_media_type
+
+
+def _truthy(value) -> bool:
+    return value is True or str(value).lower() in {'1', 'true', 'yes', 'on'}
+
+
+def _resolve_media_file(file_url: str) -> tuple[str, str | None]:
+    from django.conf import settings
+
+    rel_path = file_url
+    if rel_path.startswith(settings.MEDIA_URL):
+        rel_path = rel_path[len(settings.MEDIA_URL):]
+    file_path = os.path.join(settings.MEDIA_ROOT, rel_path)
+    mime_type, _ = mimetypes.guess_type(file_path)
+    return file_path, mime_type
+
+
+def _request_media_type(request, file_path: str, mime_type: str | None) -> str:
+    requested = (request.data.get('media_type') or '').strip().lower()
+    if requested in {'photo', 'video', 'audio', 'document'}:
+        return requested
+    return infer_media_type(mime_type=mime_type, filename=file_path)
+
+
+def _media_label(media_type: str) -> str:
+    return {
+        'photo': 'photo',
+        'video': 'video',
+        'audio': 'audio',
+        'document': 'file',
+    }.get(media_type, 'file')
 
 
 class _OrgNotSet:
@@ -277,6 +310,7 @@ def send_telegram_message_from_comms(request):
     lead_id = request.data.get('lead_id')
     message_text = request.data.get('message', '').strip()
     file_url = request.data.get('file_url')
+    is_voice = _truthy(request.data.get('is_voice'))
 
     if not lead_id or (not message_text and not file_url):
         return Response({
@@ -296,14 +330,10 @@ def send_telegram_message_from_comms(request):
                 'error': 'This lead does not have a Telegram chat ID configured'
             }, status=status.HTTP_400_BAD_REQUEST)
 
-        # Send photo or message
+        media_type = None
         if file_url:
-            from django.conf import settings
-            # Construct local file path
-            rel_path = file_url
-            if rel_path.startswith(settings.MEDIA_URL):
-                rel_path = rel_path[len(settings.MEDIA_URL):]
-            file_path = os.path.join(settings.MEDIA_ROOT, rel_path)
+            file_path, mime_type = _resolve_media_file(file_url)
+            media_type = _request_media_type(request, file_path, mime_type)
 
             if not os.path.exists(file_path):
                 return Response({
@@ -313,9 +343,22 @@ def send_telegram_message_from_comms(request):
 
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
-            result = loop.run_until_complete(
-                telegram_service.send_photo(lead.telegram_chat_id, file_path, caption=message_text or None)
-            )
+            if media_type == 'photo':
+                result = loop.run_until_complete(
+                    telegram_service.send_photo(lead.telegram_chat_id, file_path, caption=message_text or None)
+                )
+            elif media_type == 'video':
+                result = loop.run_until_complete(
+                    telegram_service.send_video(lead.telegram_chat_id, file_path, caption=message_text or None)
+                )
+            elif media_type == 'audio':
+                result = loop.run_until_complete(
+                    telegram_service.send_audio(lead.telegram_chat_id, file_path, caption=message_text or None, as_voice=is_voice)
+                )
+            else:
+                result = loop.run_until_complete(
+                    telegram_service.send_document(lead.telegram_chat_id, file_path, caption=message_text or None)
+                )
             loop.close()
         else:
             # Send message using async
@@ -349,12 +392,14 @@ def send_telegram_message_from_comms(request):
 
         # Log activity
         if file_url:
-            desc = f"Sent Telegram photo: {message_text[:100]}" if message_text else "Sent Telegram photo"
+            media_label = _media_label(media_type or 'photo')
+            desc = f"Sent Telegram {media_label}: {message_text[:100]}" if message_text else f"Sent Telegram {media_label}"
             metadata = {
                 'message_id': result.get('message_id'),
                 'text': message_text,
-                'media_type': 'photo',
+                'media_type': media_type or 'photo',
                 'file_url': file_url,
+                'is_voice': is_voice,
                 'is_manager_manual': True,
             }
         else:
@@ -652,6 +697,7 @@ def send_instagram_message_from_comms(request):
     lead_id = request.data.get('lead_id')
     message_text = request.data.get('message', '').strip()
     file_url = request.data.get('file_url')
+    is_voice = _truthy(request.data.get('is_voice'))
 
     if not lead_id or (not message_text and not file_url):
         return Response({
@@ -681,16 +727,25 @@ def send_instagram_message_from_comms(request):
 
         # Send photo and/or message
         result = None
-        photo_result = None
+        media_result = None
+        media_type = None
         if file_url:
+            file_path, mime_type = _resolve_media_file(file_url)
+            media_type = _request_media_type(request, file_path, mime_type)
             absolute_url = request.build_absolute_uri(file_url)
-            photo_result = instagram_service.send_image_url(lead.instagram_user_id, absolute_url, org=org)
-            if not photo_result:
+            attachment_type = {
+                'photo': 'image',
+                'video': 'video',
+                'audio': 'audio',
+                'document': 'file',
+            }.get(media_type, 'image')
+            media_result = instagram_service.send_attachment_url(lead.instagram_user_id, absolute_url, attachment_type=attachment_type, org=org)
+            if not media_result:
                 return Response({
                     'success': False,
-                    'error': 'Failed to send photo via Instagram'
+                    'error': f'Failed to send {media_type or "media"} via Instagram. Meta may reject this media type or non-public URL.'
                 }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-            result = photo_result
+            result = media_result
 
         text_result = None
         if message_text:
@@ -720,16 +775,18 @@ def send_instagram_message_from_comms(request):
         # Log activity — echo_origin='crm' lets the webhook echo handler identify
         # this message ID as a CRM send, not a native Instagram app takeover.
         if file_url:
+            media_label = _media_label(media_type or 'photo')
             LeadActivity.objects.create(
                 lead=lead,
                 organization=org,
                 activity_type=LeadActivity.TYPE_INSTAGRAM_SENT,
-                description="Sent Instagram photo",
+                description=f"Sent Instagram {media_label}",
                 echo_origin=LeadActivity.ECHO_ORIGIN_CRM,
                 metadata={
-                    'message_id': photo_result.get('message_id'),
-                    'media_type': 'photo',
+                    'message_id': media_result.get('message_id'),
+                    'media_type': media_type or 'photo',
                     'file_url': file_url,
+                    'is_voice': is_voice,
                     'echo_origin': LeadActivity.ECHO_ORIGIN_CRM,
                     'is_manager_manual': True,
                 }
@@ -774,6 +831,7 @@ def send_whatsapp_message_from_comms(request):
     lead_id = request.data.get('lead_id')
     message_text = request.data.get('message', '').strip()
     file_url = request.data.get('file_url')
+    is_voice = _truthy(request.data.get('is_voice'))
 
     if not lead_id or (not message_text and not file_url):
         return Response({
@@ -801,14 +859,10 @@ def send_whatsapp_message_from_comms(request):
                 'error': 'WhatsApp is not configured. Please connect your WhatsApp Business Account in Settings.'
             }, status=status.HTTP_400_BAD_REQUEST)
 
-        # Send message (photo or text)
+        media_type = None
         if file_url:
-            from django.conf import settings
-            # Construct local file path
-            rel_path = file_url
-            if rel_path.startswith(settings.MEDIA_URL):
-                rel_path = rel_path[len(settings.MEDIA_URL):]
-            file_path = os.path.join(settings.MEDIA_ROOT, rel_path)
+            file_path, mime_type = _resolve_media_file(file_url)
+            media_type = _request_media_type(request, file_path, mime_type)
 
             if not os.path.exists(file_path):
                 return Response({
@@ -816,7 +870,23 @@ def send_whatsapp_message_from_comms(request):
                     'error': f'File not found: {file_url}'
                 }, status=status.HTTP_400_BAD_REQUEST)
 
-            result = whatsapp_service.send_photo(lead.whatsapp_phone, file_path, caption=message_text or None, org=org, raise_exception=True)
+            wa_media_type = {
+                'photo': 'image',
+                'video': 'video',
+                'audio': 'audio',
+                'document': 'document',
+            }.get(media_type, 'image')
+            result = whatsapp_service.send_media(
+                lead.whatsapp_phone,
+                file_path,
+                media_type=wa_media_type,
+                caption=message_text if media_type != 'audio' else None,
+                org=org,
+                raise_exception=True,
+            )
+            if media_type == 'audio' and message_text:
+                text_result = whatsapp_service.send_message(lead.whatsapp_phone, message_text, org=org, raise_exception=True)
+                result = text_result or result
         else:
             result = whatsapp_service.send_message(lead.whatsapp_phone, message_text, org=org, raise_exception=True)
 
@@ -843,12 +913,14 @@ def send_whatsapp_message_from_comms(request):
 
         # Create activity record
         if file_url:
-            desc = f"WhatsApp photo sent: {message_text[:100]}" if message_text else "WhatsApp photo sent"
+            media_label = _media_label(media_type or 'photo')
+            desc = f"WhatsApp {media_label} sent: {message_text[:100]}" if message_text else f"WhatsApp {media_label} sent"
             metadata = {
                 'message_id': result.get('message_id'),
                 'text': message_text,
-                'media_type': 'photo',
+                'media_type': media_type or 'photo',
                 'file_url': file_url,
+                'is_voice': is_voice,
                 'is_manager_manual': True,
             }
         else:
@@ -1445,10 +1517,15 @@ def upload_comms_media(request):
 
         # Construct file URL
         file_url = f"{settings.MEDIA_URL}comms_media/{unique_filename}"
+        mime_type = getattr(uploaded_file, 'content_type', None)
+        media_type = infer_media_type(mime_type=mime_type, filename=uploaded_file.name)
 
         return Response({
             'success': True,
-            'file_url': file_url
+            'file_url': file_url,
+            'media_type': media_type,
+            'mime_type': mime_type,
+            'file_name': uploaded_file.name,
         })
     except Exception as e:
         logger.error(f"Error uploading comms media: {e}", exc_info=True)

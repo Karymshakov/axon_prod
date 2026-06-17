@@ -172,6 +172,64 @@ class TelegramService:
             logger.error(f"Failed to read document file {file_path}: {e}")
             return None
 
+    async def send_video(self, chat_id: str, file_path: str, caption: str = None) -> Optional[dict]:
+        """Send a video file to a Telegram chat."""
+        bot = await self._get_bot()
+        if not bot:
+            logger.error("Telegram bot not configured")
+            return None
+
+        try:
+            with open(file_path, 'rb') as video_file:
+                message = await bot.send_video(
+                    chat_id=chat_id,
+                    video=video_file,
+                    caption=caption,
+                    supports_streaming=True,
+                )
+            return {
+                'message_id': message.message_id,
+                'chat_id': message.chat_id,
+            }
+        except TelegramError as e:
+            logger.error(f"Failed to send video to {chat_id}: {e}")
+            raise
+        except OSError as e:
+            logger.error(f"Failed to read video file {file_path}: {e}")
+            return None
+
+    async def send_audio(self, chat_id: str, file_path: str, caption: str = None, as_voice: bool = False) -> Optional[dict]:
+        """Send an audio file to a Telegram chat, optionally as a voice message."""
+        bot = await self._get_bot()
+        if not bot:
+            logger.error("Telegram bot not configured")
+            return None
+
+        try:
+            with open(file_path, 'rb') as audio_file:
+                if as_voice:
+                    message = await bot.send_voice(
+                        chat_id=chat_id,
+                        voice=audio_file,
+                        caption=caption,
+                    )
+                else:
+                    message = await bot.send_audio(
+                        chat_id=chat_id,
+                        audio=audio_file,
+                        caption=caption,
+                    )
+            return {
+                'message_id': message.message_id,
+                'chat_id': message.chat_id,
+            }
+        except TelegramError as e:
+            logger.error(f"Failed to send audio to {chat_id}: {e}")
+            raise
+        except OSError as e:
+            logger.error(f"Failed to read audio file {file_path}: {e}")
+            return None
+
     async def send_media_group(self, chat_id: str, file_sources: list, caption: str = None) -> Optional[list]:
         """
         Send multiple photos as a Telegram media group (album).

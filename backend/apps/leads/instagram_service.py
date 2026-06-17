@@ -76,10 +76,15 @@ class InstagramService:
         caption is accepted for API symmetry but Instagram DM attachments do not
         render captions; the AI should follow up with a text message instead.
         """
+        return self.send_attachment_url(recipient_id, image_url, attachment_type='image', org=org)
+
+    def send_attachment_url(self, recipient_id: str, media_url: str, attachment_type: str = 'image', org=None) -> Optional[dict]:
+        """Send a media attachment URL to an Instagram user."""
         if not self.is_configured(org):
             logger.error("Instagram not configured")
             return None
 
+        api_attachment_type = attachment_type if attachment_type in {'image', 'video', 'audio', 'file'} else 'image'
         try:
             response = requests.post(
                 INSTAGRAM_MESSAGES_URL,
@@ -87,8 +92,8 @@ class InstagramService:
                     "recipient": {"id": recipient_id},
                     "message": {
                         "attachment": {
-                            "type": "image",
-                            "payload": {"url": image_url},
+                            "type": api_attachment_type,
+                            "payload": {"url": media_url},
                         }
                     },
                     "access_token": self.access_token,
@@ -97,11 +102,11 @@ class InstagramService:
             )
             response.raise_for_status()
             result = response.json()
-            logger.info(f"Sent Instagram image to {recipient_id}: {image_url}")
+            logger.info(f"Sent Instagram {api_attachment_type} to {recipient_id}: {media_url}")
             return {
                 'recipient_id': recipient_id,
                 'message_id': result.get('message_id'),
-                'image_url': image_url,
+                'media_url': media_url,
             }
         except requests.exceptions.RequestException as e:
             error_detail = ''
@@ -110,7 +115,7 @@ class InstagramService:
                     error_detail = f' — {e.response.text}'
                 except Exception:
                     pass
-            logger.error(f"Failed to send Instagram image to {recipient_id}: {e}{error_detail}")
+            logger.error(f"Failed to send Instagram {api_attachment_type} to {recipient_id}: {e}{error_detail}")
             return None
 
     def send_typing_indicator(self, recipient_id: str, org=None) -> None:

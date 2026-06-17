@@ -463,8 +463,10 @@ export interface SendTelegramMessageResponse {
   error?: string
 }
 
-export function sendTelegramMessageFromComms(leadId: number, message: string, fileUrl?: string) {
-  return api.post<SendTelegramMessageResponse>('/communications/telegram/send/', { lead_id: leadId, message, file_url: fileUrl })
+export type CommsMediaType = 'photo' | 'video' | 'audio' | 'document'
+
+export function sendTelegramMessageFromComms(leadId: number, message: string, fileUrl?: string, mediaType?: CommsMediaType, isVoice?: boolean) {
+  return api.post<SendTelegramMessageResponse>('/communications/telegram/send/', { lead_id: leadId, message, file_url: fileUrl, media_type: mediaType, is_voice: isVoice })
 }
 
 // Instagram Integration types
@@ -522,8 +524,8 @@ export function resubscribeInstagramWebhook() {
   return api.post<{ success: boolean }>('/integrations/instagram/resubscribe-webhook/', {})
 }
 
-export function sendInstagramMessageFromComms(leadId: number, message: string, fileUrl?: string) {
-  return api.post<SendInstagramMessageResponse>('/communications/instagram/send/', { lead_id: leadId, message, file_url: fileUrl })
+export function sendInstagramMessageFromComms(leadId: number, message: string, fileUrl?: string, mediaType?: CommsMediaType, isVoice?: boolean) {
+  return api.post<SendInstagramMessageResponse>('/communications/instagram/send/', { lead_id: leadId, message, file_url: fileUrl, media_type: mediaType, is_voice: isVoice })
 }
 
 // WhatsApp Integration types
@@ -571,8 +573,8 @@ export function saveWhatsAppAppCredentials(data: { app_id?: string; app_secret: 
   return api.post<{ success: boolean }>('/integrations/whatsapp/save-app-credentials/', data)
 }
 
-export function sendWhatsAppMessageFromComms(leadId: number, message: string, fileUrl?: string) {
-  return api.post<SendWhatsAppMessageResponse>('/communications/whatsapp/send/', { lead_id: leadId, message, file_url: fileUrl })
+export function sendWhatsAppMessageFromComms(leadId: number, message: string, fileUrl?: string, mediaType?: CommsMediaType, isVoice?: boolean) {
+  return api.post<SendWhatsAppMessageResponse>('/communications/whatsapp/send/', { lead_id: leadId, message, file_url: fileUrl, media_type: mediaType, is_voice: isVoice })
 }
 
 // Pipeline Stage types
@@ -2029,7 +2031,7 @@ export function superAdminImpersonate(userId: number) {
 export function uploadCommsMedia(file: File) {
   const formData = new FormData()
   formData.append('file', file)
-  return apiFetch<{ success: boolean; file_url: string }>('/communications/upload-media/', {
+  return apiFetch<{ success: boolean; file_url: string; media_type: CommsMediaType; mime_type?: string; file_name?: string }>('/communications/upload-media/', {
     method: 'POST',
     body: formData,
   })

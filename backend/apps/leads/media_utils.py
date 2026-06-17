@@ -61,6 +61,22 @@ def media_metadata(media_type: str, file_url: str, mime_type: str | None = None,
     return metadata
 
 
+def infer_media_type(mime_type: str | None = None, filename: str | None = None, fallback: str = 'photo') -> str:
+    guessed_mime = mime_type
+    if not guessed_mime and filename:
+        guessed_mime, _ = mimetypes.guess_type(filename)
+
+    if guessed_mime:
+        if guessed_mime.startswith('image/'):
+            return 'photo'
+        if guessed_mime.startswith('video/'):
+            return 'video'
+        if guessed_mime.startswith('audio/'):
+            return 'audio'
+
+    return fallback
+
+
 def is_media_only_activity_metadata(metadata: dict | None) -> bool:
     if not metadata or not metadata.get('media_type'):
         return False

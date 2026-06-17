@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { SparklesIcon, CopyIcon, CheckIcon, RefreshCwIcon, XIcon } from 'lucide-react'
+import { SparklesIcon, CopyIcon, CheckIcon, RefreshCwIcon, ChevronDownIcon } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { generateCopilotSuggestion } from '@/lib/api'
 import { toast } from 'sonner'
@@ -13,7 +13,7 @@ export function CopilotSuggestions({ leadId, onSelectSuggestion }: CopilotSugges
   const [suggestion, setSuggestion] = useState('')
   const [isLoading, setIsLoading] = useState(false)
   const [copied, setCopied] = useState(false)
-  const [isDismissed, setIsDismissed] = useState(false)
+  const [isCollapsed, setIsCollapsed] = useState(false)
   const requestIdRef = useRef(0)
   const mountedRef = useRef(true)
   const copiedResetTimeoutRef = useRef<number | null>(null)
@@ -41,7 +41,7 @@ export function CopilotSuggestions({ leadId, onSelectSuggestion }: CopilotSugges
     setSuggestion('')
     setIsLoading(false)
     setCopied(false)
-    setIsDismissed(false)
+    setIsCollapsed(false)
   }, [clearCopiedResetTimeout, leadId])
 
   const handleGenerate = async () => {
@@ -75,15 +75,6 @@ export function CopilotSuggestions({ leadId, onSelectSuggestion }: CopilotSugges
     toast.success('Подсказка скопирована в поле ввода!')
   }
 
-  const handleDismiss = () => {
-    requestIdRef.current += 1
-    clearCopiedResetTimeout()
-    setSuggestion('')
-    setIsLoading(false)
-    setCopied(false)
-    setIsDismissed(true)
-  }
-
   const handleCopyToClipboard = () => {
     navigator.clipboard.writeText(suggestion)
     setCopied(true)
@@ -97,8 +88,27 @@ export function CopilotSuggestions({ leadId, onSelectSuggestion }: CopilotSugges
     toast.success('Скопировано в буфер обмена')
   }
 
-  if (isDismissed) {
-    return null
+  if (isCollapsed) {
+    return (
+      <div className="flex items-center justify-between gap-3 rounded-lg border border-purple-100 bg-gradient-to-r from-purple-50 to-indigo-50/50 px-3 py-2 dark:border-purple-900/40 dark:from-purple-950/20 dark:to-indigo-950/10">
+        <div className="flex min-w-0 items-center gap-2 text-purple-800 dark:text-purple-300">
+          <SparklesIcon className={`h-4 w-4 shrink-0 ${isLoading ? 'animate-pulse' : ''}`} />
+          <span className="truncate text-xs font-semibold">
+            {isLoading ? 'ИИ готовит черновик...' : suggestion ? 'Черновик ИИ скрыт' : 'ИИ-ассистент скрыт'}
+          </span>
+        </div>
+        <Button
+          type="button"
+          size="sm"
+          variant="ghost"
+          onClick={() => setIsCollapsed(false)}
+          className="h-7 gap-1 text-xs text-purple-700 hover:bg-purple-100/60 hover:text-purple-900 dark:text-purple-300"
+        >
+          <ChevronDownIcon className="h-3 w-3" />
+          Показать
+        </Button>
+      </div>
+    )
   }
 
   return (
@@ -126,12 +136,12 @@ export function CopilotSuggestions({ leadId, onSelectSuggestion }: CopilotSugges
             type="button"
             size="icon-xs"
             variant="ghost"
-            onClick={handleDismiss}
+            onClick={() => setIsCollapsed(true)}
             className="text-purple-700 hover:text-purple-900 hover:bg-purple-100/60 dark:text-purple-300"
-            aria-label="Скрыть ИИ-ассистент"
-            title="Скрыть ИИ-ассистент"
+            aria-label="Свернуть ИИ-ассистент"
+            title="Свернуть ИИ-ассистент"
           >
-            <XIcon className="h-3 w-3" />
+            <ChevronDownIcon className="h-3 w-3" />
           </Button>
         </div>
       </div>

@@ -175,6 +175,12 @@ class WhatsAppService:
         """
         Upload a local photo file and send it as a WhatsApp message.
         """
+        return self.send_media(recipient_phone, file_path, media_type='image', caption=caption, org=org, raise_exception=raise_exception)
+
+    def send_media(self, recipient_phone: str, file_path: str, media_type: str = 'image', caption: str = None, org=None, raise_exception: bool = False) -> Optional[dict]:
+        """
+        Upload and send a local media file as image, video, or audio.
+        """
         if not self.is_configured(org):
             logger.error("WhatsApp not configured")
             return None
@@ -186,7 +192,7 @@ class WhatsAppService:
 
         media_id = self.upload_media(file_path, mime_type=mime_type, org=org)
         if not media_id:
-            logger.error("Failed to upload WhatsApp photo media")
+            logger.error("Failed to upload WhatsApp media")
             if raise_exception:
                 raise Exception("Failed to upload media to WhatsApp Cloud API")
             return None
@@ -199,17 +205,18 @@ class WhatsAppService:
             }
             formatted_phone = recipient_phone.replace('+', '').replace('-', '').replace(' ', '')
 
+            api_media_type = media_type if media_type in {'image', 'video', 'audio', 'document'} else 'image'
             payload = {
                 "messaging_product": "whatsapp",
                 "recipient_type": "individual",
                 "to": formatted_phone,
-                "type": "image",
-                "image": {
+                "type": api_media_type,
+                api_media_type: {
                     "id": media_id,
                 }
             }
-            if caption:
-                payload["image"]["caption"] = caption
+            if caption and api_media_type in {'image', 'video', 'document'}:
+                payload[api_media_type]["caption"] = caption
 
             response = requests.post(url, json=payload, headers=headers, timeout=15)
             response.raise_for_status()
@@ -222,7 +229,7 @@ class WhatsAppService:
                 'media_id': media_id,
             }
         except Exception as e:
-            logger.error(f"Failed to send WhatsApp photo to {recipient_phone}: {e}")
+            logger.error(f"Failed to send WhatsApp {media_type} to {recipient_phone}: {e}")
             if raise_exception:
                 raise
             return None

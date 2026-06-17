@@ -20,7 +20,11 @@ import {
   ArrowLeftIcon,
   PaperclipIcon,
   XIcon,
-  FileIcon
+  FileIcon,
+  PauseIcon,
+  MicIcon,
+  SquareIcon,
+  Volume2Icon
 } from 'lucide-react'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Input } from '@/components/ui/input'
@@ -144,6 +148,163 @@ function getSentBy(metadata: Record<string, unknown> | null): string {
   return 'ИИ'
 }
 
+type CommsMediaType = 'photo' | 'video' | 'audio' | 'document'
+
+function inferFileMediaType(file: File): CommsMediaType {
+  if (file.type.startsWith('image/')) return 'photo'
+  if (file.type.startsWith('video/')) return 'video'
+  if (file.type.startsWith('audio/')) return 'audio'
+  return 'document'
+}
+
+function formatMediaTime(seconds: number) {
+  if (!Number.isFinite(seconds) || seconds <= 0) return '0:00'
+  const totalSeconds = Math.floor(seconds)
+  const minutes = Math.floor(totalSeconds / 60)
+  const rest = totalSeconds % 60
+  return `${minutes}:${String(rest).padStart(2, '0')}`
+}
+
+function CustomVideoPlayer({ src, title }: { src: string; title?: string }) {
+  const videoRef = useRef<HTMLVideoElement>(null)
+  const [isPlaying, setIsPlaying] = useState(false)
+  const [currentTime, setCurrentTime] = useState(0)
+  const [duration, setDuration] = useState(0)
+
+  const togglePlayback = () => {
+    const video = videoRef.current
+    if (!video) return
+    if (video.paused) {
+      void video.play()
+    } else {
+      video.pause()
+    }
+  }
+
+  const handleSeek = (value: string) => {
+    const nextTime = Number(value)
+    const video = videoRef.current
+    if (!video || !Number.isFinite(nextTime)) return
+    video.currentTime = nextTime
+    setCurrentTime(nextTime)
+  }
+
+  return (
+    <div className="relative w-full min-w-[240px] max-w-[440px] overflow-hidden rounded-xl bg-black shadow-sm">
+      <video
+        ref={videoRef}
+        src={src}
+        preload="metadata"
+        className="max-h-80 w-full bg-black"
+        onClick={togglePlayback}
+        onPlay={() => setIsPlaying(true)}
+        onPause={() => setIsPlaying(false)}
+        onLoadedMetadata={(event) => setDuration(event.currentTarget.duration || 0)}
+        onTimeUpdate={(event) => setCurrentTime(event.currentTarget.currentTime || 0)}
+      >
+        Ваш браузер не поддерживает просмотр видео.
+      </video>
+      <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 via-black/45 to-transparent px-3 pb-3 pt-8 text-white">
+        <div className="mb-2 flex items-center gap-2">
+          <button
+            type="button"
+            onClick={togglePlayback}
+            className="flex h-8 w-8 items-center justify-center rounded-full bg-white text-slate-950 shadow-sm transition hover:bg-white/90"
+            aria-label={isPlaying ? 'Пауза' : 'Воспроизвести'}
+          >
+            {isPlaying ? <PauseIcon className="h-4 w-4" /> : <PlayIcon className="h-4 w-4" />}
+          </button>
+          <div className="min-w-0 flex-1">
+            <div className="truncate text-xs font-semibold">{title || 'Видео'}</div>
+            <div className="text-[11px] text-white/75">{formatMediaTime(currentTime)} / {formatMediaTime(duration)}</div>
+          </div>
+        </div>
+        <input
+          type="range"
+          min={0}
+          max={duration || 0}
+          step={0.1}
+          value={Math.min(currentTime, duration || currentTime)}
+          onChange={(event) => handleSeek(event.target.value)}
+          className="h-1 w-full accent-white"
+          aria-label="Позиция видео"
+        />
+      </div>
+    </div>
+  )
+}
+
+function CustomAudioPlayer({ src, title, isVoice }: { src: string; title?: string; isVoice?: boolean }) {
+  const audioRef = useRef<HTMLAudioElement>(null)
+  const [isPlaying, setIsPlaying] = useState(false)
+  const [currentTime, setCurrentTime] = useState(0)
+  const [duration, setDuration] = useState(0)
+
+  const togglePlayback = () => {
+    const audio = audioRef.current
+    if (!audio) return
+    if (audio.paused) {
+      void audio.play()
+    } else {
+      audio.pause()
+    }
+  }
+
+  const handleSeek = (value: string) => {
+    const nextTime = Number(value)
+    const audio = audioRef.current
+    if (!audio || !Number.isFinite(nextTime)) return
+    audio.currentTime = nextTime
+    setCurrentTime(nextTime)
+  }
+
+  return (
+    <div className="min-w-[260px] max-w-[380px] rounded-xl border border-violet-200/70 bg-white/90 p-3 text-slate-950 shadow-sm dark:border-violet-900/40 dark:bg-slate-950/80 dark:text-white">
+      <audio
+        ref={audioRef}
+        src={src}
+        preload="metadata"
+        onPlay={() => setIsPlaying(true)}
+        onPause={() => setIsPlaying(false)}
+        onLoadedMetadata={(event) => setDuration(event.currentTarget.duration || 0)}
+        onTimeUpdate={(event) => setCurrentTime(event.currentTarget.currentTime || 0)}
+      >
+        Ваш браузер не поддерживает воспроизведение аудио.
+      </audio>
+      <div className="flex items-center gap-3">
+        <button
+          type="button"
+          onClick={togglePlayback}
+          className="flex h-10 w-10 items-center justify-center rounded-full bg-violet-600 text-white shadow-sm transition hover:bg-violet-700"
+          aria-label={isPlaying ? 'Пауза' : 'Воспроизвести'}
+        >
+          {isPlaying ? <PauseIcon className="h-4 w-4" /> : <PlayIcon className="h-4 w-4" />}
+        </button>
+        <div className="min-w-0 flex-1">
+          <div className="mb-1 flex items-center gap-1.5 text-xs font-semibold text-violet-800 dark:text-violet-200">
+            {isVoice ? <MicIcon className="h-3.5 w-3.5" /> : <Volume2Icon className="h-3.5 w-3.5" />}
+            <span className="truncate">{title || (isVoice ? 'Голосовое сообщение' : 'Аудио')}</span>
+          </div>
+          <input
+            type="range"
+            min={0}
+            max={duration || 0}
+            step={0.1}
+            value={Math.min(currentTime, duration || currentTime)}
+            onChange={(event) => handleSeek(event.target.value)}
+            className="h-1 w-full accent-violet-600"
+            aria-label="Позиция аудио"
+          />
+          <div className="mt-1 flex justify-between text-[11px] text-muted-foreground">
+            <span>{formatMediaTime(currentTime)}</span>
+            <span>{formatMediaTime(duration)}</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function CommunicationsPage() {
   const navigate = useNavigate()
   const routeSearch = Route.useSearch()
@@ -170,27 +331,109 @@ function CommunicationsPage() {
 
   const [attachment, setAttachment] = useState<File | null>(null)
   const [attachmentPreview, setAttachmentPreview] = useState<string | null>(null)
+  const [attachmentMediaType, setAttachmentMediaType] = useState<CommsMediaType | null>(null)
+  const [attachmentIsVoice, setAttachmentIsVoice] = useState(false)
+  const [isRecordingVoice, setIsRecordingVoice] = useState(false)
+  const [recordingSeconds, setRecordingSeconds] = useState(0)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null)
+  const recordingChunksRef = useRef<Blob[]>([])
+  const recordingTimerRef = useRef<number | null>(null)
+
+  const clearRecordingTimer = () => {
+    if (recordingTimerRef.current !== null) {
+      window.clearInterval(recordingTimerRef.current)
+      recordingTimerRef.current = null
+    }
+  }
+
+  const setAttachmentFromFile = (file: File, isVoice = false) => {
+    if (attachmentPreview) {
+      URL.revokeObjectURL(attachmentPreview)
+    }
+    setAttachment(file)
+    setAttachmentMediaType(inferFileMediaType(file))
+    setAttachmentIsVoice(isVoice)
+    setAttachmentPreview(URL.createObjectURL(file))
+  }
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (file) {
-      setAttachment(file)
-      const reader = new FileReader()
-      reader.onloadend = () => {
-        setAttachmentPreview(reader.result as string)
-      }
-      reader.readAsDataURL(file)
+      setAttachmentFromFile(file)
     }
   }
 
   const handleRemoveAttachment = () => {
+    if (attachmentPreview) {
+      URL.revokeObjectURL(attachmentPreview)
+    }
     setAttachment(null)
     setAttachmentPreview(null)
+    setAttachmentMediaType(null)
+    setAttachmentIsVoice(false)
     if (fileInputRef.current) {
       fileInputRef.current.value = ''
     }
   }
+
+  const handleStartVoiceRecording = async () => {
+    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
+      toast.error('Запись голоса не поддерживается в этом браузере')
+      return
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      const recorder = new MediaRecorder(stream)
+      recordingChunksRef.current = []
+      recorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          recordingChunksRef.current.push(event.data)
+        }
+      }
+      recorder.onstop = () => {
+        const mimeType = recorder.mimeType || 'audio/webm'
+        const blob = new Blob(recordingChunksRef.current, { type: mimeType })
+        const extension = mimeType.includes('ogg') ? 'ogg' : 'webm'
+        const file = new File([blob], `voice-message.${extension}`, { type: mimeType })
+        setAttachmentFromFile(file, true)
+        stream.getTracks().forEach((track) => track.stop())
+        recordingChunksRef.current = []
+      }
+      mediaRecorderRef.current = recorder
+      recorder.start()
+      setIsRecordingVoice(true)
+      setRecordingSeconds(0)
+      clearRecordingTimer()
+      recordingTimerRef.current = window.setInterval(() => {
+        setRecordingSeconds((seconds) => seconds + 1)
+      }, 1000)
+    } catch {
+      toast.error('Не удалось получить доступ к микрофону')
+    }
+  }
+
+  const handleStopVoiceRecording = () => {
+    const recorder = mediaRecorderRef.current
+    if (recorder && recorder.state !== 'inactive') {
+      recorder.stop()
+    }
+    setIsRecordingVoice(false)
+    clearRecordingTimer()
+  }
+
+  useEffect(() => {
+    return () => {
+      clearRecordingTimer()
+      if (mediaRecorderRef.current?.state === 'recording') {
+        mediaRecorderRef.current.stop()
+      }
+      if (attachmentPreview) {
+        URL.revokeObjectURL(attachmentPreview)
+      }
+    }
+  }, [attachmentPreview])
 
   // Channel override for leads with multiple communication channels
   const [overrideChannel, setOverrideChannel] = useState<ConversationChannel | null>(null)
@@ -485,22 +728,24 @@ function CommunicationsPage() {
     setIsSending(true)
     try {
       let fileUrl: string | undefined = undefined
+      let mediaType: CommsMediaType | undefined = attachmentMediaType ?? undefined
       if (attachment) {
         const uploadRes = await uploadCommsMedia(attachment)
         if (uploadRes && uploadRes.success) {
           fileUrl = uploadRes.file_url
+          mediaType = uploadRes.media_type || mediaType
         } else {
-          throw new Error('Не удалось загрузить изображение на сервер')
+          throw new Error('Не удалось загрузить медиафайл на сервер')
         }
       }
 
       let response
       if (activeChannel === 'telegram') {
-        response = await sendTelegramMessageFromComms(selectedLead.id, message, fileUrl)
+        response = await sendTelegramMessageFromComms(selectedLead.id, message, fileUrl, mediaType, attachmentIsVoice)
       } else if (activeChannel === 'instagram') {
-        response = await sendInstagramMessageFromComms(selectedLead.id, message, fileUrl)
+        response = await sendInstagramMessageFromComms(selectedLead.id, message, fileUrl, mediaType, attachmentIsVoice)
       } else if (activeChannel === 'whatsapp') {
-        response = await sendWhatsAppMessageFromComms(selectedLead.id, message, fileUrl)
+        response = await sendWhatsAppMessageFromComms(selectedLead.id, message, fileUrl, mediaType, attachmentIsVoice)
       }
 
       if (response?.success) {
@@ -923,6 +1168,7 @@ function CommunicationsPage() {
                       const fileUrls = activity.metadata?.file_urls as string[] | undefined
                       const mediaTitle = activity.metadata?.media_title as string | undefined
                       const fileName = activity.metadata?.file_name as string | undefined
+                      const isVoice = Boolean(activity.metadata?.is_voice)
                       const rawMediaUrls = fileUrls && fileUrls.length > 0 ? fileUrls : (fileUrl ? [fileUrl] : [])
                       const mediaUrls = rawMediaUrls.map(resolveMediaUrl)
 
@@ -974,27 +1220,13 @@ function CommunicationsPage() {
 
                             {mediaType === 'video' && mediaUrls.length > 0 && (
                               <div className="p-1.5">
-                                <video
-                                  src={mediaUrls[0]}
-                                  controls
-                                  preload="metadata"
-                                  className="max-h-80 w-full min-w-[220px] max-w-[420px] rounded-xl bg-black"
-                                >
-                                  Ваш браузер не поддерживает просмотр видео.
-                                </video>
+                                <CustomVideoPlayer src={mediaUrls[0]} title={mediaTitle || fileName || 'Видео'} />
                               </div>
                             )}
 
                             {mediaType === 'audio' && mediaUrls.length > 0 && (
                               <div className="p-2.5 min-w-[240px]">
-                                <audio
-                                  src={mediaUrls[0]}
-                                  controls
-                                  preload="metadata"
-                                  className="w-full max-w-[360px]"
-                                >
-                                  Ваш браузер не поддерживает воспроизведение аудио.
-                                </audio>
+                                <CustomAudioPlayer src={mediaUrls[0]} title={mediaTitle || fileName} isVoice={isVoice} />
                               </div>
                             )}
 
@@ -1059,7 +1291,7 @@ function CommunicationsPage() {
                 )}
 
                 {/* Templates and Quick utilities */}
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
                   <QuickRepliesPopover channel={activeChannel} onSelectTemplate={(text) => setMessage(prev => prev + text)} />
 
                   {/* Emoji Picker */}
@@ -1090,7 +1322,7 @@ function CommunicationsPage() {
                     <>
                       <input
                         type="file"
-                        accept="image/*"
+                        accept="image/*,video/*,audio/*"
                         ref={fileInputRef}
                         onChange={handleFileChange}
                         className="hidden"
@@ -1102,7 +1334,18 @@ function CommunicationsPage() {
                         onClick={() => fileInputRef.current?.click()}
                       >
                         <PaperclipIcon className="h-4 w-4" />
-                        Фото
+                        Медиа
+                      </Button>
+
+                      <Button
+                        variant={isRecordingVoice ? 'default' : 'outline'}
+                        size="sm"
+                        className={`h-8 gap-1.5 ${isRecordingVoice ? 'bg-red-600 text-white hover:bg-red-700' : 'text-muted-foreground hover:text-foreground'}`}
+                        onClick={isRecordingVoice ? handleStopVoiceRecording : handleStartVoiceRecording}
+                        type="button"
+                      >
+                        {isRecordingVoice ? <SquareIcon className="h-4 w-4" /> : <MicIcon className="h-4 w-4" />}
+                        {isRecordingVoice ? formatMediaTime(recordingSeconds) : 'Голос'}
                       </Button>
                     </>
                   )}
@@ -1110,11 +1353,28 @@ function CommunicationsPage() {
 
                 {/* Attachment Preview */}
                 {attachmentPreview && (
-                  <div className="relative inline-block border rounded-xl overflow-hidden bg-muted p-1 max-w-[200px]">
-                    <img src={attachmentPreview} alt="Превью" className="max-h-28 rounded-lg object-cover" />
+                  <div className="relative inline-block max-w-[320px] overflow-hidden rounded-xl border bg-muted p-1 shadow-sm">
+                    {attachmentMediaType === 'photo' && (
+                      <img src={attachmentPreview} alt="Превью" className="max-h-28 rounded-lg object-cover" />
+                    )}
+                    {attachmentMediaType === 'video' && (
+                      <div className="w-[280px]">
+                        <CustomVideoPlayer src={attachmentPreview} title={attachment?.name || 'Видео'} />
+                      </div>
+                    )}
+                    {attachmentMediaType === 'audio' && (
+                      <CustomAudioPlayer src={attachmentPreview} title={attachment?.name} isVoice={attachmentIsVoice} />
+                    )}
+                    {attachmentMediaType === 'document' && (
+                      <div className="flex min-w-[240px] items-center gap-2 rounded-lg bg-background px-3 py-2 text-sm">
+                        <FileIcon className="h-4 w-4 text-muted-foreground" />
+                        <span className="truncate">{attachment?.name || 'Файл'}</span>
+                      </div>
+                    )}
                     <button
                       onClick={handleRemoveAttachment}
                       className="absolute top-2 right-2 bg-background/80 hover:bg-background rounded-full p-1 shadow-sm transition-colors text-muted-foreground hover:text-foreground"
+                      type="button"
                     >
                       <XIcon className="h-3 w-3" />
                     </button>
