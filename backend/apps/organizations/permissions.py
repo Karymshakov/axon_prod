@@ -10,7 +10,7 @@ class IsOrganizationMember(BasePermission):
             return False
         if getattr(request.user, 'is_superadmin', False):
             return True
-        org = getattr(request, 'organization', None)
+        org = getattr(request, 'organization', None) or getattr(request.user, 'current_organization', None)
         if org is None:
             return False
         return OrganizationMember.objects.filter(
@@ -26,7 +26,7 @@ class IsOrganizationAdmin(BasePermission):
             return False
         if getattr(request.user, 'is_superadmin', False):
             return True
-        org = getattr(request, 'organization', None)
+        org = getattr(request, 'organization', None) or getattr(request.user, 'current_organization', None)
         if org is None:
             return False
         return OrganizationMember.objects.filter(
@@ -45,7 +45,7 @@ class IsOrganizationOwner(BasePermission):
             return False
         if getattr(request.user, 'is_superadmin', False):
             return True
-        org = getattr(request, 'organization', None)
+        org = getattr(request, 'organization', None) or getattr(request.user, 'current_organization', None)
         if org is None:
             return False
         return OrganizationMember.objects.filter(
