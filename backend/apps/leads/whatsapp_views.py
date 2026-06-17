@@ -24,6 +24,13 @@ from .whatsapp_service import whatsapp_service
 from .agent_service import agent_service
 from .agent_dispatcher import agent_dispatcher
 from .channel_ai_control import get_channel_ai_status_label, is_channel_ai_globally_paused
+from .media_utils import (
+    MEDIA_PLACEHOLDERS,
+    extension_from_filename,
+    incoming_media_path,
+    is_media_only_activity_metadata,
+    media_metadata as build_media_metadata,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -174,12 +181,16 @@ def _delayed_whatsapp_ai_response(lead_id: int, activity_id: int, sender_phone: 
         if last_ai_sent:
             pending_filter['created_at__gt'] = last_ai_sent.created_at
         pending_messages = list(LeadActivity.objects.filter(**pending_filter).order_by('created_at'))
-        if len(pending_messages) > 1:
+        pending_text_messages = [
+            m for m in pending_messages
+            if not is_media_only_activity_metadata(m.metadata)
+        ]
+        if len(pending_text_messages) > 1:
             combined_text = '\n'.join(
-                m.metadata.get('text', '') for m in pending_messages
+                m.metadata.get('text', '') for m in pending_text_messages
                 if m.metadata and m.metadata.get('text')
             ).strip() or text
-            logger.info(f"Lead {lead.id}: pooled {len(pending_messages)} WhatsApp messages into one response")
+            logger.info(f"Lead {lead.id}: pooled {len(pending_text_messages)} WhatsApp messages into one response")
         else:
             combined_text = text
 
@@ -201,6 +212,8 @@ def _delayed_whatsapp_ai_response(lead_id: int, activity_id: int, sender_phone: 
             if activity.id in pending_ids:
                 continue
             meta = activity.metadata or {}
+            if is_media_only_activity_metadata(meta):
+                continue
             msg_text = meta.get('text', '') or activity.description or ''
             if activity.activity_type == LeadActivity.TYPE_WHATSAPP_RECEIVED:
                 conversation_history.append({"role": "user", "content": msg_text})
@@ -248,7 +261,7 @@ def _delayed_whatsapp_ai_response(lead_id: int, activity_id: int, sender_phone: 
         def _generate_ai_response() -> str | None:
             return agent_dispatcher.dispatch(
                 lead, combined_text, lead_data, conversation_history,
-                is_pooled=len(pending_messages) > 1,
+                is_pooled=len(pending_text_messages) > 1,
                 activity_history=activity_history,
             )
 
@@ -378,6 +391,8 @@ def _delayed_whatsapp_ai_response(lead_id: int, activity_id: int, sender_phone: 
                 ),
                 lead,
             ).order_by('created_at'):
+                if is_media_only_activity_metadata(activity.metadata):
+                    continue
                 role = "user" if activity.activity_type == LeadActivity.TYPE_WHATSAPP_RECEIVED else "assistant"
                 msg_text = activity.metadata.get('text', '') if activity.metadata else activity.description
                 conversation_history_for_extract.append({"role": role, "content": msg_text})
@@ -533,20 +548,28 @@ def whatsapp_webhook(request):
 
                 for message in messages:
                     msg_type = message.get('type')
-                    if msg_type not in ('text', 'image'):
+                    if msg_type not in ('text', 'image', 'video', 'audio'):
                         continue
 
                     sender_phone = message.get('from', '')
                     message_id = message.get('id', '')
                     contact_name = contact_lookup.get(sender_phone, '')
 
-                    is_photo = (msg_type == 'image')
+                    media_type = {
+                        'image': 'photo',
+                        'video': 'video',
+                        'audio': 'audio',
+                    }.get(msg_type)
                     caption = ''
-                    if is_photo:
-                        caption = message.get('image', {}).get('caption', '')
-                        message_text = caption or '[Изображение получено]'
+                    if media_type:
+                        media_payload = message.get(msg_type, {})
+                        caption = media_payload.get('caption', '')
+                        message_text = caption or MEDIA_PLACEHOLDERS.get(media_type, '[Файл получен]')
                     else:
+                        media_payload = {}
                         message_text = message.get('text', {}).get('body', '')
+
+                    is_media_only = bool(media_type) and not caption.strip()
 
                     if not sender_phone or not message_text:
                         continue
@@ -592,31 +615,26 @@ def whatsapp_webhook(request):
                         logger.info(f"Skipping duplicate WhatsApp message {message_id}")
                         continue
 
-                    # Download media if photo
+                    # Download media attachments for manager playback in the CRM.
+                    # The AI receives only message text/captions, never the file.
                     media_metadata = {}
-                    if is_photo:
+                    if media_type:
                         try:
-                            media_id = message.get('image', {}).get('id')
+                            media_id = media_payload.get('id')
                             if media_id:
-                                import os
-                                from django.conf import settings
-                                incoming_dir = os.path.join(settings.MEDIA_ROOT, 'incoming_photos')
-                                os.makedirs(incoming_dir, exist_ok=True)
-
-                                import re
                                 message_id_clean = re.sub(r'[^a-zA-Z0-9_\-]', '_', message_id)
-                                local_filename = f"wa_{message_id_clean}.jpg"
-                                dest_path = os.path.join(incoming_dir, local_filename)
+                                mime_type = media_payload.get('mime_type')
+                                file_name = media_payload.get('filename')
+                                default_ext = '.jpg' if media_type == 'photo' else '.mp4' if media_type == 'video' else '.ogg'
+                                extension = extension_from_filename(file_name, mime_type, default_ext)
+                                dest_path, file_url = incoming_media_path('wa', message_id_clean, extension)
 
                                 download_success = whatsapp_service.download_media(media_id, dest_path, org=_wa_org)
                                 if download_success:
-                                    media_metadata = {
-                                        'media_type': 'photo',
-                                        'file_url': f"{settings.MEDIA_URL}incoming_photos/{local_filename}"
-                                    }
-                                    logger.info(f"Downloaded guest photo from WhatsApp: {media_metadata['file_url']}")
+                                    media_metadata = build_media_metadata(media_type, file_url, mime_type, file_name)
+                                    logger.info(f"Downloaded guest {media_type} from WhatsApp: {media_metadata['file_url']}")
                         except Exception as e:
-                            logger.error(f"Error downloading incoming WhatsApp photo: {e}", exc_info=True)
+                            logger.error(f"Error downloading incoming WhatsApp media: {e}", exc_info=True)
 
                     # Create activity for received message
                     metadata = {
@@ -629,7 +647,15 @@ def whatsapp_webhook(request):
                     if media_metadata:
                         metadata.update(media_metadata)
 
-                    desc = f"Received photo from WhatsApp" + (f": {caption}" if is_photo and caption else "") if is_photo else f'Received from WhatsApp: {message_text[:100]}{"..." if len(message_text) > 100 else ""}'
+                    if media_type:
+                        desc_media = {
+                            'photo': 'photo',
+                            'video': 'video',
+                            'audio': 'audio',
+                        }.get(media_type, 'attachment')
+                        desc = f"Received {desc_media} from WhatsApp" + (f": {caption}" if caption else "")
+                    else:
+                        desc = f'Received from WhatsApp: {message_text[:100]}{"..." if len(message_text) > 100 else ""}'
 
                     current_activity = LeadActivity.objects.create(
                         lead=lead,
@@ -679,7 +705,7 @@ def whatsapp_webhook(request):
                         detail=eligibility_reason,
                         status='success' if eligible else 'warning',
                     )
-                    if eligible:
+                    if eligible and not is_media_only:
                         thread = threading.Thread(
                             target=_delayed_whatsapp_ai_response,
                             args=(lead.id, current_activity.id, sender_phone, message_id, message_text),
@@ -687,10 +713,11 @@ def whatsapp_webhook(request):
                         )
                         thread.start()
                     else:
+                        skip_reason = 'media-only message' if is_media_only else eligibility_reason
                         finalize_diagnostics(
                             current_activity.id,
                             result=OUTCOME_SKIPPED,
-                            summary=f'Skipped — {eligibility_reason}',
+                            summary=f'Skipped — {skip_reason}',
                             status='warning',
                         )
 

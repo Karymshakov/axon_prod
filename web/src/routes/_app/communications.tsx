@@ -19,7 +19,8 @@ import {
   ScrollTextIcon,
   ArrowLeftIcon,
   PaperclipIcon,
-  XIcon
+  XIcon,
+  FileIcon
 } from 'lucide-react'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Input } from '@/components/ui/input'
@@ -897,9 +898,18 @@ function CommunicationsPage() {
                         lowerText === '[аудио получено]' ||
                         lowerText === '[видео получено]' ||
                         lowerText === '[файл получен]' ||
+                        lowerText === '[получено: image]' ||
+                        lowerText === '[получено: video]' ||
+                        lowerText === '[получено: audio]' ||
                         lowerText === 'received photo from whatsapp' ||
+                        lowerText === 'received video from whatsapp' ||
+                        lowerText === 'received audio from whatsapp' ||
                         lowerText === 'received telegram photo' ||
-                        lowerText.startsWith('received photo from')
+                        lowerText === 'received telegram video' ||
+                        lowerText === 'received telegram audio' ||
+                        lowerText.startsWith('received photo from') ||
+                        lowerText.startsWith('received video from') ||
+                        lowerText.startsWith('received audio from')
 
                       if (isPlaceholder) {
                         messageText = ''
@@ -912,8 +922,9 @@ function CommunicationsPage() {
                       const fileUrl = activity.metadata?.file_url as string | undefined
                       const fileUrls = activity.metadata?.file_urls as string[] | undefined
                       const mediaTitle = activity.metadata?.media_title as string | undefined
-                      const rawPhotoUrls = fileUrls && fileUrls.length > 0 ? fileUrls : (fileUrl ? [fileUrl] : [])
-                      const photoUrls = rawPhotoUrls.map(resolveMediaUrl)
+                      const fileName = activity.metadata?.file_name as string | undefined
+                      const rawMediaUrls = fileUrls && fileUrls.length > 0 ? fileUrls : (fileUrl ? [fileUrl] : [])
+                      const mediaUrls = rawMediaUrls.map(resolveMediaUrl)
 
                       const timestamp = new Date(activity.created_at).toLocaleString('ru-RU', {
                         month: 'short',
@@ -937,18 +948,18 @@ function CommunicationsPage() {
                                 : 'bg-card border-border text-foreground'
                               }`}
                           >
-                            {/* Render attachments/photos */}
-                            {mediaType === 'photo' && photoUrls.length > 0 && (
+                            {/* Render attachments */}
+                            {mediaType === 'photo' && mediaUrls.length > 0 && (
                               <div className="p-1.5">
-                                {photoUrls.length === 1 ? (
+                                {mediaUrls.length === 1 ? (
                                   <img
-                                    src={photoUrls[0]}
+                                    src={mediaUrls[0]}
                                     alt={mediaTitle || 'Фото'}
                                     className="max-h-60 rounded-xl object-cover"
                                   />
                                 ) : (
                                   <div className="grid gap-1 grid-cols-2 max-w-[280px]">
-                                    {photoUrls.slice(0, 4).map((url, idx) => (
+                                    {mediaUrls.slice(0, 4).map((url, idx) => (
                                       <img
                                         key={idx}
                                         src={url}
@@ -958,6 +969,49 @@ function CommunicationsPage() {
                                     ))}
                                   </div>
                                 )}
+                              </div>
+                            )}
+
+                            {mediaType === 'video' && mediaUrls.length > 0 && (
+                              <div className="p-1.5">
+                                <video
+                                  src={mediaUrls[0]}
+                                  controls
+                                  preload="metadata"
+                                  className="max-h-80 w-full min-w-[220px] max-w-[420px] rounded-xl bg-black"
+                                >
+                                  Ваш браузер не поддерживает просмотр видео.
+                                </video>
+                              </div>
+                            )}
+
+                            {mediaType === 'audio' && mediaUrls.length > 0 && (
+                              <div className="p-2.5 min-w-[240px]">
+                                <audio
+                                  src={mediaUrls[0]}
+                                  controls
+                                  preload="metadata"
+                                  className="w-full max-w-[360px]"
+                                >
+                                  Ваш браузер не поддерживает воспроизведение аудио.
+                                </audio>
+                              </div>
+                            )}
+
+                            {mediaType === 'document' && mediaUrls.length > 0 && (
+                              <div className="p-2.5">
+                                <a
+                                  href={mediaUrls[0]}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-sm font-medium transition-colors ${isSent
+                                      ? 'border-white/25 bg-white/10 text-white hover:bg-white/15'
+                                      : 'border-border bg-muted/40 text-foreground hover:bg-muted'
+                                    }`}
+                                >
+                                  <FileIcon className="h-4 w-4" />
+                                  <span className="max-w-[260px] truncate">{fileName || mediaTitle || 'Открыть файл'}</span>
+                                </a>
                               </div>
                             )}
 

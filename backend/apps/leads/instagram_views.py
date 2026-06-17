@@ -17,6 +17,13 @@ from .instagram_service import instagram_service
 from .agent_service import agent_service
 from .agent_dispatcher import agent_dispatcher
 from .channel_ai_control import is_channel_ai_globally_paused
+from .media_utils import (
+    MEDIA_PLACEHOLDERS,
+    extension_from_filename,
+    incoming_media_path,
+    is_media_only_activity_metadata,
+    media_metadata as build_media_metadata,
+)
 
 logger = logging.getLogger(__name__)
 INSTAGRAM_GRAPH_API_VERSION = 'v25.0'
@@ -296,12 +303,16 @@ def _delayed_instagram_ai_response(
         pending_messages = list(
             LeadActivity.objects.filter(**pending_filter).order_by('created_at')
         )
-        if len(pending_messages) > 1:
+        pending_text_messages = [
+            m for m in pending_messages
+            if not is_media_only_activity_metadata(m.metadata)
+        ]
+        if len(pending_text_messages) > 1:
             combined_text = '\n'.join(
-                m.metadata.get('text', '') for m in pending_messages
+                m.metadata.get('text', '') for m in pending_text_messages
                 if m.metadata and m.metadata.get('text')
             ).strip() or text
-            logger.info(f"Lead {lead.id}: pooled {len(pending_messages)} Instagram messages into one response")
+            logger.info(f"Lead {lead.id}: pooled {len(pending_text_messages)} Instagram messages into one response")
         else:
             combined_text = text
 
@@ -351,6 +362,8 @@ def _delayed_instagram_ai_response(
             if activity.id in pending_ids:
                 continue  # Already in combined_text — don't duplicate in history
             meta = activity.metadata or {}
+            if is_media_only_activity_metadata(meta):
+                continue
             msg_text = meta.get('text', '') or activity.description or ''
             if activity.activity_type == LeadActivity.TYPE_INSTAGRAM_RECEIVED:
                 conversation_history.append({"role": "user", "content": msg_text})
@@ -392,7 +405,7 @@ def _delayed_instagram_ai_response(
         }
         ai_response = agent_dispatcher.dispatch(
             lead, combined_text, lead_data, conversation_history,
-            is_pooled=len(pending_messages) > 1,
+            is_pooled=len(pending_text_messages) > 1,
             activity_history=activity_history,
         )
 
@@ -490,6 +503,8 @@ def _delayed_instagram_ai_response(
                 ),
                 lead,
             ).order_by('created_at'):
+                if is_media_only_activity_metadata(activity.metadata):
+                    continue
                 role = "user" if activity.activity_type == LeadActivity.TYPE_INSTAGRAM_RECEIVED else "assistant"
                 msg_text = activity.metadata.get('text', '') if activity.metadata else activity.description
                 conversation_history_for_extract.append({"role": role, "content": msg_text})
@@ -651,56 +666,56 @@ def instagram_webhook(request):
                         ).start()
                     continue
 
-                # Extract attachments and download image if present
+                # Extract attachments and download media for manager playback.
+                # The AI receives only text/captions, never the media file.
                 attachments = message.get('attachments', [])
-                is_photo = False
+                media_type = None
                 media_metadata = {}
                 mid = message.get('mid')
 
                 if attachments:
                     attachment_type = attachments[0].get('type', 'attachment')
-                    if attachment_type == 'image':
-                        is_photo = True
+                    media_type = {
+                        'image': 'photo',
+                        'video': 'video',
+                        'audio': 'audio',
+                        'file': 'document',
+                    }.get(attachment_type)
+                    if media_type:
                         if not message_text:
-                            message_text = '[Изображение получено]'
+                            message_text = MEDIA_PLACEHOLDERS.get(media_type, '[Файл получен]')
                         payload = attachments[0].get('payload', {})
-                        photo_url = payload.get('url')
-                        if photo_url and mid:
+                        media_url = payload.get('url')
+                        if media_url and mid:
                             try:
-                                import os
-                                import requests
                                 mid_clean = re.sub(r'[^a-zA-Z0-9_\-]', '_', mid)
-                                from django.conf import settings
-                                incoming_dir = os.path.join(settings.MEDIA_ROOT, 'incoming_photos')
-                                os.makedirs(incoming_dir, exist_ok=True)
-
-                                local_filename = f"ig_{mid_clean}.jpg"
-                                dest_path = os.path.join(incoming_dir, local_filename)
 
                                 # Download file
-                                resp = requests.get(photo_url, timeout=15)
+                                resp = requests.get(media_url, timeout=20)
                                 if resp.ok:
+                                    mime_type = resp.headers.get('Content-Type', '').split(';', 1)[0] or None
+                                    default_ext = '.jpg' if media_type == 'photo' else '.mp4' if media_type == 'video' else '.mp3' if media_type == 'audio' else '.bin'
+                                    extension = extension_from_filename(media_url, mime_type, default_ext)
+                                    dest_path, file_url = incoming_media_path('ig', mid_clean, extension)
                                     with open(dest_path, 'wb') as f:
                                         f.write(resp.content)
-                                    media_metadata = {
-                                        'media_type': 'photo',
-                                        'file_url': f"{settings.MEDIA_URL}incoming_photos/{local_filename}"
-                                    }
-                                    logger.info(f"Downloaded guest photo from Instagram: {media_metadata['file_url']}")
+                                    media_metadata = build_media_metadata(media_type, file_url, mime_type)
+                                    logger.info(f"Downloaded guest {media_type} from Instagram: {media_metadata['file_url']}")
                             except Exception as e:
-                                logger.error(f"Error downloading incoming Instagram photo: {e}", exc_info=True)
+                                logger.error(f"Error downloading incoming Instagram media: {e}", exc_info=True)
+
+                is_media_only = bool(media_type) and not (message.get('text') or '').strip()
 
                 if not message_text:
                     if attachments:
                         attachment_type = attachments[0].get('type', 'attachment')
-                        if attachment_type == 'video':
-                            message_text = '[Видео получено]'
-                        elif attachment_type == 'audio':
-                            message_text = '[Аудио получено]'
-                        elif attachment_type == 'file':
-                            message_text = '[Файл получен]'
-                        else:
-                            message_text = f'[Получено: {attachment_type}]'
+                        fallback_media_type = {
+                            'image': 'photo',
+                            'video': 'video',
+                            'audio': 'audio',
+                            'file': 'document',
+                        }.get(attachment_type)
+                        message_text = MEDIA_PLACEHOLDERS.get(fallback_media_type or '', f'[Получено: {attachment_type}]')
                     elif message.get('sticker_id'):
                         message_text = '[Стикер получен]'
                     else:
@@ -790,11 +805,22 @@ def instagram_webhook(request):
                 if media_metadata:
                     activity_metadata.update(media_metadata)
 
+                if media_type:
+                    desc_media = {
+                        'photo': 'photo',
+                        'video': 'video',
+                        'audio': 'audio',
+                        'document': 'file',
+                    }.get(media_type, 'attachment')
+                    description = f'Received {desc_media} from Instagram'
+                else:
+                    description = f'Received from Instagram: {message_text[:100]}{"..." if len(message_text) > 100 else ""}'
+
                 current_activity = LeadActivity.objects.create(
                     lead=lead,
                     organization=lead.organization,
                     activity_type=LeadActivity.TYPE_INSTAGRAM_RECEIVED,
-                    description=f'Received from Instagram: {message_text[:100]}{"..." if len(message_text) > 100 else ""}',
+                    description=description,
                     metadata=activity_metadata
                 )
 
@@ -806,10 +832,12 @@ def instagram_webhook(request):
                 # Spawn background thread when AI is configured — classification runs
                 # regardless of auto_response; the thread decides whether to reply.
                 config = AIConfig.get_config(org=lead.organization)
-                if ai_service.is_configured():
+                if ai_service.is_configured() and not is_media_only:
                     _delayed_instagram_ai_response.delay(
                         lead.id, current_activity.id, sender_id, message_text
                     )
+                elif is_media_only:
+                    logger.info(f"Lead {lead.id}: skipping Instagram AI task — media-only message")
 
         return Response({'ok': True})
 
