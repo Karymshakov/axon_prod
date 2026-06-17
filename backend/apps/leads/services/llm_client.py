@@ -43,6 +43,7 @@ from apps.leads.services.prompt_assembly import (
     trim_messages_for_model,
 )
 from apps.leads.services.stage_resolver import is_reliable_contact_person
+from apps.leads.services.discovery_sources import build_discovery_sources_prompt_block
 
 logger = logging.getLogger(__name__)
 
@@ -845,7 +846,25 @@ class AIService:
             except Exception:
                 pass
 
-        needed = needed_booking + needed_contact
+        # Check if discovery_source is already collected
+        _discovery_source = ''
+        if lead is not None:
+            _discovery_source = str(getattr(lead, 'discovery_source', '') or '').strip()
+        if not _discovery_source and lead_data:
+            _discovery_source = str(lead_data.get('discovery_source', '') or '').strip()
+        _needs_discovery = not bool(_discovery_source)
+
+        # Add discovery_source to needed list — ask AFTER contacts, BEFORE transfer_to_manager
+        needed_discovery = []
+        if _needs_discovery:
+            needed_discovery.append(
+                'discovery_source — ask the guest ONE short question: '
+                '"Откуда вы узнали о нас?" / "How did you hear about us?" '
+                '(ask AFTER collecting name+phone, just before calling transfer_to_manager). '
+                'Accept any answer; do NOT pressure. If guest ignores or says they don\'t know — proceed without it.'
+            )
+
+        needed = needed_booking + needed_contact + needed_discovery
         if needed:
             lc_parts.append(
                 "\nSTILL NEEDED TO COMPLETE BOOKING — work through these in order:"
@@ -857,6 +876,13 @@ class AIService:
                     "Contact collection rule: require guest name and phone. "
                     "Email is optional; phrase it as 'email, если удобно', and continue without it if the guest does not provide one."
                 )
+            if _needs_discovery:
+                try:
+                    discovery_block = build_discovery_sources_prompt_block(_org)
+                    if discovery_block:
+                        lc_parts.append(f"\n{discovery_block}")
+                except Exception:
+                    pass
         if stage_policy and stage_policy.resolution:
             try:
                 missing = list(stage_policy.resolution.missing_fields or [])
