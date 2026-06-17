@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { SparklesIcon, CopyIcon, CheckIcon, RefreshCwIcon } from 'lucide-react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { SparklesIcon, CopyIcon, CheckIcon, RefreshCwIcon, XIcon } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { generateCopilotSuggestion } from '@/lib/api'
 import { toast } from 'sonner'
@@ -13,22 +13,60 @@ export function CopilotSuggestions({ leadId, onSelectSuggestion }: CopilotSugges
   const [suggestion, setSuggestion] = useState('')
   const [isLoading, setIsLoading] = useState(false)
   const [copied, setCopied] = useState(false)
+  const [isDismissed, setIsDismissed] = useState(false)
+  const requestIdRef = useRef(0)
+  const mountedRef = useRef(true)
+  const copiedResetTimeoutRef = useRef<number | null>(null)
+
+  const clearCopiedResetTimeout = useCallback(() => {
+    if (copiedResetTimeoutRef.current !== null) {
+      window.clearTimeout(copiedResetTimeoutRef.current)
+      copiedResetTimeoutRef.current = null
+    }
+  }, [])
+
+  useEffect(() => {
+    mountedRef.current = true
+
+    return () => {
+      mountedRef.current = false
+      requestIdRef.current += 1
+      clearCopiedResetTimeout()
+    }
+  }, [clearCopiedResetTimeout])
+
+  useEffect(() => {
+    requestIdRef.current += 1
+    clearCopiedResetTimeout()
+    setSuggestion('')
+    setIsLoading(false)
+    setCopied(false)
+    setIsDismissed(false)
+  }, [clearCopiedResetTimeout, leadId])
 
   const handleGenerate = async () => {
+    const requestId = requestIdRef.current + 1
+    requestIdRef.current = requestId
     setIsLoading(true)
     setSuggestion('')
     try {
       const response = await generateCopilotSuggestion(leadId)
+      if (!mountedRef.current || requestId !== requestIdRef.current) return
+
       if (response.suggestion) {
         setSuggestion(response.suggestion)
       } else {
         toast.error('ИИ не вернул вариантов ответа для этого диалога.')
       }
     } catch (err) {
+      if (!mountedRef.current || requestId !== requestIdRef.current) return
+
       console.error(err)
       toast.error('Ошибка при генерации подсказки ИИ.')
     } finally {
-      setIsLoading(false)
+      if (mountedRef.current && requestId === requestIdRef.current) {
+        setIsLoading(false)
+      }
     }
   }
 
@@ -37,11 +75,30 @@ export function CopilotSuggestions({ leadId, onSelectSuggestion }: CopilotSugges
     toast.success('Подсказка скопирована в поле ввода!')
   }
 
+  const handleDismiss = () => {
+    requestIdRef.current += 1
+    clearCopiedResetTimeout()
+    setSuggestion('')
+    setIsLoading(false)
+    setCopied(false)
+    setIsDismissed(true)
+  }
+
   const handleCopyToClipboard = () => {
     navigator.clipboard.writeText(suggestion)
     setCopied(true)
-    setTimeout(() => setCopied(false), 2000)
+    clearCopiedResetTimeout()
+    copiedResetTimeoutRef.current = window.setTimeout(() => {
+      if (mountedRef.current) {
+        setCopied(false)
+      }
+      copiedResetTimeoutRef.current = null
+    }, 2000)
     toast.success('Скопировано в буфер обмена')
+  }
+
+  if (isDismissed) {
+    return null
   }
 
   return (
@@ -51,18 +108,32 @@ export function CopilotSuggestions({ leadId, onSelectSuggestion }: CopilotSugges
           <SparklesIcon className="h-4 w-4 animate-pulse" />
           <span className="text-xs font-bold uppercase tracking-wider">ИИ-ассистент</span>
         </div>
-        
-        <Button 
-          type="button"
-          size="sm" 
-          variant="ghost" 
-          onClick={handleGenerate} 
-          disabled={isLoading}
-          className="h-7 text-xs text-purple-700 hover:text-purple-900 hover:bg-purple-100/60 dark:text-purple-300 gap-1"
-        >
-          <RefreshCwIcon className={`h-3 w-3 ${isLoading ? 'animate-spin' : ''}`} />
-          {suggestion ? 'Обновить черновик' : 'Предложить ответ'}
-        </Button>
+
+        <div className="flex items-center gap-1">
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            onClick={handleGenerate}
+            disabled={isLoading}
+            className="h-7 text-xs text-purple-700 hover:text-purple-900 hover:bg-purple-100/60 dark:text-purple-300 gap-1"
+          >
+            <RefreshCwIcon className={`h-3 w-3 ${isLoading ? 'animate-spin' : ''}`} />
+            {suggestion ? 'Обновить черновик' : 'Предложить ответ'}
+          </Button>
+
+          <Button
+            type="button"
+            size="icon-xs"
+            variant="ghost"
+            onClick={handleDismiss}
+            className="text-purple-700 hover:text-purple-900 hover:bg-purple-100/60 dark:text-purple-300"
+            aria-label="Скрыть ИИ-ассистент"
+            title="Скрыть ИИ-ассистент"
+          >
+            <XIcon className="h-3 w-3" />
+          </Button>
+        </div>
       </div>
 
       {isLoading && (

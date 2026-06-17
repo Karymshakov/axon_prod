@@ -998,6 +998,7 @@ function CommunicationsPage() {
                 {/* AI Co-pilot Suggestions Area (if AI paused) */}
                 {selectedLead.ai_paused && (
                   <CopilotSuggestions
+                    key={`${selectedLead.id}:${activeChannel}`}
                     leadId={selectedLead.id}
                     onSelectSuggestion={(text) => setMessage(text)}
                   />
