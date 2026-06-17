@@ -611,11 +611,6 @@ function LeadsPage() {
                                     source={lead.discovery_source}
                                     label={getDiscoverySourceOptionLabel(lead.discovery_source)}
                                   />
-                                  {lead.discovery_source_detail ? (
-                                    <span className="line-clamp-1 text-xs text-muted-foreground" title={lead.discovery_source_detail}>
-                                      {lead.discovery_source_detail}
-                                    </span>
-                                  ) : null}
                                 </div>
                               ) : (
                                 <span className="text-xs text-muted-foreground">—</span>

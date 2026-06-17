@@ -12,7 +12,7 @@ export function LeadSourceBadge({ source, label: displayLabel, className }: Lead
   const s = source.trim()
   const lower = s.toLowerCase()
 
-  // Premium, harmonious color palettes using HSL tailwind colors with dark borders
+  // Labels stay semantic, while styling remains quiet to avoid looking like a contact channel.
   let colorClasses = 'bg-slate-50 text-slate-700 border-slate-200 dark:bg-slate-900/50 dark:text-slate-400 dark:border-slate-800'
   let label = displayLabel || s
 
@@ -60,8 +60,10 @@ export function LeadSourceBadge({ source, label: displayLabel, className }: Lead
     label = 'Другое'
   }
 
+  colorClasses = 'bg-muted/35 text-muted-foreground border-border hover:bg-muted/35 dark:bg-muted/20 dark:text-muted-foreground dark:border-border'
+
   return (
-    <Badge variant="outline" className={`text-[10px] font-semibold tracking-wide uppercase px-2 py-0.5 border ${colorClasses} ${className}`}>
+    <Badge variant="outline" className={`text-[10px] font-medium px-1.5 py-0.5 border ${colorClasses} ${className}`}>
       {label}
     </Badge>
   )

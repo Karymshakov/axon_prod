@@ -90,22 +90,18 @@ export function CopilotSuggestions({ leadId, onSelectSuggestion }: CopilotSugges
 
   if (isCollapsed) {
     return (
-      <div className="flex items-center justify-between gap-3 rounded-lg border border-purple-100 bg-gradient-to-r from-purple-50 to-indigo-50/50 px-3 py-2 dark:border-purple-900/40 dark:from-purple-950/20 dark:to-indigo-950/10">
-        <div className="flex min-w-0 items-center gap-2 text-purple-800 dark:text-purple-300">
-          <SparklesIcon className={`h-4 w-4 shrink-0 ${isLoading ? 'animate-pulse' : ''}`} />
-          <span className="truncate text-xs font-semibold">
-            {isLoading ? 'ИИ готовит черновик...' : suggestion ? 'Черновик ИИ скрыт' : 'ИИ-ассистент скрыт'}
-          </span>
-        </div>
+      <div className="flex justify-end">
         <Button
           type="button"
           size="sm"
           variant="ghost"
           onClick={() => setIsCollapsed(false)}
-          className="h-7 gap-1 text-xs text-purple-700 hover:bg-purple-100/60 hover:text-purple-900 dark:text-purple-300"
+          className="h-7 gap-1.5 rounded-md px-2 text-[11px] font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
+          title={isLoading ? 'ИИ готовит черновик' : 'Показать ИИ-черновик'}
         >
+          <SparklesIcon className={`h-3.5 w-3.5 shrink-0 ${isLoading ? 'animate-pulse' : ''}`} />
+          <span>{isLoading ? 'ИИ думает' : 'ИИ-черновик'}</span>
           <ChevronDownIcon className="h-3 w-3" />
-          Показать
         </Button>
       </div>
     )

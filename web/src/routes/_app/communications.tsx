@@ -30,7 +30,6 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { LeadSourceBadge } from '@/components/lead-source-badge'
 import { Textarea } from '@/components/ui/textarea'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import {
@@ -1069,9 +1068,6 @@ function CommunicationsPage() {
                             </Badge>
                           )}
 
-                          {lead.discovery_source && (
-                            <LeadSourceBadge source={lead.discovery_source} className="h-4 px-1 text-[8px] shrink-0" />
-                          )}
                         </div>
 
                         {/* Unread badge */}
