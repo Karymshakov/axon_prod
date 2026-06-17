@@ -259,11 +259,10 @@ function LeadsPage() {
   const fetchParams = useMemo(() => {
     const params: Record<string, string> = {}
     if (searchQuery) params.search = searchQuery
-    if (statusFilter && statusFilter !== 'all') params.status = statusFilter
     if (channelFilter && channelFilter !== 'all') params.contact_channel = channelFilter
     if (discoveryFilter && discoveryFilter !== 'all') params.discovery_source = discoveryFilter
     return params
-  }, [searchQuery, statusFilter, channelFilter, discoveryFilter])
+  }, [searchQuery, channelFilter, discoveryFilter])
 
   const { data: stats } = useQuery({
     queryKey: ['lead-stats'],
@@ -286,12 +285,15 @@ function LeadsPage() {
         const actualChannel = resolveLeadContactChannel(lead)
         if (actualChannel !== channelFilter) return false
       }
+      if (statusFilter && statusFilter !== 'all') {
+        if ((lead.status || '') !== statusFilter) return false
+      }
       if (discoveryFilter && discoveryFilter !== 'all') {
         if ((lead.discovery_source || '') !== discoveryFilter) return false
       }
       return true
     })
-  }, [leads, channelFilter, discoveryFilter])
+  }, [leads, channelFilter, statusFilter, discoveryFilter])
 
   const deleteMutation = useMutation({
     mutationFn: deleteLead,
@@ -596,7 +598,7 @@ function LeadsPage() {
                     </SelectContent>
                   </Select>
 
-                  {(Object.keys(fetchParams).length > 0) ? (
+                  {(Object.keys(fetchParams).length > 0 || (statusFilter && statusFilter !== 'all')) ? (
                     <Button
                       variant="ghost"
                       size="sm"
@@ -766,7 +768,7 @@ function LeadsPage() {
                   {leadsByStatus.map((column, index) => {
                     const tone = getKanbanStageTone(column.key, index)
                     return (
-                    <div key={column.key} className="flex w-[200px] flex-none flex-col gap-1.5 sm:w-[212px] lg:w-[220px]">
+                    <div key={column.key} className="flex w-[264px] flex-none flex-col gap-1.5 sm:w-[276px] lg:w-[288px]">
                       <div className={`rounded-md border px-2.5 py-2 shadow-sm ${tone.header}`}>
                         <div className="flex items-center justify-between gap-2">
                           <div className="flex min-w-0 items-center gap-2">
@@ -834,7 +836,7 @@ function LeadsPage() {
 
       <DragOverlay dropAnimation={{ duration: 220, easing: 'cubic-bezier(0.2, 0, 0, 1)' }}>
         {activeLead ? (
-          <div className="rotate-1 scale-[1.02] opacity-95 shadow-2xl">
+          <div className="rotate-1 scale-[1.03] rounded-md opacity-95 shadow-2xl ring-1 ring-primary/20 transition-transform duration-150">
             <LeadCard
               lead={activeLead}
               onEdit={() => {}}

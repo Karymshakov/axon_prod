@@ -82,9 +82,9 @@ export function LeadCard({ lead, onOpen, onOpenChat }: LeadCardProps) {
       : 'bg-border'
 
   return (
-    <Card className="group relative cursor-pointer overflow-hidden rounded-md border bg-card shadow-sm transition-[border-color,box-shadow,transform] duration-150 hover:-translate-y-0.5 hover:border-primary/30 hover:shadow-md" onClick={handleOpen}>
+    <Card className="group relative h-[132px] cursor-pointer overflow-hidden rounded-md border bg-card shadow-sm transition-[border-color,box-shadow,transform] duration-150 hover:-translate-y-0.5 hover:border-primary/30 hover:shadow-md" onClick={handleOpen}>
       <span className={`absolute inset-y-0 left-0 w-1 ${stateMarkerClass}`} />
-      <CardContent className="p-2 pl-3">
+      <CardContent className="flex h-full flex-col p-2 pl-3">
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-1.5">
@@ -168,7 +168,7 @@ export function LeadCard({ lead, onOpen, onOpenChat }: LeadCardProps) {
           </div>
         ) : null}
 
-        <div className="mt-1.5 grid gap-1 text-xs text-muted-foreground">
+        <div className="mt-auto grid gap-1 pt-1.5 text-xs text-muted-foreground">
           {contactPhone ? (
             <div className="flex min-w-0 items-center gap-1.5">
               <PhoneIcon className="h-3 w-3 shrink-0" />
