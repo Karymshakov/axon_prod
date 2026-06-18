@@ -1487,24 +1487,8 @@ function SettingsPage() {
                               )}
                             </div>
                           </div>
+                          
                           <div className="flex gap-3">
-                            <Button
-                              variant="outline"
-                              onClick={async () => {
-                                try {
-                                  const res = await registerTelegramWebhook(webhookBaseUrl.trim() || undefined)
-                                  if (res.success) {
-                                    toast.success(`Webhook registered: ${res.webhook_url ?? ''}`)
-                                  } else {
-                                    toast.error(res.error || "Failed to register webhook")
-                                  }
-                                } catch {
-                                  toast.error("Failed to register webhook")
-                                }
-                              }}
-                            >
-                              Перерегистрировать вебхук
-                            </Button>
                             <Button
                               variant="destructive"
                               onClick={handleDisconnectTelegram}
