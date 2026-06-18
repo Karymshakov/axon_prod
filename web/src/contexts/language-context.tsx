@@ -1,10 +1,12 @@
-import { createContext, useContext, useState, useCallback, useMemo, type ReactNode } from 'react'
+import { createContext, useContext, useState, useRef, useCallback, useMemo, type ReactNode } from 'react'
 import { createT, type Language, type TFunction } from '@/lib/translations'
 import { getAccessToken, updateUserLanguage } from '@/lib/api'
 
 interface LanguageContextType {
   language: Language
   setLanguage: (lang: Language) => void
+  /** Синхронизировать язык из сервера — только если пользователь не менял сам */
+  syncFromServer: (lang: Language) => void
   t: TFunction
 }
 
@@ -25,28 +27,46 @@ export function LanguageProvider({ children }: { children: ReactNode }) {
   // без лишнего useEffect и двойного рендера
   const [language, setLanguageState] = useState<Language>(detectLanguage)
 
-  const setLanguage = useCallback((lang: Language) => {
+  // Флаг: менял ли пользователь язык вручную в этой сессии.
+  // Если да — не позволяем auth-context перетирать выбор.
+  const userOverrodeRef = useRef(false)
+
+  const setLanguage = useCallback((lang: Language, isUserAction = true) => {
+    if (isUserAction) {
+      userOverrodeRef.current = true
+    }
     setLanguageState(lang)
     try {
       localStorage.setItem('crm_language', lang)
     } catch {
       // ignore
     }
-    // Persist to backend if logged in
-    if (getAccessToken()) {
+    // Persist to backend only on explicit user action
+    if (isUserAction && getAccessToken()) {
       updateUserLanguage(lang).catch(() => {
         // Silently ignore — preference saved in localStorage regardless
       })
     }
   }, [])
 
+  // Метод для auth-context: синхронизировать язык из БД ТОЛЬКО если
+  // пользователь НЕ менял язык вручную в этой сессии
+  const syncFromServer = useCallback((lang: Language) => {
+    if (!userOverrodeRef.current) {
+      setLanguageState(lang)
+      try {
+        localStorage.setItem('crm_language', lang)
+      } catch {
+        // ignore
+      }
+    }
+  }, [])
+
   const t = useMemo(() => createT(language), [language])
 
-  // Стабилизируем объект value — React гарантированно перерисует
-  // всех consumer'ов только когда language или t реально изменятся
   const contextValue = useMemo(
-    () => ({ language, setLanguage, t }),
-    [language, setLanguage, t],
+    () => ({ language, setLanguage, t, syncFromServer }),
+    [language, setLanguage, t, syncFromServer],
   )
 
   return (

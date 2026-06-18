@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect, type ReactNode } from 'react'
+import { createContext, useContext, useState, useEffect, useRef, type ReactNode } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { getAccessToken, clearTokens, login as loginApi, logout as logoutApi, getMe, type User } from '@/lib/api'
 import { useLanguage } from '@/contexts/language-context'
@@ -18,26 +18,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const queryClient = useQueryClient()
-  const { language: currentLang, setLanguage } = useLanguage()
+  const { syncFromServer } = useLanguage()
+  // Синхронизируем язык из БД только ОДИН РАЗ — при первой загрузке профиля
+  const didSyncLanguage = useRef(false)
 
   useEffect(() => {
     const token = getAccessToken()
     if (token) {
       getMe()
-        .then(setUser)
+        .then((me) => {
+          setUser(me)
+          // Синхронизируем язык из профиля только при первом входе/загрузке
+          if (!didSyncLanguage.current && me.language) {
+            didSyncLanguage.current = true
+            syncFromServer(me.language)
+          }
+        })
         .catch(() => clearTokens())
         .finally(() => setIsLoading(false))
     } else {
       setIsLoading(false)
     }
-  }, [])
-
-  // Sync language with user preference from DB
-  useEffect(() => {
-    if (user?.language && user.language !== currentLang) {
-      setLanguage(user.language)
-    }
-  }, [user?.language, currentLang, setLanguage])
+  }, [syncFromServer])
 
   // When the API client fails to refresh the access token, clear state so the
   // route guard redirects to /login instead of staying stuck "logged in"
@@ -46,20 +48,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       clearTokens()
       queryClient.clear()
       setUser(null)
+      didSyncLanguage.current = false
     }
     window.addEventListener('auth:session-expired', handleSessionExpired)
     return () => window.removeEventListener('auth:session-expired', handleSessionExpired)
-  }, [])
+  }, [queryClient])
 
   const login = async (email: string, password: string) => {
     const response = await loginApi(email, password)
     setUser(response.user)
+    // При логине тоже синхронизируем язык из профиля (если пользователь не менял сам)
+    if (response.user.language) {
+      syncFromServer(response.user.language)
+    }
+    didSyncLanguage.current = true
   }
 
   const logout = async () => {
     await logoutApi()
     queryClient.clear()
     setUser(null)
+    didSyncLanguage.current = false
   }
 
   const updateUser = (updates: Partial<User>) => {
