@@ -1794,7 +1794,7 @@ function FlowsPage() {
 
 function FlowsPageContent() {
   const qc = useQueryClient()
-  const { t } = useLanguage()
+  const { t, language } = useLanguage()
   const [leftTab, setLeftTab] = useState<'flows' | 'tools' | 'ai-model' | 'transfer' | 'global-prompt' | 'agents'>('flows')
   const [selectedFlowId, setSelectedFlowId] = useState<number | null>(null)
   const [selectedCard, setSelectedCard] = useState<FlowCard | null>(null)
@@ -1813,6 +1813,16 @@ function FlowsPageContent() {
     queryFn: () => fetchFlow(selectedFlowId!),
     enabled: selectedFlowId !== null,
   })
+
+  const localizedFlows = useMemo(
+    () => flows.map((flow) => localizeFlow(flow, language)),
+    [flows, language],
+  )
+
+  const localizedFlowDetail = useMemo(
+    () => localizeFlow(flowDetail, language),
+    [flowDetail, language],
+  )
 
 
   // Auto-select first flow
@@ -1970,7 +1980,7 @@ function FlowsPageContent() {
             {/* Flow list sidebar */}
             <div className="w-56 shrink-0 flex flex-col border-r border-border bg-muted/20 overflow-hidden">
               <div className="flex-1 overflow-y-auto px-3 pt-3 space-y-1">
-                {flows.map((flow) => (
+                {localizedFlows.map((flow) => (
                   <div
                     key={flow.id}
                     onClick={() => setSelectedFlowId(flow.id)}
@@ -2016,7 +2026,7 @@ function FlowsPageContent() {
                   <div className="flex items-center gap-3 px-4 py-2.5 border-b border-border bg-muted/30 shrink-0">
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2">
-                        <h2 className="text-sm font-semibold text-foreground truncate">{flowDetail.name}</h2>
+                        <h2 className="text-sm font-semibold text-foreground truncate">{localizedFlowDetail?.name}</h2>
                         {flowDetail.is_active && (
                           <Badge className="bg-emerald-100 text-emerald-700 border-emerald-300 text-[10px] h-4 px-1.5">
                             <CheckCircle2Icon className="h-2.5 w-2.5 mr-1" />
@@ -2024,8 +2034,8 @@ function FlowsPageContent() {
                           </Badge>
                         )}
                       </div>
-                      {flowDetail.description && (
-                        <p className="text-[11px] text-muted-foreground truncate">{flowDetail.description}</p>
+                      {localizedFlowDetail?.description && (
+                        <p className="text-[11px] text-muted-foreground truncate">{localizedFlowDetail.description}</p>
                       )}
                     </div>
                     <div className="flex items-center gap-2 shrink-0">
@@ -2063,7 +2073,7 @@ function FlowsPageContent() {
                   <div className="flex flex-1 min-h-0 min-w-0 overflow-hidden">
                     <div className="flex-1 min-w-0 overflow-hidden">
                       <FlowCanvas
-                        flow={flowDetail}
+                        flow={localizedFlowDetail ?? flowDetail}
                         selectedCard={selectedCard}
                         onSelectCard={setSelectedCard}
                         onConnectionCreated={handleConnectionCreated}
