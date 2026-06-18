@@ -320,10 +320,16 @@ function AppLayout() {
           </SidebarFooter>
         </Sidebar>
         <div className="flex flex-1 flex-col min-w-0 min-h-0 overflow-hidden">
-          <header className="flex h-14 shrink-0 items-center gap-2 border-b px-4 md:hidden">
-            <SidebarTrigger />
+          {/* Mobile top header with unread badge */}
+          <header className="flex h-14 shrink-0 items-center gap-2 border-b px-3 md:hidden bg-card/95 backdrop-blur-sm">
+            <SidebarTrigger className="h-9 w-9" />
             <Separator orientation="vertical" className="h-4" />
-            <span className="font-semibold">{t('nav.crm')}</span>
+            <span className="font-bold text-sm">{t('nav.crm')}</span>
+            {totalUnread > 0 && (
+              <span className="ml-auto flex h-6 min-w-6 items-center justify-center rounded-full bg-red-500 px-1.5 text-[11px] font-bold text-white crm-live-dot">
+                {totalUnread > 99 ? '99+' : totalUnread}
+              </span>
+            )}
           </header>
           <main className="flex flex-1 flex-col min-w-0 min-h-0 overflow-auto crm-workspace">
             <Outlet />
