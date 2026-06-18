@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from 'react'
+import { createContext, useContext, useState, useEffect, useCallback, useMemo, type ReactNode } from 'react'
 import { createT, type Language, type TFunction } from '@/lib/translations'
 import { getAccessToken, updateUserLanguage } from '@/lib/api'
 
@@ -11,10 +11,8 @@ interface LanguageContextType {
 const LanguageContext = createContext<LanguageContextType | null>(null)
 
 function detectLanguage(): Language {
-  // Product UX is Russian-first. Keep the legacy English dictionary available,
-  // but do not auto-switch the CRM to English from old browser/user settings.
   const stored = localStorage.getItem('crm_language')
-  if (stored === 'ru') return 'ru'
+  if (stored === 'en' || stored === 'ru') return stored
   return 'ru'
 }
 
@@ -37,7 +35,7 @@ export function LanguageProvider({ children }: { children: ReactNode }) {
     }
   }, [])
 
-  const t = createT(language)
+  const t = useMemo(() => createT(language), [language])
 
   return (
     <LanguageContext.Provider value={{ language, setLanguage, t }}>
