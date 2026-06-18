@@ -412,9 +412,7 @@ const translations = {
       playbookSelectOrCreate: 'Create your first playbook to get started',
       playbookSelect: 'Select a playbook to edit',
       playbookDeleteConfirmDesc: 'will be permanently removed and the AI will no longer use it.',
-      playbookCreated: 'Playbook created',
       playbookSaved: 'Saved',
-      playbookDeletedOk: 'Playbook deleted',
       playbookFileError: 'Failed to process file',
     },
     contacts: {
@@ -983,9 +981,7 @@ const translations = {
       playbookSelectOrCreate: 'Создайте первый сценарий для начала работы',
       playbookSelect: 'Выберите сценарий для редактирования',
       playbookDeleteConfirmDesc: 'будет удалён навсегда и AI перестанет его использовать.',
-      playbookCreated: 'Сценарий создан',
       playbookSaved: 'Сохранено',
-      playbookDeletedOk: 'Сценарий удалён',
       playbookFileError: 'Не удалось обработать файл',
     },
     contacts: {

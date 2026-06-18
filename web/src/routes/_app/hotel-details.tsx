@@ -1168,7 +1168,7 @@ function PlaybooksTab() {
       formSyncedId.current = null
       setSelectedId(null)
       queryClient.invalidateQueries({ queryKey: ['playbooks'] })
-      toast.success(t('hotelDetails.playbookDeletedOk'))
+      toast.success(t('hotelDetails.playbookDeleted'))
     },
   })
 
