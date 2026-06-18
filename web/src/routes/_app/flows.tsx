@@ -104,6 +104,7 @@ import {
 } from '@/lib/api'
 import { Slider } from '@/components/ui/slider'
 import { useAuth } from '@/contexts/auth-context'
+import { useLanguage } from '@/contexts/language-context'
 
 export const Route = createFileRoute('/_app/flows')({
   component: FlowsPage,
@@ -1636,6 +1637,7 @@ function FlowsPage() {
 
 function FlowsPageContent() {
   const qc = useQueryClient()
+  const { t } = useLanguage()
   const [leftTab, setLeftTab] = useState<'flows' | 'tools' | 'ai-model' | 'transfer' | 'global-prompt' | 'agents'>('flows')
   const [selectedFlowId, setSelectedFlowId] = useState<number | null>(null)
   const [selectedCard, setSelectedCard] = useState<FlowCard | null>(null)
@@ -1829,7 +1831,7 @@ function FlowsPageContent() {
                       <span className="text-[10px] text-muted-foreground shrink-0">{flow.card_count}c</span>
                     </div>
                     {flow.is_active && (
-                      <span className="text-[10px] text-emerald-600 mt-0.5 ml-3.5">Active</span>
+                      <span className="text-[10px] text-emerald-600 mt-0.5 ml-3.5">{t('flows.active')}</span>
                     )}
                   </div>
                 ))}

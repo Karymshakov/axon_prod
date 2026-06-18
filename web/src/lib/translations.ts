@@ -358,6 +358,7 @@ const translations = {
       transferPlaceholder: 'Select stage...',
       condition: 'Condition',
       action: 'Action',
+      active: 'Active',
     },
     hotelDetails: {
       title: 'Hotel Details',
@@ -927,6 +928,7 @@ const translations = {
       transferPlaceholder: 'Выберите этап...',
       condition: 'Условие',
       action: 'Действие',
+      active: 'Активен',
     },
     hotelDetails: {
       title: 'Отель',
