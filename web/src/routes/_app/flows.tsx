@@ -298,6 +298,25 @@ function localizeTool(tool: AITool, language: ToolLocale): AITool {
   return translation ? { ...tool, ...translation } : tool
 }
 
+const STANDARD_FLOW_TRANSLATIONS: Record<string, Record<ToolLocale, Pick<ConversationFlow, 'name' | 'description'>>> = {
+  'Hotel Individual Booking': {
+    en: {
+      name: 'Hotel Individual Booking',
+      description: 'Guides a lead from first contact through room selection and booking confirmation.',
+    },
+    ru: {
+      name: 'Индивидуальное бронирование отеля',
+      description: 'Проводит лида от первого обращения через выбор номера до подтверждения бронирования.',
+    },
+  },
+}
+
+function localizeFlow<T extends ConversationFlow | null | undefined>(flow: T, language: ToolLocale): T {
+  if (!flow) return flow
+  const translation = STANDARD_FLOW_TRANSLATIONS[flow.name]?.[language]
+  return translation ? { ...flow, ...translation } : flow
+}
+
 function ToolsPanel() {
   const qc = useQueryClient()
   const { language } = useLanguage()
