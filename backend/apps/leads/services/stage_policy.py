@@ -56,7 +56,7 @@ def _infer_allowed_tools_from_card(card) -> set[str] | None:
         f"{getattr(card, 'goal', '') or ''}"
     ).lower()
     if any(marker in title for marker in ('meal', 'питан', 'рацион', 'завтрак', 'ужин')):
-        return {'get_room_options', 'get_family_room'}
+        return {'get_room_options', 'get_family_room', 'get_meal_plan_pricing'}
     if any(marker in title for marker in ('contact', 'контакт', 'телефон', 'phone')):
         return set()
     return None

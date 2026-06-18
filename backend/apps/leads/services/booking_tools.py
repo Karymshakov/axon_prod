@@ -68,6 +68,24 @@ _TOOL_PARAMS = {
         },
         "required": ["guest_count"],
     },
+    'get_meal_plan_pricing': {
+        "type": "object",
+        "properties": {
+            "room_type": {
+                "type": "string",
+                "description": "Exact selected room type from get_room_options/get_family_room, usually room_type_key.",
+            },
+            "guest_count": {
+                "type": "integer",
+                "description": "Number of adult guests used for the selected room pricing.",
+            },
+            "checkin_date": {
+                "type": "string",
+                "description": "Check-in date in YYYY-MM-DD format.",
+            },
+        },
+        "required": ["room_type", "guest_count"],
+    },
     'transfer_to_manager': {
         "type": "object",
         "properties": {
@@ -100,30 +118,52 @@ _TOOL_PARAMS = {
 
 _FALLBACK_DESCRIPTIONS = {
     'get_room_images': (
-        "Fetch and send photos to the guest — rooms OR hotel areas. "
-        "Choose categories from the current flow, tool schema, media setup, and conversation context. "
-        "Room categories: standard_queen, standard_twin, comfort, family. "
-        "Hotel area categories: cafeteria, pool, spa, exterior, lobby, conference. "
-        "Pass multiple categories when guest asks to see several types. "
+        "Send photos of hotel rooms to the guest. "
+        "Call this when a guest asks to see a room, asks what a room looks like, or requests photos. "
+        "Infer the room category from context: 1-2 guests → standard_queen or standard_twin; "
+        "3-4 guests or guest mentions 'комфорт'/'comfort' → comfort; "
+        "family with confirmed children → family. "
+        "Pass multiple categories when the guest asks to see all rooms. "
         "Photos are sent directly to the guest — compose a natural reply referencing them."
     ),
     'transfer_to_manager': (
-        "Call this tool to notify the hotel manager about a completed or escalated lead. "
-        "Call when: booking is complete, guest is a legal entity, corporate/sports/large-group request, "
-        "complaint, refund, guest count > 10, or question outside the knowledge base. "
-        "Always call after collecting guest data — never ask the guest to wait."
+        "Call this tool to notify the hotel manager about a completed or escalated lead.\n\n"
+        "Call when ANY of these happen:\n"
+        "1. Guest has confirmed room + meal plan + provided contacts → booking complete\n"
+        "2. Guest is a legal entity (юрлицо), requests invoice or contract\n"
+        "3. Corporate event, conference, teambuilding, banquet request\n"
+        "4. Sports camp or group training request\n"
+        "5. Complaint, conflict, or refund request\n"
+        "6. get_room_options returns {\"error\": \"transfer_to_manager\"} for groups > 10 → "
+        "YOU MUST CALL THIS TOOL IMMEDIATELY. Do not just tell the guest you are transferring — "
+        "actually call this tool first, then tell the guest.\n"
+        "7. Guest asks a question you cannot answer from the knowledge base\n\n"
+        "IMPORTANT: Whenever you say \"I will transfer you to the manager\" or \"передам менеджеру\" "
+        "or any equivalent phrase — you MUST call this tool in the same turn. Never say those words "
+        "without calling the tool. Saying the words without calling the tool is not a transfer.\n\n"
+        "This tool sends a Telegram notification to the manager with a structured summary.\n"
+        "Always call this tool before or immediately after telling the guest the transfer is happening — "
+        "never ask the guest to wait."
     ),
     'get_room_options': (
-        "Call this tool when a guest asks about rooms, pricing, or availability for any number of guests. "
-        "Returns all room combinations with standard prices AND meal plan prices in one call. "
-        "MANDATORY: call this tool before presenting any room options — NEVER describe options from memory. "
-        "Call immediately when guest_count is known, even if other details arrived in the same message. "
-        "Present standard_price_per_night for ALL combinations first. "
-        "After guest picks a room, use meal_plans from this same response — do NOT call this tool again for meal prices. "
-        "All values are pre-calculated — never perform arithmetic. "
-        "NEVER label options as 'Основной' or 'Альтернатива' to guests — these are internal labels. "
-        "For is_multi_room=true options, add a natural note that rooms are adjacent. "
-        "For groups larger than 10 guests the tool returns a transfer_to_manager signal — tell the guest a manager will assist them."
+        "Use for standard groups — couples, friends, colleagues, solo travelers. "
+        "Never call this when the guest mentions children, kids, baby, toddler, son, daughter, or family."
+    ),
+    'get_family_room': (
+        "Use ONLY when guest mentions children, kids, baby, toddler, son, daughter, family, "
+        "or any indication they are travelling with minors. "
+        "Returns family room options only. "
+        "guest_count should be adults only — do not count children under 6."
+    ),
+    'get_meal_plan_pricing': (
+        "Look up meal plan prices for a specific room type. "
+        "Call this after room selection AND whenever the guest asks ANY question about "
+        "food, meals, питание, dining, or что включено в стоимость. "
+        "This is the ONLY authoritative source for meal pricing — never answer food questions from memory. "
+        "Returns total_price_per_night for each meal plan — this is the COMPLETE all-in nightly rate "
+        "(room + meals combined). It is NOT an add-on fee. Do NOT subtract the room base price. "
+        "Quote total_price_per_night directly as the new rate: 'с полупансионом — 8 800 сом/ночь'. "
+        "Never do arithmetic with the room price. Never present a delta. Just quote total_price_per_night."
     ),
 }
 
@@ -752,6 +792,34 @@ def execute_pricing_tool(tool_name: str, args: dict, lead=None):
             runtime_config = tool_cfg.runtime_config or {} if tool_cfg else {}
         except Exception:
             runtime_config = {}
+
+        if tool_name == 'get_meal_plan_pricing':
+            room_type = str(args.get('room_type') or '').strip()
+            guest_count = args.get('guest_count')
+            checkin_date = args.get('checkin_date')
+
+            if not room_type:
+                return {'error': 'room_type_required'}
+            if guest_count is None:
+                return {'error': 'guest_count_required'}
+
+            try:
+                guest_count = int(guest_count)
+            except (TypeError, ValueError):
+                return {'error': 'guest_count_invalid'}
+
+            result = query_meal_plan_pricing(
+                room_type=room_type,
+                guest_count=guest_count,
+                checkin_date=checkin_date,
+            )
+            if 'error' not in result:
+                result['_note'] = (
+                    'total_price_per_night is the COMPLETE all-in nightly rate '
+                    '(room + meals combined). Quote it directly. Never subtract '
+                    'the room base price and never present a delta.'
+                )
+            return result
 
         if tool_name == 'get_room_options':
             guest_count = args.get('guest_count', 1)

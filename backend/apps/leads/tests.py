@@ -1966,7 +1966,7 @@ class AIConnectionAndIntentClassifierTests(TestCase):
 
         self.assertEqual(policy.resolution.required_fields, ['meal_plan'])
         self.assertEqual(policy.resolution.missing_fields, ['meal_plan'])
-        self.assertEqual(policy.allowed_tools, {'get_room_options', 'get_family_room'})
+        self.assertEqual(policy.allowed_tools, {'get_room_options', 'get_family_room', 'get_meal_plan_pricing'})
         self.assertFalse(policy.allows_tool('transfer_to_manager'))
 
     def test_contact_stage_empty_tool_set_blocks_transfer(self):
@@ -2386,6 +2386,64 @@ class AIConnectionAndIntentClassifierTests(TestCase):
 
         self.assertEqual(result['error'], 'transfer_to_manager')
         self.assertEqual(result['max_self_service_guest_count'], 5)
+
+    def test_meal_plan_pricing_tool_returns_total_price_per_night(self):
+        from apps.hotel_info.models import RoomPricing
+        from apps.leads.ai_service import ai_service
+        from apps.leads.models import Lead
+
+        RoomPricing.objects.create(
+            organization=self.org,
+            kategoria_nomera='Standard Double',
+            kolichestvo_chelovek=2,
+            standartny_tarif=5800,
+            s_zavtrakom=7200,
+            polupansion=8800,
+            polny_pansion=10400,
+        )
+        lead = Lead.objects.create(organization=self.org, contact_person='Guest')
+
+        result = ai_service._execute_pricing_tool(
+            'get_meal_plan_pricing',
+            {'room_type': 'Standard Double', 'guest_count': 2},
+            lead=lead,
+        )
+
+        self.assertEqual(result['room_type'], 'Standard Double')
+        self.assertEqual(result['meal_plan_options'][0]['total_price_per_night'], 7200)
+        self.assertEqual(result['meal_plan_options'][1]['total_price_per_night'], 8800)
+        self.assertNotIn('extra_per_night', result['meal_plan_options'][0])
+        self.assertIn('Never subtract', result['_note'])
+
+    def test_meal_plan_pricing_tool_is_registered_with_schema(self):
+        from apps.flows.models import LeadFlowState
+        from apps.leads.ai_service import ai_service
+        from apps.leads.models import Lead
+
+        self.card.title = 'Meal Plan Selection'
+        self.card.allowed_tools = []
+        self.card.save(update_fields=['title', 'allowed_tools'])
+        lead = Lead.objects.create(organization=self.org, contact_person='Guest')
+        LeadFlowState.objects.create(lead=lead, flow=self.flow, current_card=self.card)
+
+        ai_service.client = Mock()
+        mock_response = Mock()
+        mock_response.choices = [Mock(message=Mock(content='Ответ', tool_calls=None))]
+
+        with patch.object(ai_service.client.chat.completions, 'create', return_value=mock_response) as mock_create:
+            ai_service.generate_response(
+                lead=lead,
+                message='Сколько стоит питание?',
+                lead_data={'guest_count': 2, 'room_type_preference': 'Standard Double'},
+                conversation_history=[],
+            )
+
+        meal_tool = next(
+            tool for tool in mock_create.call_args[1].get('tools', [])
+            if tool['function']['name'] == 'get_meal_plan_pricing'
+        )
+        self.assertEqual(meal_tool['function']['parameters']['required'], ['room_type', 'guest_count'])
+        self.assertIn('total_price_per_night', meal_tool['function']['description'])
 
     def test_flow_card_allowed_tools_filters_registered_llm_tools(self):
         from apps.flows.models import LeadFlowState

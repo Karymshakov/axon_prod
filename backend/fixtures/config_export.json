@@ -1445,7 +1445,7 @@
   "fields": {
     "name": "get_room_options",
     "display_name": "Get Room Options",
-    "description": "Look up available room options for a given number of guests. Call this as soon as the guest mentions their group size — total_guests is the ONLY required parameter, dates are optional. Returns room configurations with the BASE (standard, no meals) price only. Present these options to the guest and ask them to choose. Do NOT mention meal plan prices at this stage — that comes after they pick a room. You MUST call this tool — do not use prices from memory.",
+    "description": "Use for standard groups — couples, friends, colleagues, solo travelers. Never call this when the guest mentions children, kids, baby, toddler, son, daughter, or family.",
     "is_enabled": true,
     "created_at": "2026-03-13T22:35:40.669Z",
     "updated_at": "2026-03-13T22:35:40.669Z"
@@ -1458,6 +1458,7 @@
     "name": "get_meal_plan_pricing",
     "display_name": "Get Meal Plan Pricing",
     "description": "Look up meal plan prices for a specific room type. Call this after room selection AND whenever the guest asks ANY question about food, meals, питание, dining, or что включено в стоимость. This is the ONLY authoritative source for meal pricing — never answer food questions from memory. Returns total_price_per_night for each meal plan — this is the COMPLETE all-in nightly rate (room + meals combined). It is NOT an add-on fee. Do NOT subtract the room base price. Quote total_price_per_night directly as the new rate: 'с полупансионом — 8 800 сом/ночь'. Never do arithmetic with the room price. Never present a delta. Just quote total_price_per_night.",
+    "parameters_schema": {"type": "object", "properties": {"room_type": {"type": "string", "description": "Exact selected room type from get_room_options/get_family_room, usually room_type_key."}, "guest_count": {"type": "integer", "description": "Number of adult guests used for the selected room pricing."}, "checkin_date": {"type": "string", "description": "Check-in date in YYYY-MM-DD format."}}, "required": ["room_type", "guest_count"]},
     "is_enabled": true,
     "created_at": "2026-03-13T22:35:40.672Z",
     "updated_at": "2026-03-13T22:35:40.673Z"
@@ -1473,6 +1474,18 @@
     "is_enabled": true,
     "created_at": "2026-03-15T03:35:55.358Z",
     "updated_at": "2026-03-15T05:27:00.911Z"
+  }
+},
+{
+  "model": "flows.aitool",
+  "pk": 5,
+  "fields": {
+    "name": "get_family_room",
+    "display_name": "Get Family Room",
+    "description": "Use ONLY when guest mentions children, kids, baby, toddler, son, daughter, family, or any indication they are travelling with minors. Returns family room options only. guest_count should be adults only — do not count children under 6.",
+    "is_enabled": true,
+    "created_at": "2026-03-16T11:13:12.943Z",
+    "updated_at": "2026-03-16T11:13:12.943Z"
   }
 },
 {
