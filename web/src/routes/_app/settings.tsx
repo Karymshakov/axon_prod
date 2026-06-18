@@ -1487,30 +1487,6 @@ function SettingsPage() {
                               )}
                             </div>
                           </div>
-                          <div className="rounded-lg bg-blue-50 dark:bg-blue-950/20 p-4 border border-blue-200 dark:border-blue-900">
-                            <div className="space-y-3 text-sm">
-                              <p className="font-medium text-blue-900 dark:text-blue-100">URL вебхука</p>
-                              <p className="text-xs text-blue-700 dark:text-blue-300">
-                                Этот URL автоматически регистрируется в Telegram, чтобы входящие сообщения поступали в вашу CRM.
-                                Если вы не получаете сообщения, введите ваш публичный URL ниже и нажмите "Перерегистрировать вебхук".
-                              </p>
-                              <div className="space-y-1">
-                                <Label htmlFor="webhook-base-url" className="text-xs text-blue-800 dark:text-blue-200">Публичный базовый URL (например, из ngrok или Cloudflare)</Label>
-                                <Input
-                                  id="webhook-base-url"
-                                  placeholder="https://your-tunnel.trycloudflare.com"
-                                  value={webhookBaseUrl}
-                                  onChange={(e) => setWebhookBaseUrl(e.target.value)}
-                                  className="text-xs bg-white dark:bg-gray-900 border-blue-200 dark:border-blue-800"
-                                />
-                                {webhookBaseUrl && (
-                                  <code className="block p-2 bg-white dark:bg-gray-900 rounded text-xs break-all border border-blue-200 dark:border-blue-800 text-muted-foreground">
-                                    {webhookBaseUrl.replace(/\/$/, '')}/api/telegram-webhook/
-                                  </code>
-                                )}
-                              </div>
-                            </div>
-                          </div>
                           <div className="flex gap-3">
                             <Button
                               variant="outline"

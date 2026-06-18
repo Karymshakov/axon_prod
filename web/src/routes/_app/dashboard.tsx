@@ -123,7 +123,7 @@ function DashboardPage() {
           {/* Welcome banner for new empty orgs */}
           {!isLoading && (stats?.total ?? 0) === 0 ? (
             <div className="px-4 lg:px-6">
-              <div className="rounded-xl bg-gradient-to-r from-blue-50 to-violet-50 border border-blue-200/60 p-5 flex flex-col sm:flex-row items-start sm:items-center gap-4 crm-card">
+              <div className="rounded-xl bg-gradient-to-r from-blue-50 to-violet-50 border border-blue-200/60 p-5 flex flex-col sm:flex-row items-start sm:items-center gap-4 crm-card crm-interactive">
                 <div className="h-10 w-10 rounded-xl bg-gradient-to-br from-[#2461FF] to-[#7C3AED] flex items-center justify-center shrink-0 crm-icon-tile">
                   <ArrowRightIcon className="h-5 w-5 text-white" />
                 </div>
@@ -143,7 +143,7 @@ function DashboardPage() {
           {/* Stat cards */}
           <div className="px-4 lg:px-6">
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4 crm-stagger">
-              <Card className="border-l-4 border-l-blue-500 rounded-lg crm-card">
+              <Card className="border-l-4 border-l-blue-500 rounded-lg crm-card crm-interactive">
                 <CardContent className="px-4 pt-4 pb-4">
                   <div className="flex items-start justify-between mb-4">
                     <span className="text-sm font-medium text-muted-foreground">{t('dashboard.totalLeads')}</span>
@@ -156,7 +156,7 @@ function DashboardPage() {
                 </CardContent>
               </Card>
 
-              <Card className="border-l-4 border-l-emerald-500 rounded-lg crm-card">
+              <Card className="border-l-4 border-l-emerald-500 rounded-lg crm-card crm-interactive">
                 <CardContent className="px-4 pt-4 pb-4">
                   <div className="flex items-start justify-between mb-4">
                     <span className="text-sm font-medium text-muted-foreground">{t('dashboard.finalStage')}</span>
@@ -169,7 +169,7 @@ function DashboardPage() {
                 </CardContent>
               </Card>
 
-              <Card className="border-l-4 border-l-violet-500 rounded-lg crm-card">
+              <Card className="border-l-4 border-l-violet-500 rounded-lg crm-card crm-interactive">
                 <CardContent className="px-4 pt-4 pb-4">
                   <div className="flex items-start justify-between mb-4">
                     <span className="text-sm font-medium text-muted-foreground">{t('dashboard.convRate')}</span>
@@ -182,7 +182,7 @@ function DashboardPage() {
                 </CardContent>
               </Card>
 
-              <Card className="border-l-4 border-l-orange-500 rounded-lg crm-card">
+              <Card className="border-l-4 border-l-orange-500 rounded-lg crm-card crm-interactive">
                 <CardContent className="px-4 pt-4 pb-4">
                   <div className="flex items-start justify-between mb-4">
                     <span className="text-sm font-medium text-muted-foreground">{t('dashboard.inPipeline')}</span>
@@ -201,7 +201,7 @@ function DashboardPage() {
           <div className="px-4 lg:px-6">
             <div className="grid gap-4 md:grid-cols-2 crm-stagger">
               {/* Leads by Status - Pie Chart */}
-              <Card className="crm-card">
+              <Card className="crm-card crm-interactive">
                 <CardHeader className="pb-3">
                   <CardTitle className="text-base">{t('dashboard.leadsByStatus')}</CardTitle>
                   <CardDescription className="text-xs">{t('dashboard.distributionAcrossStages')}</CardDescription>
@@ -260,7 +260,7 @@ function DashboardPage() {
               </Card>
 
               {/* Leads by Source - Bar Chart */}
-              <Card className="crm-card">
+              <Card className="crm-card crm-interactive">
                 <CardHeader className="pb-3">
                   <CardTitle className="text-base">{t('dashboard.leadsBySource')}</CardTitle>
                   <CardDescription className="text-xs">{t('dashboard.whereLeadsComeFrom')}</CardDescription>
@@ -308,7 +308,7 @@ function DashboardPage() {
           <div className="px-4 lg:px-6">
             <div className="grid gap-4 md:grid-cols-2 crm-stagger">
               {/* Lead pipeline breakdown */}
-              <Card className="crm-card">
+              <Card className="crm-card crm-interactive">
                 <CardHeader className="pb-3">
                   <CardTitle className="text-base">{t('dashboard.leadPipeline')}</CardTitle>
                 </CardHeader>
@@ -349,7 +349,7 @@ function DashboardPage() {
               </Card>
 
               {/* Recent leads */}
-              <Card className="crm-card">
+              <Card className="crm-card crm-interactive">
                 <CardHeader className="pb-3">
                   <CardTitle className="text-base">{t('dashboard.recentLeads')}</CardTitle>
                 </CardHeader>

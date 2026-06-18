@@ -395,7 +395,7 @@ body {
 @keyframes crm-fade-up {
   from {
     opacity: 0;
-    transform: translateY(10px);
+    transform: translateY(6px);
   }
   to {
     opacity: 1;
@@ -436,46 +436,63 @@ body {
   .crm-shell {
     position: relative;
     background:
-      linear-gradient(180deg, color-mix(in oklab, var(--muted) 34%, transparent), transparent 220px),
-      linear-gradient(115deg, color-mix(in oklab, var(--chart-2) 9%, transparent), transparent 38%),
-      linear-gradient(245deg, color-mix(in oklab, var(--chart-4) 7%, transparent), transparent 42%),
+      linear-gradient(180deg, color-mix(in oklab, var(--muted) 30%, transparent), transparent 260px),
+      linear-gradient(115deg, color-mix(in oklab, var(--chart-2) 6%, transparent), transparent 42%),
+      linear-gradient(245deg, color-mix(in oklab, var(--chart-4) 5%, transparent), transparent 46%),
       var(--background);
   }
 
   .crm-workspace {
     background:
-      linear-gradient(135deg, color-mix(in oklab, var(--muted) 70%, transparent), transparent 42%),
+      linear-gradient(135deg, color-mix(in oklab, var(--muted) 52%, transparent), transparent 44%),
       linear-gradient(180deg, color-mix(in oklab, var(--background) 92%, transparent), var(--background));
   }
 
   .crm-panel {
     background:
-      linear-gradient(180deg, color-mix(in oklab, var(--card) 96%, transparent), color-mix(in oklab, var(--muted) 22%, var(--card))),
+      linear-gradient(180deg, color-mix(in oklab, var(--card) 98%, transparent), color-mix(in oklab, var(--muted) 12%, var(--card))),
       var(--card);
-    box-shadow: 0 1px 2px color-mix(in oklab, var(--foreground) 7%, transparent);
+    box-shadow:
+      0 1px 2px color-mix(in oklab, var(--foreground) 6%, transparent),
+      0 12px 28px -28px color-mix(in oklab, var(--foreground) 36%, transparent);
   }
 
   .crm-enter {
-    animation: crm-fade-up 420ms cubic-bezier(0.22, 1, 0.36, 1) both;
+    animation: crm-fade-up 260ms cubic-bezier(0.22, 1, 0.36, 1) both;
   }
 
   .crm-pop {
-    animation: crm-pop 260ms cubic-bezier(0.22, 1, 0.36, 1) both;
+    animation: crm-pop 180ms cubic-bezier(0.22, 1, 0.36, 1) both;
   }
 
   .crm-card {
     position: relative;
-    transition:
-      transform 180ms cubic-bezier(0.22, 1, 0.36, 1),
-      box-shadow 180ms cubic-bezier(0.22, 1, 0.36, 1),
-      border-color 180ms ease,
-      background-color 180ms ease;
+    background:
+      linear-gradient(180deg, color-mix(in oklab, var(--card) 100%, transparent), color-mix(in oklab, var(--muted) 8%, var(--card))),
+      var(--card);
+    box-shadow:
+      0 1px 2px color-mix(in oklab, var(--foreground) 6%, transparent),
+      0 10px 26px -28px color-mix(in oklab, var(--foreground) 38%, transparent);
   }
 
-  .crm-card:hover {
-    transform: translateY(-2px);
-    border-color: color-mix(in oklab, var(--primary) 28%, var(--border));
-    box-shadow: 0 14px 30px -24px color-mix(in oklab, var(--primary) 42%, black);
+  .crm-interactive {
+    transition:
+      transform 160ms cubic-bezier(0.22, 1, 0.36, 1),
+      box-shadow 160ms cubic-bezier(0.22, 1, 0.36, 1),
+      border-color 160ms ease,
+      background-color 160ms ease;
+  }
+
+  .crm-interactive:hover {
+    transform: translateY(-1px);
+    border-color: color-mix(in oklab, var(--primary) 22%, var(--border));
+    box-shadow:
+      0 2px 4px color-mix(in oklab, var(--foreground) 8%, transparent),
+      0 18px 40px -32px color-mix(in oklab, var(--primary) 36%, black);
+  }
+
+  .crm-interactive:active {
+    transform: translateY(0);
   }
 
   .crm-list-row {
@@ -487,7 +504,7 @@ body {
   }
 
   .crm-list-row:hover {
-    transform: translateX(2px);
+    transform: translateX(1px);
     box-shadow: inset 3px 0 0 color-mix(in oklab, var(--primary) 54%, transparent);
   }
 
@@ -497,9 +514,9 @@ body {
       box-shadow 180ms ease;
   }
 
-  .crm-card:hover .crm-icon-tile,
+  .crm-interactive:hover .crm-icon-tile,
   .crm-list-row:hover .crm-icon-tile {
-    transform: scale(1.06);
+    transform: scale(1.04);
   }
 
   .crm-progress-fill {
@@ -508,7 +525,7 @@ body {
   }
 
   .crm-message {
-    animation: crm-fade-up 220ms cubic-bezier(0.22, 1, 0.36, 1) both;
+    animation: crm-fade-up 160ms cubic-bezier(0.22, 1, 0.36, 1) both;
   }
 
   .crm-live-dot {
@@ -520,7 +537,7 @@ body {
   }
 
   .crm-stagger > * {
-    animation: crm-fade-up 420ms cubic-bezier(0.22, 1, 0.36, 1) both;
+    animation: crm-fade-up 260ms cubic-bezier(0.22, 1, 0.36, 1) both;
   }
 
   .crm-stagger > *:nth-child(2) { animation-delay: 45ms; }
@@ -528,6 +545,31 @@ body {
   .crm-stagger > *:nth-child(4) { animation-delay: 135ms; }
   .crm-stagger > *:nth-child(5) { animation-delay: 180ms; }
   .crm-stagger > *:nth-child(6) { animation-delay: 225ms; }
+
+  .crm-table-wrap {
+    box-shadow:
+      0 1px 2px color-mix(in oklab, var(--foreground) 6%, transparent),
+      0 20px 48px -42px color-mix(in oklab, var(--foreground) 44%, transparent);
+  }
+
+  .crm-soft-divider {
+    border-color: color-mix(in oklab, var(--border) 72%, transparent);
+  }
+
+  .crm-subtle-scroll {
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(in oklab, var(--muted-foreground) 28%, transparent) transparent;
+  }
+
+  .crm-subtle-scroll::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  .crm-subtle-scroll::-webkit-scrollbar-thumb {
+    background: color-mix(in oklab, var(--muted-foreground) 24%, transparent);
+    border-radius: 999px;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -540,13 +582,13 @@ body {
     animation: none !important;
   }
 
-  .crm-card,
+  .crm-interactive,
   .crm-list-row,
   .crm-icon-tile {
     transition: none !important;
   }
 
-  .crm-card:hover,
+  .crm-interactive:hover,
   .crm-list-row:hover {
     transform: none !important;
   }

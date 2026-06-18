@@ -649,7 +649,7 @@ function LeadsPage() {
             {/* Views */}
             {view === 'table' ? (
               <div className="px-4 lg:px-6 min-w-0">
-                <div className="rounded-md border overflow-x-auto bg-background crm-panel">
+                <div className="rounded-md border overflow-x-auto bg-background crm-panel crm-table-wrap">
                   <Table className="min-w-[1120px] w-full table-fixed">
                     <colgroup>
                       <col className="w-[260px]" />
@@ -808,7 +808,7 @@ function LeadsPage() {
               </div>
             ) : (
               <div className="px-4 lg:px-6">
-                <div className="flex gap-2.5 overflow-x-auto pb-2 crm-stagger">
+                <div className="flex gap-2.5 overflow-x-auto pb-2 crm-stagger crm-subtle-scroll">
                   {leadsByStatus.map((column, index) => {
                     const tone = getKanbanStageTone(column.key, index)
                     return (

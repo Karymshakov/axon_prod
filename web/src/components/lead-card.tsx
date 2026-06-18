@@ -82,7 +82,7 @@ export function LeadCard({ lead, onOpen, onOpenChat }: LeadCardProps) {
       : 'bg-border'
 
   return (
-    <Card className="group relative h-[132px] cursor-pointer overflow-hidden rounded-md border bg-card shadow-sm crm-card" onClick={handleOpen}>
+    <Card className="group relative h-[132px] cursor-pointer overflow-hidden rounded-md border bg-card shadow-sm crm-card crm-interactive" onClick={handleOpen}>
       <span className={`absolute inset-y-0 left-0 w-1 ${stateMarkerClass}`} />
       <CardContent className="flex h-full flex-col p-2 pl-3">
         <div className="flex items-start justify-between gap-2">
