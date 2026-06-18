@@ -1106,6 +1106,7 @@ function serializeBlocks(blocks: ContentBlock[]): string {
 
 function PlaybooksTab() {
   const queryClient = useQueryClient()
+  const { t } = useLanguage()
 
   const { data: playbooks = [] } = useQuery({ queryKey: ['playbooks'], queryFn: fetchPlaybooks })
 
@@ -1149,7 +1150,7 @@ function PlaybooksTab() {
       setForm({ name: created.name, trigger_description: '', instructions: '', is_active: true, expires_at: '' })
       setContentBlocks([{ id: newBlockId(), title: '', content: '' }])
       setBlockPreview(null)
-      toast.success('Playbook created')
+      toast.success(t('hotelDetails.playbookCreated'))
     },
   })
 
@@ -1157,7 +1158,7 @@ function PlaybooksTab() {
     mutationFn: ({ id, data }: { id: number; data: Parameters<typeof updatePlaybook>[1] }) => updatePlaybook(id, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['playbooks'] })
-      toast.success('Saved')
+      toast.success(t('hotelDetails.playbookSaved'))
     },
   })
 
@@ -1167,7 +1168,7 @@ function PlaybooksTab() {
       formSyncedId.current = null
       setSelectedId(null)
       queryClient.invalidateQueries({ queryKey: ['playbooks'] })
-      toast.success('Playbook deleted')
+      toast.success(t('hotelDetails.playbookDeletedOk'))
     },
   })
 
@@ -1224,7 +1225,7 @@ function PlaybooksTab() {
       const result = await processPlaybookFile(selectedPlaybook.id, file)
       setBlockPreview({ blockId: targetBlockId, content: result.content })
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to process file')
+      toast.error(err instanceof Error ? err.message : t('hotelDetails.playbookFileError'))
     } finally {
       setExtracting(false)
       setUploadingBlockId(null)
@@ -1243,7 +1244,7 @@ function PlaybooksTab() {
           disabled={createMutation.isPending}
         >
           <PlusIcon className="h-4 w-4" />
-          New Playbook
+          {t('hotelDetails.newPlaybook')}
         </Button>
         {playbooks.map((p) => {
           const now = new Date()
@@ -1268,12 +1269,12 @@ function PlaybooksTab() {
                 <span className="truncate flex-1">{p.name}</span>
               </div>
               {isExpired ? (
-                <span className="mt-1 inline-block text-[10px] font-medium px-1.5 py-0.5 rounded bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-400">
-                  Expired
+                  <span className="mt-1 inline-block text-[10px] font-medium px-1.5 py-0.5 rounded bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-400">
+                  {t('hotelDetails.playbookExpired')}
                 </span>
               ) : hasExpiry ? (
                 <span className="mt-1 inline-block text-[10px] font-medium px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-400">
-                  Expires {new Date(p.expires_at!).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+                  {t('hotelDetails.playbookExpires')} {new Date(p.expires_at!).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
                 </span>
               ) : null}
             </button>
@@ -1281,7 +1282,7 @@ function PlaybooksTab() {
         })}
         {playbooks.length === 0 && (
           <p className="text-xs text-muted-foreground px-2 py-6 text-center leading-relaxed">
-            Create a playbook to give the AI topic-specific guidance
+            {t('hotelDetails.playbookNoDesc')}
           </p>
         )}
       </div>
@@ -1304,7 +1305,7 @@ function PlaybooksTab() {
                   onCheckedChange={(v) => setForm((f) => ({ ...f, is_active: v }))}
                 />
                 <span className="text-sm text-muted-foreground whitespace-nowrap">
-                  {form.is_active ? 'Active' : 'Inactive'}
+                  {form.is_active ? t('hotelDetails.playbookActive') : t('hotelDetails.playbookInactive')}
                 </span>
               </div>
               <Button
@@ -1320,9 +1321,9 @@ function PlaybooksTab() {
 
             {/* Expiration date */}
             <div className="space-y-1.5">
-              <Label>Expiration Date</Label>
+              <Label>{t('hotelDetails.playbookExpirationDate')}</Label>
               <p className="text-xs text-muted-foreground">
-                Leave empty to keep active indefinitely. Once expired, the AI will no longer use this playbook.
+                {t('hotelDetails.playbookExpirationDesc')}
               </p>
               <Input
                 type="datetime-local"
@@ -1334,9 +1335,9 @@ function PlaybooksTab() {
 
             {/* Trigger */}
             <div className="space-y-1.5">
-              <Label>When to activate</Label>
+              <Label>{t('hotelDetails.playbookWhenToActivate')}</Label>
               <p className="text-xs text-muted-foreground">
-                Describe the guest situation or topic that should trigger this playbook.
+                {t('hotelDetails.playbookTriggerDesc')}
               </p>
               <Textarea
                 value={form.trigger_description}
@@ -1348,9 +1349,9 @@ function PlaybooksTab() {
 
             {/* Instructions */}
             <div className="space-y-1.5">
-              <Label>AI Instructions</Label>
+              <Label>{t('hotelDetails.playbookAiInstructions')}</Label>
               <p className="text-xs text-muted-foreground">
-                How should the AI respond in this scenario? Rules, tone, required steps.
+                {t('hotelDetails.playbookInstructionsDesc')}
               </p>
               <Textarea
                 value={form.instructions}
@@ -1362,10 +1363,9 @@ function PlaybooksTab() {
 
             {/* Content Blocks */}
             <div className="space-y-3">
-              <Label>Knowledge &amp; Content</Label>
+              <Label>{t('hotelDetails.playbookKnowledge')}</Label>
               <p className="text-xs text-muted-foreground -mt-1.5">
-                Add one or more blocks — each block is a separate topic the AI can reference independently.
-                Upload a screenshot or PDF to extract content automatically.
+                {t('hotelDetails.playbookKnowledgeDesc')}
               </p>
 
               {contentBlocks.map((block, idx) => (
@@ -1375,7 +1375,7 @@ function PlaybooksTab() {
                     <Input
                       value={block.title}
                       onChange={(e) => updateBlock(block.id, 'title', e.target.value)}
-                      placeholder={`Block ${idx + 1} title, e.g. Pricing table`}
+                      placeholder={`${t('hotelDetails.playbookBlockTitlePlaceholder')} ${idx + 1}`}
                       className="h-8 text-sm flex-1"
                     />
                     <Button
@@ -1395,7 +1395,7 @@ function PlaybooksTab() {
                   {blockPreview?.blockId === block.id && (
                     <div className="rounded-md border bg-muted/40 p-3 space-y-2">
                       <div className="flex items-center justify-between gap-2">
-                        <p className="text-xs font-medium">Extracted — review before inserting</p>
+                        <p className="text-xs font-medium">{t('hotelDetails.playbookExtracted')}</p>
                         <Button
                           size="icon"
                           variant="ghost"
@@ -1419,11 +1419,11 @@ function PlaybooksTab() {
                             block.content ? `${block.content}\n\n${blockPreview.content}` : blockPreview.content,
                           )
                           setBlockPreview(null)
-                          toast.success('Content inserted')
+                          toast.success(t('hotelDetails.playbookContentInserted'))
                         }}
                       >
                         <CheckIcon className="h-3.5 w-3.5" />
-                        Insert into block
+                        {t('hotelDetails.playbookInsertBlock')}
                       </Button>
                     </div>
                   )}
@@ -1448,12 +1448,12 @@ function PlaybooksTab() {
                       {extracting && uploadingBlockId === block.id ? (
                         <>
                           <Loader2Icon className="h-3 w-3 animate-spin" />
-                          Extracting…
+                          {t('hotelDetails.playbookExtracting')}
                         </>
                       ) : (
                         <>
                           <PaperclipIcon className="h-3 w-3" />
-                          Upload file
+                          {t('hotelDetails.playbookUploadFile')}
                         </>
                       )}
                     </Button>
@@ -1467,7 +1467,7 @@ function PlaybooksTab() {
                 className="w-full border border-dashed rounded-md py-2 text-sm text-muted-foreground hover:text-foreground hover:border-muted-foreground transition-colors flex items-center justify-center gap-1.5"
               >
                 <PlusIcon className="h-3.5 w-3.5" />
-                Add another block
+                {t('hotelDetails.playbookAddBlock')}
               </button>
 
               <input
@@ -1481,14 +1481,14 @@ function PlaybooksTab() {
 
             <div className="flex justify-end">
               <Button onClick={handleSave} disabled={updateMutation.isPending}>
-                {updateMutation.isPending ? 'Saving...' : 'Save Playbook'}
+                {updateMutation.isPending ? t('hotelDetails.playbookSaving') : t('hotelDetails.playbookSave')}
               </Button>
             </div>
           </CardContent>
         </Card>
       ) : (
         <div className="flex-1 flex items-center justify-center text-sm text-muted-foreground">
-          {playbooks.length === 0 ? 'Create your first playbook to get started' : 'Select a playbook to edit'}
+          {playbooks.length === 0 ? t('hotelDetails.playbookSelectOrCreate') : t('hotelDetails.playbookSelect')}
         </div>
       )}
 
@@ -1497,11 +1497,11 @@ function PlaybooksTab() {
           <AlertDialogHeader>
             <AlertDialogTitle>Удалить сценарий?</AlertDialogTitle>
             <AlertDialogDescription>
-              &quot;{selectedPlaybook?.name}&quot; will be permanently removed and the AI will no longer use it.
+              &quot;{selectedPlaybook?.name}&quot; {t('hotelDetails.playbookDeleteConfirmDesc')}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogCancel>{t('common.cancel')}</AlertDialogCancel>
             <AlertDialogAction
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
               onClick={() => {
@@ -1509,7 +1509,7 @@ function PlaybooksTab() {
                 setDeleteConfirmOpen(false)
               }}
             >
-              Delete
+              {t('common.delete')}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
