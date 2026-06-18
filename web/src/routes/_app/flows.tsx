@@ -228,8 +228,79 @@ const nodeTypes: NodeTypes = { card: CardNode }
 
 // ─── Tools Panel ───────────────────────────────────────────────────────────────
 
+type ToolLocale = 'en' | 'ru'
+
+const STANDARD_TOOL_TRANSLATIONS: Record<string, Record<ToolLocale, Pick<AITool, 'display_name' | 'description'>>> = {
+  get_room_options: {
+    en: {
+      display_name: 'Get Room Options',
+      description:
+        'Use for standard groups: couples, friends, colleagues, solo travelers. Never call this when the guest mentions children, kids, baby, toddler, son, daughter, or family.',
+    },
+    ru: {
+      display_name: 'Получить варианты номеров',
+      description:
+        'Использовать для стандартных групп: пары, друзья, коллеги, соло-путешественники. Никогда не вызывать, если гость упоминает детей, kids, baby, toddler, son, daughter или family.',
+    },
+  },
+  get_meal_plan_pricing: {
+    en: {
+      display_name: 'Get Meal Plan Pricing',
+      description:
+        "Look up meal plan prices for a specific room type. Call this after room selection and whenever the guest asks any question about food, meals, питание, dining, or what is included in the price. This is the only authoritative source for meal pricing. It returns total_price_per_night for each meal plan: the complete all-in nightly rate, room + meals combined. It is not an add-on fee. Do not subtract the room base price, never present a delta, and quote total_price_per_night directly.",
+    },
+    ru: {
+      display_name: 'Получить цены на питание',
+      description:
+        'Узнать стоимость питания для конкретного типа номера. Вызывать после выбора номера и каждый раз, когда гость спрашивает про еду, питание, meals, dining или «что включено в стоимость». Это единственный авторитетный источник цен на питание. Инструмент возвращает total_price_per_night для каждого тарифа: полную цену за ночь, номер + питание вместе. Это не доплата. Не вычитать базовую цену номера, не показывать разницу, а называть total_price_per_night напрямую.',
+    },
+  },
+  transfer_to_manager: {
+    en: {
+      display_name: 'Transfer to Manager',
+      description:
+        'Notify the hotel manager about a completed or escalated lead. Call when the booking is complete, the guest is a legal entity or requests an invoice/contract, there is a corporate/event/sports-camp request, a complaint/refund/conflict, a group over 10 must be transferred, or the guest asks something outside the knowledge base. If you tell the guest they will be transferred to a manager, this tool must be called in the same turn.',
+    },
+    ru: {
+      display_name: 'Передать менеджеру',
+      description:
+        'Уведомить менеджера отеля о завершенной или эскалированной заявке. Вызывать, когда бронирование завершено, гость является юрлицом или просит счет/договор, есть запрос на корпоратив/мероприятие/спортивные сборы, жалоба/возврат/конфликт, группу больше 10 человек нужно передать менеджеру, или гость задает вопрос вне базы знаний. Если вы говорите гостю, что передаете его менеджеру, этот инструмент должен быть вызван в том же ходе.',
+    },
+  },
+  get_room_images: {
+    en: {
+      display_name: 'Send Room Photos',
+      description:
+        'Send hotel room photos to the guest. Call this when the guest asks to see a room, asks what a room looks like, or requests photos. Infer the room category from context: 1-2 guests means standard_queen or standard_twin; 3-4 guests or comfort means comfort; family with confirmed children means family. Pass multiple categories when the guest asks to see all rooms.',
+    },
+    ru: {
+      display_name: 'Отправить фото номеров',
+      description:
+        'Отправить гостю фотографии номеров. Вызывать, когда гость просит показать номер, спрашивает, как он выглядит, или просит фото. Категорию определять из контекста: 1-2 гостя — standard_queen или standard_twin; 3-4 гостя или «комфорт» — comfort; семья с подтвержденными детьми — family. Если гость просит показать все номера, передавать несколько категорий.',
+    },
+  },
+  get_family_room: {
+    en: {
+      display_name: 'Get Family Room',
+      description:
+        'Use only when the guest mentions children, kids, baby, toddler, son, daughter, family, or any indication they are travelling with minors. Returns family room options only. guest_count should include adults only; do not count children under 6.',
+    },
+    ru: {
+      display_name: 'Получить семейный номер',
+      description:
+        'Использовать только когда гость упоминает детей, kids, baby, toddler, son, daughter, family или есть любой признак, что он едет с несовершеннолетними. Возвращает только семейные варианты номеров. guest_count должен включать только взрослых; детей до 6 лет не считать.',
+    },
+  },
+}
+
+function localizeTool(tool: AITool, language: ToolLocale): AITool {
+  const translation = STANDARD_TOOL_TRANSLATIONS[tool.name]?.[language]
+  return translation ? { ...tool, ...translation } : tool
+}
+
 function ToolsPanel() {
   const qc = useQueryClient()
+  const { language } = useLanguage()
   const [editingTool, setEditingTool] = useState<AITool | null>(null)
   const [draftDescription, setDraftDescription] = useState('')
   const [draftDisplayName, setDraftDisplayName] = useState('')
@@ -240,6 +311,71 @@ function ToolsPanel() {
   const [deletingToolId, setDeletingToolId] = useState<number | null>(null)
 
   const { data: tools = [] } = useQuery({ queryKey: ['ai-tools'], queryFn: fetchAITools })
+  const displayedTools = useMemo(
+    () => tools.map((tool) => localizeTool(tool, language)),
+    [tools, language],
+  )
+  const labels = language === 'ru'
+    ? {
+        saved: 'Инструмент сохранен',
+        created: 'Инструмент создан',
+        createError: 'Не удалось создать инструмент',
+        deleted: 'Инструмент удален',
+        enabledTitle: 'Включено — нажмите, чтобы отключить',
+        disabledTitle: 'Отключено — нажмите, чтобы включить',
+        edit: 'Редактировать',
+        noTools: 'Инструменты не настроены',
+        addTool: 'Добавить инструмент',
+        editTool: 'Редактировать инструмент',
+        displayName: 'Отображаемое имя',
+        description: 'Описание',
+        descriptionHint: 'сообщает AI, когда вызывать этот инструмент',
+        cancel: 'Отмена',
+        saving: 'Сохранение...',
+        save: 'Сохранить',
+        addToolTitle: 'Добавить инструмент',
+        internalName: 'Внутреннее имя',
+        internalNameHint: 'snake_case, совпадает с обработчиком Python',
+        internalNamePlaceholder: 'напр. get_availability',
+        displayNamePlaceholder: 'напр. Проверить доступность',
+        descriptionPlaceholder: 'Опишите, когда AI должен вызывать этот инструмент и что он делает...',
+        creating: 'Создание...',
+        createTool: 'Создать инструмент',
+        deleteTitle: 'Удалить инструмент?',
+        deleteDesc: 'Это навсегда удалит этот инструмент. AI больше не сможет вызывать его. Это действие нельзя отменить.',
+        delete: 'Удалить',
+        deleteAria: 'Удалить инструмент',
+      }
+    : {
+        saved: 'Tool saved',
+        created: 'Tool created',
+        createError: 'Failed to create tool',
+        deleted: 'Tool deleted',
+        enabledTitle: 'Enabled — click to disable',
+        disabledTitle: 'Disabled — click to enable',
+        edit: 'Edit',
+        noTools: 'No tools configured',
+        addTool: 'Add tool',
+        editTool: 'Edit tool',
+        displayName: 'Display name',
+        description: 'Description',
+        descriptionHint: 'tells AI when to call this tool',
+        cancel: 'Cancel',
+        saving: 'Saving...',
+        save: 'Save',
+        addToolTitle: 'Add tool',
+        internalName: 'Internal name',
+        internalNameHint: 'snake_case, matches the Python handler',
+        internalNamePlaceholder: 'e.g. get_availability',
+        displayNamePlaceholder: 'e.g. Check availability',
+        descriptionPlaceholder: 'Describe when AI should call this tool and what it does...',
+        creating: 'Creating...',
+        createTool: 'Create tool',
+        deleteTitle: 'Delete tool?',
+        deleteDesc: 'This will permanently delete this tool. AI will no longer be able to call it. This action cannot be undone.',
+        delete: 'Delete',
+        deleteAria: 'Delete tool',
+      }
 
   const patchMutation = useMutation({
     mutationFn: ({ id, data }: { id: number; data: Parameters<typeof updateAITool>[1] }) =>
@@ -247,7 +383,7 @@ function ToolsPanel() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['ai-tools'] })
       setEditingTool(null)
-      toast.success('Инструмент сохранен')
+      toast.success(labels.saved)
     },
   })
 
@@ -265,9 +401,9 @@ function ToolsPanel() {
       setNewName('')
       setNewDisplayName('')
       setNewDescription('')
-      toast.success('Инструмент создан')
+      toast.success(labels.created)
     },
-    onError: () => toast.error('Не удалось создать инструмент'),
+    onError: () => toast.error(labels.createError),
   })
 
   const deleteMutation = useMutation({
@@ -275,7 +411,7 @@ function ToolsPanel() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['ai-tools'] })
       setDeletingToolId(null)
-      toast.success('Инструмент удален')
+      toast.success(labels.deleted)
     },
   })
 
@@ -289,7 +425,9 @@ function ToolsPanel() {
     <div className="flex flex-col flex-1 min-h-0">
       <div className="flex-1 overflow-y-auto p-6">
         <div className="max-w-xl mx-auto space-y-2">
-        {tools.map((tool) => (
+        {displayedTools.map((tool) => {
+          const rawTool = tools.find((item) => item.id === tool.id) ?? tool
+          return (
           <div
             key={tool.id}
             className="rounded-lg border border-border bg-background p-3 space-y-2"
@@ -304,7 +442,7 @@ function ToolsPanel() {
                 className={`shrink-0 h-5 w-9 rounded-full transition-colors ${
                   tool.is_enabled ? 'bg-emerald-500' : 'bg-muted-foreground/30'
                 }`}
-                title={tool.is_enabled ? "Включено — нажмите, чтобы отключить" : "Отключено — нажмите, чтобы включить"}
+                title={tool.is_enabled ? labels.enabledTitle : labels.disabledTitle}
               >
                 <span
                   className={`block h-3.5 w-3.5 rounded-full bg-white shadow transition-transform mx-0.5 ${
@@ -323,25 +461,25 @@ function ToolsPanel() {
                 variant="outline"
                 size="sm"
                 className="h-6 text-[11px] flex-1"
-                onClick={() => openEdit(tool)}
+                onClick={() => openEdit(rawTool)}
               >
-                Редактировать
+                {labels.edit}
               </Button>
               <Button
                 variant="outline"
                 size="sm"
                 className="h-6 w-6 p-0 text-red-400 hover:text-red-600 hover:border-red-200 hover:bg-red-50"
                 onClick={() => setDeletingToolId(tool.id)}
-                aria-label="Delete tool"
+                aria-label={labels.deleteAria}
               >
                 <Trash2Icon className="h-3 w-3" />
               </Button>
             </div>
           </div>
-        ))}
+        )})}
 
         {tools.length === 0 && (
-          <p className="text-xs text-muted-foreground/50 text-center py-6">Инструменты не настроены</p>
+          <p className="text-xs text-muted-foreground/50 text-center py-6">{labels.noTools}</p>
         )}
 
         {/* Add tool button */}
@@ -352,7 +490,7 @@ function ToolsPanel() {
           onClick={() => setShowAddDialog(true)}
         >
           <PlusIcon className="h-3.5 w-3.5 mr-1.5" />
-          Добавить инструмент
+          {labels.addTool}
         </Button>
         </div>
       </div>
@@ -361,11 +499,11 @@ function ToolsPanel() {
       <Dialog open={editingTool !== null} onOpenChange={(open) => { if (!open) setEditingTool(null) }}>
         <DialogContent className="max-w-md max-h-[75vh] flex flex-col">
           <DialogHeader>
-            <DialogTitle>Редактировать инструмент</DialogTitle>
+            <DialogTitle>{labels.editTool}</DialogTitle>
           </DialogHeader>
           <div className="flex-1 overflow-y-auto space-y-4 pr-1">
             <div>
-              <Label className="mb-1.5 block text-xs">Отображаемое имя</Label>
+              <Label className="mb-1.5 block text-xs">{labels.displayName}</Label>
               <Input
                 value={draftDisplayName}
                 onChange={(e) => setDraftDisplayName(e.target.value)}
@@ -373,7 +511,7 @@ function ToolsPanel() {
             </div>
             <div>
               <Label className="mb-1.5 block text-xs">
-                Описание <span className="text-muted-foreground">(сообщает AI, когда вызывать этот инструмент)</span>
+                {labels.description} <span className="text-muted-foreground">({labels.descriptionHint})</span>
               </Label>
               <Textarea
                 value={draftDescription}
@@ -384,7 +522,7 @@ function ToolsPanel() {
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setEditingTool(null)}>Отмена</Button>
+            <Button variant="outline" onClick={() => setEditingTool(null)}>{labels.cancel}</Button>
             <Button
               onClick={() => editingTool && patchMutation.mutate({
                 id: editingTool.id,
@@ -392,7 +530,7 @@ function ToolsPanel() {
               })}
               disabled={patchMutation.isPending}
             >
-              {patchMutation.isPending ? 'Сохранение…' : 'Сохранить'}
+              {patchMutation.isPending ? labels.saving : labels.save}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -402,34 +540,34 @@ function ToolsPanel() {
       <Dialog open={showAddDialog} onOpenChange={(open) => { if (!open) setShowAddDialog(false) }}>
         <DialogContent className="max-w-lg">
           <DialogHeader>
-            <DialogTitle>Добавить инструмент</DialogTitle>
+            <DialogTitle>{labels.addToolTitle}</DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
             <div>
               <Label className="mb-1.5 block text-xs">
-                Внутреннее имя <span className="text-muted-foreground">(snake_case, совпадает с обработчиком Python)</span>
+                {labels.internalName} <span className="text-muted-foreground">({labels.internalNameHint})</span>
               </Label>
               <Input
-                placeholder="напр. get_availability"
+                placeholder={labels.internalNamePlaceholder}
                 value={newName}
                 onChange={(e) => setNewName(e.target.value.toLowerCase().replace(/\s+/g, '_'))}
                 className="font-mono text-xs"
               />
             </div>
             <div>
-              <Label className="mb-1.5 block text-xs">Отображаемое имя</Label>
+              <Label className="mb-1.5 block text-xs">{labels.displayName}</Label>
               <Input
-                placeholder="напр. Проверить доступность"
+                placeholder={labels.displayNamePlaceholder}
                 value={newDisplayName}
                 onChange={(e) => setNewDisplayName(e.target.value)}
               />
             </div>
             <div>
               <Label className="mb-1.5 block text-xs">
-                Описание <span className="text-muted-foreground">(сообщает AI, когда вызывать этот инструмент)</span>
+                {labels.description} <span className="text-muted-foreground">({labels.descriptionHint})</span>
               </Label>
               <Textarea
-                placeholder="Опишите, когда AI должен вызывать этот инструмент и что он делает..."
+                placeholder={labels.descriptionPlaceholder}
                 value={newDescription}
                 onChange={(e) => setNewDescription(e.target.value)}
                 rows={6}
@@ -438,7 +576,7 @@ function ToolsPanel() {
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setShowAddDialog(false)}>Отмена</Button>
+            <Button variant="outline" onClick={() => setShowAddDialog(false)}>{labels.cancel}</Button>
             <Button
               onClick={() => createMutation.mutate({
                 name: newName.trim(),
@@ -447,7 +585,7 @@ function ToolsPanel() {
               })}
               disabled={!newName.trim() || !newDisplayName.trim() || !newDescription.trim() || createMutation.isPending}
             >
-              {createMutation.isPending ? 'Создание…' : 'Создать инструмент'}
+              {createMutation.isPending ? labels.creating : labels.createTool}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -457,18 +595,18 @@ function ToolsPanel() {
       <AlertDialog open={deletingToolId !== null} onOpenChange={(open) => { if (!open) setDeletingToolId(null) }}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Удалить инструмент?</AlertDialogTitle>
+            <AlertDialogTitle>{labels.deleteTitle}</AlertDialogTitle>
             <AlertDialogDescription>
-              Это навсегда удалит этот инструмент. AI больше не сможет вызывать его. Это действие нельзя отменить.
+              {labels.deleteDesc}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Отмена</AlertDialogCancel>
+            <AlertDialogCancel>{labels.cancel}</AlertDialogCancel>
             <AlertDialogAction
               className="bg-red-600 hover:bg-red-700"
               onClick={() => { if (deletingToolId !== null) deleteMutation.mutate(deletingToolId) }}
             >
-              Удалить
+              {labels.delete}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
