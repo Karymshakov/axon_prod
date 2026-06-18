@@ -899,10 +899,10 @@ function CommunicationsPage() {
   }
 
   return (
-    <div className="flex flex-1 flex-col min-h-0 overflow-hidden">
+    <div className="flex flex-1 flex-col min-h-0 overflow-hidden crm-enter">
 
       {/* Upper Title Panel */}
-      <div className="border-b bg-card px-4 py-3 flex items-center justify-between">
+      <div className="border-b bg-card px-4 py-3 flex items-center justify-between crm-panel">
         <div>
           <h1 className="text-lg sm:text-xl font-bold tracking-tight">Единый Центр Сообщений</h1>
           <p className="text-xs text-muted-foreground">
@@ -917,13 +917,13 @@ function CommunicationsPage() {
         {/* Left Column: Unified Leads List & Search.
              On mobile: full-width and hidden when a lead is selected (chat view).
              On md+: fixed 280px sidebar always visible. */}
-        <div className={`shrink-0 border-r bg-background flex flex-col h-full min-h-0 overflow-hidden ${
+        <div className={`shrink-0 border-r bg-background flex flex-col h-full min-h-0 overflow-hidden crm-panel ${
           selectedLead ? 'hidden md:flex md:w-[280px]' : 'flex w-full md:w-[280px]'
         }`}>
 
           {/* Channel Filters */}
           <div className="p-3 border-b space-y-2.5">
-            <div className="flex rounded-lg bg-muted p-0.5 w-full">
+            <div className="flex rounded-lg bg-muted p-0.5 w-full crm-pop">
               <button
                 onClick={() => setActiveChannelTab('all')}
                 className={`flex-1 text-[11px] font-semibold py-1.5 rounded-md transition-all ${activeChannelTab === 'all' ? 'bg-background shadow text-foreground' : 'text-muted-foreground hover:text-foreground'
@@ -1014,7 +1014,7 @@ function CommunicationsPage() {
                 Диалоги не найдены
               </div>
             ) : (
-              <div className="divide-y">
+              <div className="divide-y crm-stagger">
                 {filteredLeads.map((lead) => {
                   const unread = getLeadTotalUnread(lead.id)
                   const isSelected = selectedLead?.id === lead.id
@@ -1023,7 +1023,7 @@ function CommunicationsPage() {
                     <button
                       key={lead.id}
                       onClick={() => handleSelectLead(lead)}
-                      className={`w-full p-3.5 text-left transition-all hover:bg-muted/50 flex flex-col gap-1 border-l-4 outline-none ${isSelected
+                      className={`w-full p-3.5 text-left transition-all hover:bg-muted/50 flex flex-col gap-1 border-l-4 outline-none crm-list-row ${isSelected
                           ? 'bg-muted border-primary'
                           : 'border-transparent bg-transparent'
                         }`}
@@ -1072,7 +1072,7 @@ function CommunicationsPage() {
 
                         {/* Unread badge */}
                         {unread > 0 && (
-                          <span className="flex h-4 min-w-4 shrink-0 items-center justify-center rounded-full bg-red-500 px-1 text-[9px] font-bold text-white leading-none">
+                          <span className="flex h-4 min-w-4 shrink-0 items-center justify-center rounded-full bg-red-500 px-1 text-[9px] font-bold text-white leading-none crm-live-dot">
                             {unread}
                           </span>
                         )}
@@ -1090,7 +1090,7 @@ function CommunicationsPage() {
           {selectedLead ? (
             <>
               {/* Chat Header */}
-              <div className="border-b bg-card px-4 py-3 flex items-center justify-between flex-wrap gap-2">
+              <div className="border-b bg-card px-4 py-3 flex items-center justify-between flex-wrap gap-2 crm-panel">
                 {/* Mobile: back button to return to leads list */}
                 <button
                   className="md:hidden flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground mr-1 shrink-0"
@@ -1147,7 +1147,7 @@ function CommunicationsPage() {
                 <div className="flex items-center gap-2 shrink-0">
 
                   {/* Status Banner Card */}
-                  <div className={`hidden sm:flex items-center px-2.5 py-1 rounded-full text-xs font-semibold border ${selectedLead.ai_paused
+                  <div className={`hidden sm:flex items-center px-2.5 py-1 rounded-full text-xs font-semibold border crm-pop ${selectedLead.ai_paused
                       ? 'bg-amber-50 border-amber-200 text-amber-700'
                       : 'bg-green-50 border-green-200 text-green-700'
                     }`}>
@@ -1294,10 +1294,10 @@ function CommunicationsPage() {
                       return (
                         <div
                           key={activity.id}
-                          className={`flex ${isSent ? 'justify-end' : 'justify-start'}`}
+                          className={`flex crm-message ${isSent ? 'justify-end' : 'justify-start'}`}
                         >
                           <div
-                            className={`max-w-[85%] sm:max-w-[70%] overflow-hidden rounded-2xl shadow-sm border ${isSent
+                            className={`max-w-[85%] sm:max-w-[70%] overflow-hidden rounded-2xl shadow-sm border crm-card ${isSent
                                 ? activeChannel === 'instagram'
                                   ? 'bg-gradient-to-r from-purple-600 to-pink-600 border-purple-600 text-white'
                                   : 'bg-primary border-primary text-primary-foreground'
@@ -1389,7 +1389,7 @@ function CommunicationsPage() {
               </ScrollArea>
 
               {/* Chat Input Workspace */}
-              <div className="border-t bg-card p-4 space-y-3 shrink-0">
+              <div className="border-t bg-card p-4 space-y-3 shrink-0 crm-panel">
 
                 {/* AI Co-pilot Suggestions Area (if AI paused) */}
                 {selectedLead.ai_paused && (
@@ -1521,7 +1521,7 @@ function CommunicationsPage() {
               </div>
             </>
           ) : (
-            <div className="flex-1 flex flex-col items-center justify-center text-center p-8 space-y-3">
+            <div className="flex-1 flex flex-col items-center justify-center text-center p-8 space-y-3 crm-pop">
               <MessageSquareIcon className="h-12 w-12 text-muted-foreground/45" />
               <div>
                 <h3 className="font-semibold text-sm">Диалог не выбран</h3>

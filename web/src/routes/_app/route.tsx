@@ -238,9 +238,9 @@ function AppLayout() {
 
   return (
     <SidebarProvider>
-      <div className="flex h-screen w-full overflow-hidden">
-        <Sidebar collapsible="icon">
-          <SidebarHeader className="p-2">
+      <div className="flex h-screen w-full overflow-hidden crm-shell">
+        <Sidebar collapsible="icon" className="border-r-border/70">
+          <SidebarHeader className="p-2 crm-panel">
             <div className="flex items-center gap-1 group-data-[collapsible=icon]:justify-center">
               <div className="flex-1 min-w-0 group-data-[collapsible=icon]:hidden">
                 <OrgSwitcher />
@@ -253,7 +253,7 @@ function AppLayout() {
               <SidebarGroupContent>
                 <SidebarMenu>
                   <SidebarMenuItem>
-                    <SidebarMenuButton asChild tooltip={t('nav.dashboard')}>
+                    <SidebarMenuButton asChild tooltip={t('nav.dashboard')} className="crm-list-row">
                       <Link to="/dashboard">
                         <LayoutDashboardIcon />
                         <span>{t('nav.dashboard')}</span>
@@ -261,7 +261,7 @@ function AppLayout() {
                     </SidebarMenuButton>
                   </SidebarMenuItem>
                   <SidebarMenuItem>
-                    <SidebarMenuButton asChild tooltip={t('nav.leads')}>
+                    <SidebarMenuButton asChild tooltip={t('nav.leads')} className="crm-list-row">
                       <Link to="/leads">
                         <UsersIcon />
                         <span>{t('nav.leads')}</span>
@@ -269,12 +269,12 @@ function AppLayout() {
                     </SidebarMenuButton>
                   </SidebarMenuItem>
                   <SidebarMenuItem>
-                    <SidebarMenuButton asChild tooltip={t('nav.communications')}>
+                    <SidebarMenuButton asChild tooltip={t('nav.communications')} className="crm-list-row">
                       <Link to="/communications" search={{ leadId: undefined, channel: undefined }}>
                         <MessageSquareIcon />
                         <span>{t('nav.communications')}</span>
                         {totalUnread > 0 && (
-                          <span className="ml-auto flex h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1 text-[11px] font-semibold text-white">
+                          <span className="ml-auto flex h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1 text-[11px] font-semibold text-white crm-live-dot">
                             {totalUnread > 99 ? '99+' : totalUnread}
                           </span>
                         )}
@@ -283,7 +283,7 @@ function AppLayout() {
                   </SidebarMenuItem>
                   {canManageWorkspace && (
                     <SidebarMenuItem>
-                      <SidebarMenuButton asChild tooltip={t('nav.aiFlows')}>
+                      <SidebarMenuButton asChild tooltip={t('nav.aiFlows')} className="crm-list-row">
                         <Link to="/flows">
                           <GitBranchIcon />
                           <span>{t('nav.aiFlows')}</span>
@@ -292,7 +292,7 @@ function AppLayout() {
                     </SidebarMenuItem>
                   )}
                   <SidebarMenuItem>
-                    <SidebarMenuButton asChild tooltip={t('nav.hotelDetails')}>
+                    <SidebarMenuButton asChild tooltip={t('nav.hotelDetails')} className="crm-list-row">
                       <Link to="/hotel-details">
                         <HotelIcon />
                         <span>{t('nav.hotelDetails')}</span>
@@ -300,7 +300,7 @@ function AppLayout() {
                     </SidebarMenuButton>
                   </SidebarMenuItem>
                   <SidebarMenuItem>
-                    <SidebarMenuButton asChild tooltip={t('nav.settings')}>
+                    <SidebarMenuButton asChild tooltip={t('nav.settings')} className="crm-list-row">
                       <Link to="/settings" search={{ tab: canManageWorkspace ? 'general' : 'preferences' }}>
                         <SettingsIcon />
                         <span>{t('nav.settings')}</span>
@@ -311,7 +311,7 @@ function AppLayout() {
               </SidebarGroupContent>
             </SidebarGroup>
           </SidebarContent>
-          <SidebarFooter>
+          <SidebarFooter className="crm-panel">
             <SidebarMenu>
               <SidebarMenuItem>
                 <UserMenu />
@@ -325,7 +325,7 @@ function AppLayout() {
             <Separator orientation="vertical" className="h-4" />
             <span className="font-semibold">{t('nav.crm')}</span>
           </header>
-          <main className="flex flex-1 flex-col min-w-0 min-h-0 overflow-auto">
+          <main className="flex flex-1 flex-col min-w-0 min-h-0 overflow-auto crm-workspace">
             <Outlet />
           </main>
         </div>

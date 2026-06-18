@@ -391,3 +391,163 @@ body {
     @apply bg-background text-foreground;
   }
 }
+
+@keyframes crm-fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes crm-pop {
+  from {
+    opacity: 0;
+    transform: scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes crm-soft-pulse {
+  0%, 100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+@keyframes crm-bar-fill {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+
+@layer components {
+  .crm-shell {
+    position: relative;
+    background:
+      linear-gradient(180deg, color-mix(in oklab, var(--muted) 34%, transparent), transparent 220px),
+      linear-gradient(115deg, color-mix(in oklab, var(--chart-2) 9%, transparent), transparent 38%),
+      linear-gradient(245deg, color-mix(in oklab, var(--chart-4) 7%, transparent), transparent 42%),
+      var(--background);
+  }
+
+  .crm-workspace {
+    background:
+      linear-gradient(135deg, color-mix(in oklab, var(--muted) 70%, transparent), transparent 42%),
+      linear-gradient(180deg, color-mix(in oklab, var(--background) 92%, transparent), var(--background));
+  }
+
+  .crm-panel {
+    background:
+      linear-gradient(180deg, color-mix(in oklab, var(--card) 96%, transparent), color-mix(in oklab, var(--muted) 22%, var(--card))),
+      var(--card);
+    box-shadow: 0 1px 2px color-mix(in oklab, var(--foreground) 7%, transparent);
+  }
+
+  .crm-enter {
+    animation: crm-fade-up 420ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+
+  .crm-pop {
+    animation: crm-pop 260ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+
+  .crm-card {
+    position: relative;
+    transition:
+      transform 180ms cubic-bezier(0.22, 1, 0.36, 1),
+      box-shadow 180ms cubic-bezier(0.22, 1, 0.36, 1),
+      border-color 180ms ease,
+      background-color 180ms ease;
+  }
+
+  .crm-card:hover {
+    transform: translateY(-2px);
+    border-color: color-mix(in oklab, var(--primary) 28%, var(--border));
+    box-shadow: 0 14px 30px -24px color-mix(in oklab, var(--primary) 42%, black);
+  }
+
+  .crm-list-row {
+    transition:
+      transform 160ms cubic-bezier(0.22, 1, 0.36, 1),
+      background-color 160ms ease,
+      box-shadow 160ms ease,
+      border-color 160ms ease;
+  }
+
+  .crm-list-row:hover {
+    transform: translateX(2px);
+    box-shadow: inset 3px 0 0 color-mix(in oklab, var(--primary) 54%, transparent);
+  }
+
+  .crm-icon-tile {
+    transition:
+      transform 180ms cubic-bezier(0.22, 1, 0.36, 1),
+      box-shadow 180ms ease;
+  }
+
+  .crm-card:hover .crm-icon-tile,
+  .crm-list-row:hover .crm-icon-tile {
+    transform: scale(1.06);
+  }
+
+  .crm-progress-fill {
+    transform-origin: left center;
+    animation: crm-bar-fill 620ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+
+  .crm-message {
+    animation: crm-fade-up 220ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+
+  .crm-live-dot {
+    animation: crm-soft-pulse 1.8s ease-in-out infinite;
+  }
+
+  .crm-page-title {
+    letter-spacing: 0;
+  }
+
+  .crm-stagger > * {
+    animation: crm-fade-up 420ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+
+  .crm-stagger > *:nth-child(2) { animation-delay: 45ms; }
+  .crm-stagger > *:nth-child(3) { animation-delay: 90ms; }
+  .crm-stagger > *:nth-child(4) { animation-delay: 135ms; }
+  .crm-stagger > *:nth-child(5) { animation-delay: 180ms; }
+  .crm-stagger > *:nth-child(6) { animation-delay: 225ms; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .crm-enter,
+  .crm-pop,
+  .crm-message,
+  .crm-stagger > *,
+  .crm-progress-fill,
+  .crm-live-dot {
+    animation: none !important;
+  }
+
+  .crm-card,
+  .crm-list-row,
+  .crm-icon-tile {
+    transition: none !important;
+  }
+
+  .crm-card:hover,
+  .crm-list-row:hover {
+    transform: none !important;
+  }
+}

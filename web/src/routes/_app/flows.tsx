@@ -176,7 +176,7 @@ function CardNode({ data }: { data: CardNodeData }) {
       className={`
         relative w-60 rounded-xl border-2 ${cfg.border} ${cfg.bg}
         backdrop-blur-sm cursor-pointer select-none
-        transition-all duration-150
+        transition-all duration-150 crm-card
         ${isSelected ? 'ring-2 ring-black/10 ring-offset-2 ring-offset-transparent shadow-xl scale-105' : 'hover:brightness-95 shadow-md'}
       `}
       onClick={() => onSelect(card)}
@@ -1938,9 +1938,9 @@ function FlowsPageContent() {
   )
 
   return (
-    <div className="flex h-screen flex-col min-w-0 bg-background text-foreground overflow-hidden">
+    <div className="flex h-screen flex-col min-w-0 bg-background text-foreground overflow-hidden crm-enter">
       {/* ── Page Header + Tab Bar ── */}
-      <div className="shrink-0 border-b border-border px-4 lg:px-6 pt-5 pb-0">
+      <div className="shrink-0 border-b border-border px-4 lg:px-6 pt-5 pb-0 crm-panel">
         <Tabs value={leftTab} onValueChange={(v) => setLeftTab(v as typeof leftTab)}>
           <TabsList className="h-auto bg-transparent p-0 gap-1">
             <TabsTrigger value="flows" className="gap-1.5 data-[state=active]:shadow-sm">
@@ -1978,13 +1978,13 @@ function FlowsPageContent() {
         {leftTab === 'flows' && (
           <>
             {/* Flow list sidebar */}
-            <div className="w-56 shrink-0 flex flex-col border-r border-border bg-muted/20 overflow-hidden">
+            <div className="w-56 shrink-0 flex flex-col border-r border-border bg-muted/20 overflow-hidden crm-panel">
               <div className="flex-1 overflow-y-auto px-3 pt-3 space-y-1">
                 {localizedFlows.map((flow) => (
                   <div
                     key={flow.id}
                     onClick={() => setSelectedFlowId(flow.id)}
-                    className={`group relative flex flex-col px-3 py-2.5 rounded-lg cursor-pointer transition-all ${
+                    className={`group relative flex flex-col px-3 py-2.5 rounded-lg cursor-pointer transition-all crm-list-row ${
                       selectedFlowId === flow.id
                         ? 'bg-indigo-50 border border-indigo-200'
                         : 'hover:bg-muted/60 border border-transparent'
@@ -1992,7 +1992,7 @@ function FlowsPageContent() {
                   >
                     <div className="flex items-center gap-2">
                       {flow.is_active && (
-                        <div className="h-1.5 w-1.5 rounded-full bg-emerald-400 shrink-0" />
+                        <div className="h-1.5 w-1.5 rounded-full bg-emerald-400 shrink-0 crm-live-dot" />
                       )}
                       <span className="text-xs font-medium text-foreground truncate flex-1">{flow.name}</span>
                       <span className="text-[10px] text-muted-foreground shrink-0">{flow.card_count}c</span>
@@ -2023,7 +2023,7 @@ function FlowsPageContent() {
             <div className="flex flex-col flex-1 min-w-0">
               {flowDetail ? (
                 <>
-                  <div className="flex items-center gap-3 px-4 py-2.5 border-b border-border bg-muted/30 shrink-0">
+                  <div className="flex items-center gap-3 px-4 py-2.5 border-b border-border bg-muted/30 shrink-0 crm-panel">
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2">
                         <h2 className="text-sm font-semibold text-foreground truncate">{localizedFlowDetail?.name}</h2>

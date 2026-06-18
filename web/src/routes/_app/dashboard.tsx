@@ -111,20 +111,20 @@ function DashboardPage() {
   const isLoading = stagesStatus === 'pending' || statsStatus === 'pending'
 
   return (
-    <div className="flex flex-1 flex-col">
+    <div className="flex flex-1 flex-col crm-enter">
       <div className="flex flex-1 flex-col gap-2">
         <div className="flex flex-col gap-4 py-4 md:gap-6 md:py-6">
           {/* Page header */}
           <div className="px-4 lg:px-6">
-            <h1 className="text-2xl font-bold tracking-tight">{t('dashboard.title')}</h1>
+            <h1 className="text-2xl font-bold crm-page-title">{t('dashboard.title')}</h1>
             <p className="text-muted-foreground text-sm mt-0.5">{t('dashboard.subtitle')}</p>
           </div>
 
           {/* Welcome banner for new empty orgs */}
           {!isLoading && (stats?.total ?? 0) === 0 ? (
             <div className="px-4 lg:px-6">
-              <div className="rounded-xl bg-gradient-to-r from-blue-50 to-violet-50 border border-blue-200/60 p-5 flex flex-col sm:flex-row items-start sm:items-center gap-4">
-                <div className="h-10 w-10 rounded-xl bg-gradient-to-br from-[#2461FF] to-[#7C3AED] flex items-center justify-center shrink-0">
+              <div className="rounded-xl bg-gradient-to-r from-blue-50 to-violet-50 border border-blue-200/60 p-5 flex flex-col sm:flex-row items-start sm:items-center gap-4 crm-card">
+                <div className="h-10 w-10 rounded-xl bg-gradient-to-br from-[#2461FF] to-[#7C3AED] flex items-center justify-center shrink-0 crm-icon-tile">
                   <ArrowRightIcon className="h-5 w-5 text-white" />
                 </div>
                 <div className="flex-1 min-w-0">
@@ -142,12 +142,12 @@ function DashboardPage() {
 
           {/* Stat cards */}
           <div className="px-4 lg:px-6">
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4">
-              <Card className="border-l-4 border-l-blue-500 rounded-lg">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4 crm-stagger">
+              <Card className="border-l-4 border-l-blue-500 rounded-lg crm-card">
                 <CardContent className="px-4 pt-4 pb-4">
                   <div className="flex items-start justify-between mb-4">
                     <span className="text-sm font-medium text-muted-foreground">{t('dashboard.totalLeads')}</span>
-                    <div className="h-8 w-8 rounded-lg bg-blue-50 dark:bg-blue-950 flex items-center justify-center shrink-0">
+                    <div className="h-8 w-8 rounded-lg bg-blue-50 dark:bg-blue-950 flex items-center justify-center shrink-0 crm-icon-tile">
                       <UsersIcon className="h-4 w-4 text-blue-500" />
                     </div>
                   </div>
@@ -156,11 +156,11 @@ function DashboardPage() {
                 </CardContent>
               </Card>
 
-              <Card className="border-l-4 border-l-emerald-500 rounded-lg">
+              <Card className="border-l-4 border-l-emerald-500 rounded-lg crm-card">
                 <CardContent className="px-4 pt-4 pb-4">
                   <div className="flex items-start justify-between mb-4">
                     <span className="text-sm font-medium text-muted-foreground">{t('dashboard.finalStage')}</span>
-                    <div className="h-8 w-8 rounded-lg bg-emerald-50 dark:bg-emerald-950 flex items-center justify-center shrink-0">
+                    <div className="h-8 w-8 rounded-lg bg-emerald-50 dark:bg-emerald-950 flex items-center justify-center shrink-0 crm-icon-tile">
                       <CheckCircleIcon className="h-4 w-4 text-emerald-500" />
                     </div>
                   </div>
@@ -169,11 +169,11 @@ function DashboardPage() {
                 </CardContent>
               </Card>
 
-              <Card className="border-l-4 border-l-violet-500 rounded-lg">
+              <Card className="border-l-4 border-l-violet-500 rounded-lg crm-card">
                 <CardContent className="px-4 pt-4 pb-4">
                   <div className="flex items-start justify-between mb-4">
                     <span className="text-sm font-medium text-muted-foreground">{t('dashboard.convRate')}</span>
-                    <div className="h-8 w-8 rounded-lg bg-violet-50 dark:bg-violet-950 flex items-center justify-center shrink-0">
+                    <div className="h-8 w-8 rounded-lg bg-violet-50 dark:bg-violet-950 flex items-center justify-center shrink-0 crm-icon-tile">
                       <BadgeCheckIcon className="h-4 w-4 text-violet-500" />
                     </div>
                   </div>
@@ -182,11 +182,11 @@ function DashboardPage() {
                 </CardContent>
               </Card>
 
-              <Card className="border-l-4 border-l-orange-500 rounded-lg">
+              <Card className="border-l-4 border-l-orange-500 rounded-lg crm-card">
                 <CardContent className="px-4 pt-4 pb-4">
                   <div className="flex items-start justify-between mb-4">
                     <span className="text-sm font-medium text-muted-foreground">{t('dashboard.inPipeline')}</span>
-                    <div className="h-8 w-8 rounded-lg bg-orange-50 dark:bg-orange-950 flex items-center justify-center shrink-0">
+                    <div className="h-8 w-8 rounded-lg bg-orange-50 dark:bg-orange-950 flex items-center justify-center shrink-0 crm-icon-tile">
                       <TrendingUpIcon className="h-4 w-4 text-orange-500" />
                     </div>
                   </div>
@@ -199,9 +199,9 @@ function DashboardPage() {
 
           {/* Charts section */}
           <div className="px-4 lg:px-6">
-            <div className="grid gap-4 md:grid-cols-2">
+            <div className="grid gap-4 md:grid-cols-2 crm-stagger">
               {/* Leads by Status - Pie Chart */}
-              <Card>
+              <Card className="crm-card">
                 <CardHeader className="pb-3">
                   <CardTitle className="text-base">{t('dashboard.leadsByStatus')}</CardTitle>
                   <CardDescription className="text-xs">{t('dashboard.distributionAcrossStages')}</CardDescription>
@@ -260,7 +260,7 @@ function DashboardPage() {
               </Card>
 
               {/* Leads by Source - Bar Chart */}
-              <Card>
+              <Card className="crm-card">
                 <CardHeader className="pb-3">
                   <CardTitle className="text-base">{t('dashboard.leadsBySource')}</CardTitle>
                   <CardDescription className="text-xs">{t('dashboard.whereLeadsComeFrom')}</CardDescription>
@@ -306,9 +306,9 @@ function DashboardPage() {
 
           {/* Bottom section */}
           <div className="px-4 lg:px-6">
-            <div className="grid gap-4 md:grid-cols-2">
+            <div className="grid gap-4 md:grid-cols-2 crm-stagger">
               {/* Lead pipeline breakdown */}
-              <Card>
+              <Card className="crm-card">
                 <CardHeader className="pb-3">
                   <CardTitle className="text-base">{t('dashboard.leadPipeline')}</CardTitle>
                 </CardHeader>
@@ -326,7 +326,7 @@ function DashboardPage() {
                           <span className="w-28 text-sm text-muted-foreground shrink-0 truncate" title={stage.name}>{stage.name}</span>
                           <div className="flex-1 h-2 bg-muted rounded-full overflow-hidden min-w-0">
                             <div
-                              className={`h-full rounded-full ${color}`}
+                              className={`h-full rounded-full ${color} crm-progress-fill`}
                               style={{ width: `${pct}%` }}
                             />
                           </div>
@@ -349,7 +349,7 @@ function DashboardPage() {
               </Card>
 
               {/* Recent leads */}
-              <Card>
+              <Card className="crm-card">
                 <CardHeader className="pb-3">
                   <CardTitle className="text-base">{t('dashboard.recentLeads')}</CardTitle>
                 </CardHeader>
@@ -361,7 +361,7 @@ function DashboardPage() {
                   ) : (
                     recentLeads.map(lead => (
                       <Link key={lead.id} to="/leads/$leadId" params={{ leadId: String(lead.id) }} className="block">
-                        <div className="flex items-center justify-between py-2 px-2 rounded-md hover:bg-muted/50 transition-colors">
+                        <div className="flex items-center justify-between py-2 px-2 rounded-md hover:bg-muted/50 crm-list-row">
                           <div className="min-w-0">
                             <p className="text-sm font-medium truncate">{lead.contact_person}</p>
                           </div>
