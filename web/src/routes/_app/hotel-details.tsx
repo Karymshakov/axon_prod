@@ -27,6 +27,8 @@ import {
   ArrowUpIcon,
   ArrowDownIcon,
   RefreshCwIcon,
+  InstagramIcon,
+  CalendarClockIcon,
 } from 'lucide-react'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Switch } from '@/components/ui/switch'
@@ -131,6 +133,15 @@ import {
   saveCombinationType,
   type RoomCombinationGroup,
   type RoomCategory,
+  fetchSocialContentItems,
+  updateSocialContentItem,
+  markSocialContentReviewed,
+  rebuildSocialContentFingerprints,
+  syncInstagramSocialContent,
+  type SocialContentItem,
+  type SocialContentReviewStatus,
+  type SocialContentStatus,
+  type SocialContentType,
   type User,
 } from '@/lib/api'
 import { DatePicker } from '@/components/date-picker'
@@ -3064,6 +3075,350 @@ function PricingTab() {
   )
 }
 
+// ── Social Content Review ─────────────────────────────────────────────────────
+
+const SOCIAL_TYPE_LABELS: Record<SocialContentType, string> = {
+  post: 'Пост',
+  reel: 'Рилс',
+  story: 'Сторис',
+  highlight: 'Актуальное',
+  event: 'Ивент',
+  unknown: 'Неизвестно',
+}
+
+const SOCIAL_STATUS_LABELS: Record<SocialContentStatus, string> = {
+  active: 'Активно',
+  expired: 'Истекло',
+  archived: 'Архив',
+  deleted: 'Удалено',
+}
+
+const SOCIAL_REVIEW_LABELS: Record<SocialContentReviewStatus, string> = {
+  auto: 'Авто',
+  needs_review: 'Проверить',
+  reviewed: 'Проверено',
+}
+
+interface SocialContentFormState {
+  title: string
+  caption: string
+  content_type: SocialContentType
+  status: SocialContentStatus
+  review_status: SocialContentReviewStatus
+  linked_media_item: string
+  category: string
+  room_category: string
+  playbook_keys_text: string
+  reply_guidance: string
+  manager_notes: string
+}
+
+function SocialContentTab({ mediaItems }: { mediaItems: HotelMediaItem[] }) {
+  const queryClient = useQueryClient()
+  const [needsReviewOnly, setNeedsReviewOnly] = useState(true)
+  const [search, setSearch] = useState('')
+  const [editing, setEditing] = useState<SocialContentItem | null>(null)
+  const [form, setForm] = useState<SocialContentFormState | null>(null)
+
+  const { data: socialItems = [], isLoading } = useQuery({
+    queryKey: ['social-content', needsReviewOnly, search],
+    queryFn: () => fetchSocialContentItems({
+      needs_review: needsReviewOnly,
+      search: search.trim() || undefined,
+    }),
+  })
+
+  const syncMutation = useMutation({
+    mutationFn: syncInstagramSocialContent,
+    onSuccess: (result) => {
+      queryClient.invalidateQueries({ queryKey: ['social-content'] })
+      toast.success(`Синк завершен: посты/рилсы ${result.items_synced}, сторис ${result.stories_synced}`)
+      if (result.errors.length > 0) toast.warning(result.errors[0])
+    },
+    onError: () => toast.error('Не удалось синхронизировать Instagram'),
+  })
+
+  const updateMutation = useMutation({
+    mutationFn: async () => {
+      if (!editing || !form) throw new Error('No item selected')
+      const playbookKeys = form.playbook_keys_text
+        .split(',')
+        .map((v) => v.trim())
+        .filter(Boolean)
+      return updateSocialContentItem(editing.id, {
+        title: form.title,
+        caption: form.caption,
+        content_type: form.content_type,
+        status: form.status,
+        review_status: form.review_status,
+        linked_media_item: form.linked_media_item === 'none' ? null : Number(form.linked_media_item),
+        category: form.category === 'none' ? '' : form.category,
+        room_category: form.room_category === 'none' ? null : form.room_category as RoomCategory,
+        playbook_keys: playbookKeys,
+        reply_guidance: form.reply_guidance,
+        manager_notes: form.manager_notes,
+      })
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['social-content'] })
+      toast.success('Соцконтент обновлен')
+      setEditing(null)
+      setForm(null)
+    },
+    onError: () => toast.error('Не удалось сохранить соцконтент'),
+  })
+
+  const reviewedMutation = useMutation({
+    mutationFn: (id: number) => markSocialContentReviewed(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['social-content'] })
+      toast.success('Помечено как проверенное')
+    },
+    onError: () => toast.error('Не удалось обновить статус'),
+  })
+
+  const rebuildMutation = useMutation({
+    mutationFn: (id: number) => rebuildSocialContentFingerprints(id),
+    onSuccess: (result) => toast.success(`Отпечатки пересобраны: ${result.fingerprints_created}`),
+    onError: () => toast.error('Не удалось пересобрать отпечатки'),
+  })
+
+  function openEdit(item: SocialContentItem) {
+    setEditing(item)
+    setForm({
+      title: item.title,
+      caption: item.caption,
+      content_type: item.content_type,
+      status: item.status,
+      review_status: item.review_status,
+      linked_media_item: item.linked_media_item ? String(item.linked_media_item) : 'none',
+      category: item.category || 'none',
+      room_category: item.room_category || 'none',
+      playbook_keys_text: item.playbook_keys.join(', '),
+      reply_guidance: item.reply_guidance,
+      manager_notes: item.manager_notes,
+    })
+  }
+
+  const categoryLabel = (value: string) => CATEGORIES.find((c) => c.value === value)?.label || value || 'Не задано'
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div className="flex items-center gap-2 flex-wrap">
+          <div className="relative">
+            <SearchIcon className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+            <Input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Поиск по сторис, постам, заметкам..."
+              className="pl-8 w-72"
+            />
+          </div>
+          <label className="flex items-center gap-2 text-sm text-muted-foreground">
+            <Checkbox checked={needsReviewOnly} onCheckedChange={(v) => setNeedsReviewOnly(Boolean(v))} />
+            Только требующие проверки
+          </label>
+        </div>
+        <Button onClick={() => syncMutation.mutate()} disabled={syncMutation.isPending}>
+          {syncMutation.isPending ? <Loader2Icon className="h-4 w-4 mr-2 animate-spin" /> : <RefreshCwIcon className="h-4 w-4 mr-2" />}
+          Синхронизировать Instagram
+        </Button>
+      </div>
+
+      {isLoading ? (
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+          {[0, 1, 2].map((i) => <div key={i} className="h-48 rounded-lg border bg-muted animate-pulse" />)}
+        </div>
+      ) : socialItems.length === 0 ? (
+        <div className="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">
+          Нет соцконтента для выбранного фильтра. Запустите синхронизацию Instagram или дождитесь входящих ответов на сторис.
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+          {socialItems.map((item) => {
+            const preview = item.thumbnail_url || item.media_url
+            const needsReview = item.review_status === 'needs_review'
+            return (
+              <div key={item.id} className="rounded-lg border bg-card overflow-hidden">
+                <div className="aspect-video bg-muted relative">
+                  {preview ? (
+                    <img src={preview} alt="" className="w-full h-full object-cover" />
+                  ) : (
+                    <div className="w-full h-full flex items-center justify-center text-muted-foreground">
+                      <InstagramIcon className="h-8 w-8" />
+                    </div>
+                  )}
+                  <div className="absolute top-2 left-2 flex gap-1.5 flex-wrap">
+                    <Badge variant={needsReview ? 'destructive' : 'secondary'}>{SOCIAL_REVIEW_LABELS[item.review_status]}</Badge>
+                    <Badge variant="secondary">{SOCIAL_TYPE_LABELS[item.content_type]}</Badge>
+                  </div>
+                </div>
+                <div className="p-3 space-y-3">
+                  <div>
+                    <div className="font-medium line-clamp-1">{item.title || item.linked_media_title || item.external_id || 'Без названия'}</div>
+                    <div className="text-xs text-muted-foreground line-clamp-2">{item.caption || item.manager_notes || 'Описание еще не заполнено'}</div>
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    <Badge variant="outline">{categoryLabel(item.effective_category || item.category)}</Badge>
+                    {item.effective_room_category ? <Badge variant="outline">{item.effective_room_category}</Badge> : null}
+                    {item.fingerprint_count > 0 ? <Badge variant="secondary">{item.fingerprint_count} hash</Badge> : null}
+                  </div>
+                  <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                    <CalendarClockIcon className="h-3.5 w-3.5" />
+                    {item.posted_at ? new Date(item.posted_at).toLocaleString('ru-RU') : 'Дата публикации неизвестна'}
+                    <span>·</span>
+                    {SOCIAL_STATUS_LABELS[item.status]}
+                  </div>
+                  <div className="flex gap-2">
+                    <Button size="sm" variant="outline" onClick={() => openEdit(item)}>
+                      <PencilIcon className="h-3.5 w-3.5 mr-1.5" />
+                      Настроить
+                    </Button>
+                    {needsReview ? (
+                      <Button size="sm" variant="outline" onClick={() => reviewedMutation.mutate(item.id)}>
+                        <CheckIcon className="h-3.5 w-3.5 mr-1.5" />
+                        Проверено
+                      </Button>
+                    ) : null}
+                  </div>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
+
+      <Dialog open={!!editing && !!form} onOpenChange={(open) => { if (!open) { setEditing(null); setForm(null) } }}>
+        <DialogContent className="max-w-[95vw] md:max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Настройка соцконтента</DialogTitle>
+            <DialogDescription>
+              Эти поля помогают AI понять, что изображено в сторис/посте и какой контекст использовать в ответе.
+            </DialogDescription>
+          </DialogHeader>
+          {form ? (
+            <div className="space-y-4 py-2">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <Label>Тип</Label>
+                  <Select value={form.content_type} onValueChange={(v) => setForm((f) => f && ({ ...f, content_type: v as SocialContentType }))}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {Object.entries(SOCIAL_TYPE_LABELS).map(([value, label]) => <SelectItem key={value} value={value}>{label}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Статус</Label>
+                  <Select value={form.status} onValueChange={(v) => setForm((f) => f && ({ ...f, status: v as SocialContentStatus }))}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {Object.entries(SOCIAL_STATUS_LABELS).map(([value, label]) => <SelectItem key={value} value={value}>{label}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <Label>Название</Label>
+                <Input value={form.title} onChange={(e) => setForm((f) => f && ({ ...f, title: e.target.value }))} placeholder="Напр. Сторис про номер Комфорт" />
+              </div>
+
+              <div className="space-y-1.5">
+                <Label>Связать с медиатекой отеля</Label>
+                <Select value={form.linked_media_item} onValueChange={(v) => setForm((f) => f && ({ ...f, linked_media_item: v }))}>
+                  <SelectTrigger><SelectValue placeholder="Не связано" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">Не связано</SelectItem>
+                    {mediaItems.map((item) => <SelectItem key={item.id} value={String(item.id)}>{item.title}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <Label>Тема</Label>
+                  <Select value={form.category} onValueChange={(v) => setForm((f) => f && ({ ...f, category: v, room_category: v === 'rooms' ? f.room_category : 'none' }))}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">Не задано</SelectItem>
+                      {CATEGORIES.map((c) => <SelectItem key={c.value} value={c.value}>{c.label}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Тип номера</Label>
+                  <Select value={form.room_category} onValueChange={(v) => setForm((f) => f && ({ ...f, room_category: v }))}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">Не задано</SelectItem>
+                      <SelectItem value="standard_queen">Стандарт Квин</SelectItem>
+                      <SelectItem value="standard_twin">Стандарт Твин</SelectItem>
+                      <SelectItem value="comfort">Комфорт</SelectItem>
+                      <SelectItem value="family">Семейный</SelectItem>
+                      <SelectItem value="other">Другой</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <Label>Playbook keys</Label>
+                <Input
+                  value={form.playbook_keys_text}
+                  onChange={(e) => setForm((f) => f && ({ ...f, playbook_keys_text: e.target.value }))}
+                  placeholder="nomad_run_camp, prices_and_tariffs"
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <Label>Подсказка для ответа</Label>
+                <Textarea
+                  value={form.reply_guidance}
+                  onChange={(e) => setForm((f) => f && ({ ...f, reply_guidance: e.target.value }))}
+                  rows={3}
+                  placeholder="Напр. Если спрашивают цену, уточнить даты и количество гостей. Не обещать наличие без проверки."
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <Label>Заметки менеджера</Label>
+                <Textarea
+                  value={form.manager_notes}
+                  onChange={(e) => setForm((f) => f && ({ ...f, manager_notes: e.target.value }))}
+                  rows={2}
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <Label>Caption / текст из Instagram</Label>
+                <Textarea
+                  value={form.caption}
+                  onChange={(e) => setForm((f) => f && ({ ...f, caption: e.target.value }))}
+                  rows={3}
+                />
+              </div>
+            </div>
+          ) : null}
+          <DialogFooter className="gap-2 sm:gap-0">
+            {editing ? (
+              <Button variant="outline" onClick={() => rebuildMutation.mutate(editing.id)} disabled={rebuildMutation.isPending}>
+                <RefreshCwIcon className={cn('h-4 w-4 mr-2', rebuildMutation.isPending && 'animate-spin')} />
+                Пересобрать hash
+              </Button>
+            ) : null}
+            <Button variant="outline" onClick={() => { setEditing(null); setForm(null) }}>Отмена</Button>
+            <Button onClick={() => updateMutation.mutate()} disabled={updateMutation.isPending}>
+              {updateMutation.isPending ? 'Сохранение...' : 'Сохранить'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  )
+}
+
 // ── Main Page ─────────────────────────────────────────────────────────────────
 
 function HotelDetailsPage() {
@@ -3073,7 +3428,7 @@ function HotelDetailsPage() {
 function HotelDetailsPageContent() {
   const { t } = useLanguage()
   const queryClient = useQueryClient()
-  const [activeTab, setActiveTab] = useState<'photo' | 'video' | 'playbooks' | 'reply-templates' | 'pricing'>('playbooks')
+  const [activeTab, setActiveTab] = useState<'photo' | 'video' | 'playbooks' | 'reply-templates' | 'pricing' | 'social-content'>('playbooks')
   const [search, setSearch] = useState('')
   const [category, setКатегория] = useState('all')
   const [dialogOpen, setDialogOpen] = useState(false)
@@ -3136,7 +3491,7 @@ function HotelDetailsPageContent() {
 
   const openUpload = () => {
     setEditingItem(null)
-    const mediaType = activeTab === 'playbooks' || activeTab === 'reply-templates' || activeTab === 'pricing' ? 'photo' : activeTab as 'photo' | 'video'
+    const mediaType = activeTab === 'playbooks' || activeTab === 'reply-templates' || activeTab === 'pricing' || activeTab === 'social-content' ? 'photo' : activeTab as 'photo' | 'video'
     setForm({
       ...EMPTY_FORM,
       media_type: mediaType,
@@ -3275,6 +3630,10 @@ function HotelDetailsPageContent() {
                   <DollarSignIcon className="h-4 w-4" />
                   {t('hotelDetails.tabs.pricing')}
                 </TabsTrigger>
+                <TabsTrigger value="social-content" className="gap-1.5">
+                  <InstagramIcon className="h-4 w-4" />
+                  Соцконтент
+                </TabsTrigger>
                 <TabsTrigger value="photo" className="gap-1.5">
                   <ImageIcon className="h-4 w-4" />
                   {t('hotelDetails.tabs.photos')}
@@ -3342,6 +3701,10 @@ function HotelDetailsPageContent() {
 
             <TabsContent value="pricing">
               <PricingTab />
+            </TabsContent>
+
+            <TabsContent value="social-content">
+              <SocialContentTab mediaItems={items} />
             </TabsContent>
           </Tabs>
         </div>

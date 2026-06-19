@@ -254,30 +254,32 @@ def build_agent_media_summary(context: dict, original_text: str = '') -> str:
     playbooks = context.get('playbook_keys') or []
 
     parts = [
-        'Guest sent media. The system resolved this media context:',
-        f'- topic/category: {topic}',
+        'Гость отправил медиа. Система распознала контекст медиа:',
+        f'- тема/категория: {topic}',
     ]
     if room_category:
         parts.append(f'- room_category: {room_category}')
     if title:
-        parts.append(f'- matched_content_title: {title}')
+        parts.append(f'- найденный_контент: {title}')
     if confidence is not None:
-        parts.append(f'- confidence: {confidence}')
+        parts.append(f'- уверенность: {confidence}')
     if playbooks:
         parts.append(f'- preferred_playbook_keys: {", ".join(str(p) for p in playbooks)}')
     if guidance:
-        parts.append(f'- manager_reply_guidance: {guidance}')
+        parts.append(f'- подсказка_менеджера_для_ответа: {guidance}')
     if context.get('needs_clarification'):
         parts.append('- confidence_policy: ask one concise clarification before naming the exact room/content as a fact')
+        parts.append('- правило: не называй точную категорию номера как факт, пока гость не подтвердит')
     else:
         parts.append('- confidence_policy: you may use this context as verified')
+        parts.append('- правило: этот контекст можно использовать как проверенный')
 
     if original_text and original_text not in {'[Изображение получено]', '[Видео получено]', '[Файл получен]'}:
-        parts.append(f'Guest text/caption: {original_text}')
-        parts.append('Reply in the language of the guest text/caption.')
+        parts.append(f'Текст/подпись гостя: {original_text}')
+        parts.append('Ответь на языке текста гостя. Если текст гостя на русском, ответь строго на русском.')
     else:
-        parts.append('Guest did not add a useful text caption.')
-        parts.append('Reply in Russian by default unless conversation history clearly indicates another language.')
+        parts.append('Гость не добавил полезную текстовую подпись.')
+        parts.append('Ответь на русском по умолчанию, если история диалога явно не указывает другой язык.')
     return '\n'.join(parts)
 
 
@@ -286,17 +288,17 @@ def build_unresolved_media_summary(metadata: dict | None) -> str:
     media_type = metadata.get('media_type') or 'media'
     original_text = _metadata_text(metadata)
     parts = [
-        f'Guest sent {media_type}, but the system could not confidently match it to known hotel/social content.',
-        'Do not guess the room/category/content as a fact.',
-        'Ignore any earlier guessed room category from unresolved media; do not continue booking a room category unless it was confirmed by the guest or verified media context.',
-        'Ask one concise clarification about what they want to know or which item this is.',
+        f'Гость отправил {media_type}, но система не смогла уверенно сопоставить медиа с известным контентом отеля или Instagram.',
+        'Не угадывай номер, категорию, помещение или контент как факт.',
+        'Игнорируй любые прежние догадки по нераспознанным медиа; не продолжай бронирование конкретной категории номера, если ее не подтвердил гость или проверенный media_context.',
+        'Задай один короткий уточняющий вопрос о том, что именно гость хочет узнать или какой это объект/номер.',
     ]
     if original_text and original_text not in {'[Изображение получено]', '[Видео получено]', '[Файл получен]'}:
-        parts.append(f'Guest text/caption: {original_text}')
-        parts.append('Reply in the language of the guest text/caption.')
+        parts.append(f'Текст/подпись гостя: {original_text}')
+        parts.append('Ответь на языке текста гостя. Если текст гостя на русском, ответь строго на русском.')
     else:
-        parts.append('Guest did not add a useful text caption.')
-        parts.append('Reply in Russian by default unless conversation history clearly indicates another language.')
+        parts.append('Гость не добавил полезную текстовую подпись.')
+        parts.append('Ответь на русском по умолчанию, если история диалога явно не указывает другой язык.')
     return '\n'.join(parts)
 
 
