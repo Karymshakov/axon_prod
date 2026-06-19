@@ -742,7 +742,7 @@ class AIService:
 
         try:
             from apps.hotel_info.models import Playbook
-            card_playbooks = None
+            card_playbooks = []
             if lead is not None:
                 try:
                     flow_state = lead.flow_state
@@ -753,21 +753,28 @@ class AIService:
                 except Exception:
                     pass
 
-            if card_playbooks is not None:
-                active_playbooks = card_playbooks
-            else:
-                from django.utils import timezone as _tz
-                from django.db.models import Q as _Q
-                _now = _tz.now()
-                pb_qs = Playbook.objects.filter(is_active=True).filter(
-                    _Q(expires_at__isnull=True) | _Q(expires_at__gt=_now)
-                )
-                if _org is not None:
-                    pb_qs = pb_qs.filter(organization=_org)
-                active_playbooks = list(pb_qs.order_by('created_at'))
-                for pb in _booking_agent_playbooks:
-                    if pb not in active_playbooks:
-                        active_playbooks.append(pb)
+            # Gather general active playbooks for the organization
+            from django.utils import timezone as _tz
+            from django.db.models import Q as _Q
+            _now = _tz.now()
+            pb_qs = Playbook.objects.filter(is_active=True).filter(
+                _Q(expires_at__isnull=True) | _Q(expires_at__gt=_now)
+            )
+            if _org is not None:
+                pb_qs = pb_qs.filter(organization=_org)
+            org_playbooks = list(pb_qs.order_by('created_at'))
+
+            # Merge lists: card playbooks first (highest priority), then org, then booking agent playbooks
+            active_playbooks = []
+            for pb in card_playbooks:
+                if pb not in active_playbooks:
+                    active_playbooks.append(pb)
+            for pb in org_playbooks:
+                if pb not in active_playbooks:
+                    active_playbooks.append(pb)
+            for pb in _booking_agent_playbooks:
+                if pb not in active_playbooks:
+                    active_playbooks.append(pb)
 
             if active_playbooks:
                 pb_lines = ["[PLAYBOOKS]"]
