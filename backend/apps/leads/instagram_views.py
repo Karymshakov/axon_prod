@@ -5,7 +5,9 @@ import time
 import threading
 import requests
 from datetime import date
+from urllib.parse import parse_qs, urlparse
 from .instagram_integration_views import _get_app_config
+from django.db import models
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
@@ -81,6 +83,88 @@ def _split_into_messages(text: str) -> list:
     return [p.strip() for p in parts if p.strip()]
 
 
+_INSTAGRAM_SOCIAL_ATTACHMENT_TYPES = {
+    'share': 'post',
+    'ig_post': 'post',
+    'ig_reel': 'reel',
+    'ig_story': 'story',
+}
+_INSTAGRAM_CONTEXT_ID_KEYS = {
+    'id',
+    'media_id',
+    'story_id',
+    'share_id',
+    'reel_id',
+    'post_id',
+    'attachment_id',
+    'asset_id',
+}
+_INSTAGRAM_CONTEXT_URL_KEYS = {
+    'url',
+    'media_url',
+    'thumbnail_url',
+    'permalink',
+    'story_url',
+    'share_url',
+}
+
+
+def _append_unique(values: list[str], value: str | int | None) -> None:
+    cleaned = str(value or '').strip()
+    if cleaned and cleaned not in values:
+        values.append(cleaned)
+
+
+def _collect_nested_key_values(value, keys: set[str]) -> list[str]:
+    found: list[str] = []
+    if isinstance(value, dict):
+        for key, nested in value.items():
+            if key in keys:
+                if isinstance(nested, list):
+                    for item in nested:
+                        _append_unique(found, item)
+                elif not isinstance(nested, dict):
+                    _append_unique(found, nested)
+            for item in _collect_nested_key_values(nested, keys):
+                _append_unique(found, item)
+    elif isinstance(value, list):
+        for nested in value:
+            for item in _collect_nested_key_values(nested, keys):
+                _append_unique(found, item)
+    return found
+
+
+def _collect_nested_urls(value) -> list[str]:
+    urls: list[str] = []
+    if isinstance(value, dict):
+        for nested in value.values():
+            for item in _collect_nested_urls(nested):
+                _append_unique(urls, item)
+    elif isinstance(value, list):
+        for nested in value:
+            for item in _collect_nested_urls(nested):
+                _append_unique(urls, item)
+    else:
+        text = str(value or '').strip()
+        if text.startswith(('http://', 'https://')):
+            _append_unique(urls, text)
+    return urls
+
+
+def _ids_from_instagram_url(value: str) -> list[str]:
+    parsed = urlparse(str(value or '').strip())
+    params = parse_qs(parsed.query)
+    ids: list[str] = []
+    for key in ('id', 'media_id', 'story_id', 'share_id', 'reel_id', 'post_id', 'asset_id'):
+        for item in params.get(key, []):
+            _append_unique(ids, item)
+    return ids
+
+
+def _first_present(values: list[str]) -> str:
+    return values[0] if values else ''
+
+
 def _extract_instagram_content_context(event: dict, message: dict, attachments: list | None = None) -> dict:
     """Extract story/post/share identifiers from Instagram messaging payloads.
 
@@ -107,21 +191,69 @@ def _extract_instagram_content_context(event: dict, message: dict, attachments: 
         if ref_id:
             context['media_id'] = ref_id
             context.setdefault('content_type', 'post')
+        referral_urls = _collect_nested_urls(referral)
+        if referral_urls:
+            context['urls'] = list(dict.fromkeys([*(context.get('urls') or []), *referral_urls]))
+            context.setdefault('share_url', referral_urls[0])
         context['raw_referral'] = referral
 
     for attachment in attachments:
         if not isinstance(attachment, dict):
             continue
         payload = attachment.get('payload') if isinstance(attachment.get('payload'), dict) else {}
-        attachment_type = attachment.get('type')
-        if attachment_type == 'share':
-            share_id = str(payload.get('id') or payload.get('media_id') or payload.get('url') or '').strip()
-            if share_id:
-                context['share_id'] = share_id
-                context.setdefault('content_type', 'post')
-            if payload.get('url'):
-                context['share_url'] = payload.get('url')
-            context['raw_share'] = payload
+        attachment_type = str(attachment.get('type') or '').strip()
+        content_type = _INSTAGRAM_SOCIAL_ATTACHMENT_TYPES.get(attachment_type)
+        if not content_type:
+            continue
+
+        context.setdefault('content_type', content_type)
+        context.setdefault('attachment_type', attachment_type)
+
+        id_values = _collect_nested_key_values(
+            {'attachment': attachment, 'payload': payload},
+            _INSTAGRAM_CONTEXT_ID_KEYS,
+        )
+        url_values = _collect_nested_urls({'attachment': attachment, 'payload': payload})
+        for url in url_values:
+            for url_id in _ids_from_instagram_url(url):
+                _append_unique(id_values, url_id)
+        if url_values:
+            context['urls'] = list(dict.fromkeys([*(context.get('urls') or []), *url_values]))
+            context.setdefault('share_url', url_values[0])
+            if content_type == 'story':
+                context.setdefault('story_url', url_values[0])
+
+        primary_id = _first_present(id_values)
+        if primary_id:
+            context.setdefault('media_id', primary_id)
+            if content_type == 'story':
+                context.setdefault('story_id', primary_id)
+            elif content_type == 'reel':
+                context.setdefault('reel_id', primary_id)
+                context.setdefault('share_id', primary_id)
+            else:
+                context.setdefault('post_id', primary_id)
+                context.setdefault('share_id', primary_id)
+
+        keyed_urls = _collect_nested_key_values(
+            {'attachment': attachment, 'payload': payload},
+            _INSTAGRAM_CONTEXT_URL_KEYS,
+        )
+        for key, context_key in (
+            ('url', 'share_url'),
+            ('media_url', 'media_url'),
+            ('thumbnail_url', 'thumbnail_url'),
+            ('permalink', 'permalink'),
+            ('story_url', 'story_url'),
+            ('share_url', 'share_url'),
+        ):
+            value = _first_present(_collect_nested_key_values({'attachment': attachment, 'payload': payload}, {key}))
+            if value:
+                context.setdefault(context_key, value)
+        if keyed_urls:
+            context['urls'] = list(dict.fromkeys([*(context.get('urls') or []), *keyed_urls]))
+
+        context.setdefault('raw_attachments', []).append(attachment)
 
     return context
 
@@ -714,6 +846,18 @@ def instagram_webhook(request):
                 # The AI receives only text/captions, never the media file.
                 attachments = message.get('attachments', [])
                 instagram_content_context = _extract_instagram_content_context(event, message, attachments)
+                if instagram_content_context:
+                    logger.info(
+                        "Extracted Instagram content context: type=%s attachment=%s ids=%s urls=%s",
+                        instagram_content_context.get('content_type'),
+                        instagram_content_context.get('attachment_type'),
+                        {
+                            key: instagram_content_context.get(key)
+                            for key in ('story_id', 'media_id', 'share_id', 'reel_id', 'post_id')
+                            if instagram_content_context.get(key)
+                        },
+                        (instagram_content_context.get('urls') or [])[:3],
+                    )
                 media_type = None
                 media_metadata = {}
                 mid = message.get('mid')
@@ -855,6 +999,10 @@ def instagram_webhook(request):
                         activity_metadata['instagram_media_id'] = instagram_content_context['media_id']
                     if instagram_content_context.get('share_id'):
                         activity_metadata['instagram_share_id'] = instagram_content_context['share_id']
+                    if instagram_content_context.get('reel_id'):
+                        activity_metadata['instagram_reel_id'] = instagram_content_context['reel_id']
+                    if instagram_content_context.get('post_id'):
+                        activity_metadata['instagram_post_id'] = instagram_content_context['post_id']
                 if media_metadata:
                     activity_metadata.update(media_metadata)
 
@@ -885,23 +1033,46 @@ def instagram_webhook(request):
                 if instagram_content_context:
                     try:
                         from apps.hotel_media.models import SocialContentItem
-                        from apps.hotel_media.services import upsert_social_content_from_instagram_payload
+                        from apps.hotel_media.services import (
+                            external_id_from_url,
+                            upsert_social_content_from_instagram_payload,
+                        )
 
                         external_id = (
                             instagram_content_context.get('story_id')
                             or instagram_content_context.get('media_id')
                             or instagram_content_context.get('share_id')
+                            or instagram_content_context.get('reel_id')
+                            or instagram_content_context.get('post_id')
                         )
+                        primary_url = (
+                            instagram_content_context.get('story_url')
+                            or instagram_content_context.get('share_url')
+                            or instagram_content_context.get('media_url')
+                            or instagram_content_context.get('permalink')
+                            or next(iter(instagram_content_context.get('urls') or []), '')
+                        )
+                        existing_by_url = None
+                        if primary_url and lead.organization:
+                            existing_by_url = SocialContentItem.objects.filter(
+                                organization=lead.organization,
+                                platform=SocialContentItem.PLATFORM_INSTAGRAM,
+                                is_active=True,
+                            ).filter(
+                                models.Q(media_url=primary_url)
+                                | models.Q(thumbnail_url=primary_url)
+                                | models.Q(permalink=primary_url)
+                            ).first()
+                        if not external_id and primary_url and not existing_by_url:
+                            external_id = external_id_from_url(primary_url)
                         if external_id:
                             upsert_social_content_from_instagram_payload(
                                 organization=lead.organization,
                                 external_id=external_id,
                                 content_type=instagram_content_context.get('content_type') or SocialContentItem.TYPE_UNKNOWN,
-                                media_url=(
-                                    instagram_content_context.get('story_url')
-                                    or instagram_content_context.get('share_url')
-                                    or ''
-                                ),
+                                media_url=primary_url or '',
+                                thumbnail_url=instagram_content_context.get('thumbnail_url') or '',
+                                permalink=instagram_content_context.get('permalink') or '',
                                 metadata=instagram_content_context,
                                 source=SocialContentItem.SOURCE_WEBHOOK,
                             )

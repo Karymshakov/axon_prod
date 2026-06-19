@@ -19,7 +19,7 @@ from .instagram_integration_views import (
 from .models import AIConfig, InstagramAppConfig, InstagramConnection, Lead, LeadActivity
 from .views import _reset_lead_ai_memory
 from .telegram_views import _delayed_ai_response, telegram_webhook
-from .instagram_views import instagram_webhook
+from .instagram_views import _extract_instagram_content_context, instagram_webhook
 from .whatsapp_views import _delayed_whatsapp_ai_response
 
 
@@ -253,6 +253,114 @@ class BlankAutoReplyRetryTests(TestCase):
             metadata__message_id='ig-mid-1',
         ).latest('id')
         self.assertEqual(received_activity.organization, self.org)
+
+
+class InstagramSocialContentWebhookTests(TestCase):
+    def setUp(self):
+        user_model = get_user_model()
+        self.owner = user_model.objects.create_user(
+            email='ig_social@example.com',
+            password='password123',
+            name='Instagram Manager',
+            role='admin',
+        )
+        self.org = Organization.objects.create(name='Instagram Social Org', slug='instagram-social-org', owner=self.owner)
+        self.owner.current_organization = self.org
+        self.owner.save(update_fields=['current_organization'])
+        self.factory = APIRequestFactory()
+        AIConfig.objects.create(organization=self.org, ai_auto_response=True, response_delay=0)
+        InstagramConnection.objects.create(
+            organization=self.org,
+            access_token='ig-token',
+            instagram_user_id='own-user-id',
+            instagram_username='nomadcamp',
+        )
+
+    def test_extract_instagram_content_context_normalizes_ig_post(self):
+        attachment = {
+            'type': 'ig_post',
+            'payload': {
+                'url': 'https://lookaside.fbsbx.com/ig_messaging_cdn/room.jpg?asset_id=media-777',
+                'permalink': 'https://www.instagram.com/p/comfort-room/',
+            },
+        }
+
+        context = _extract_instagram_content_context({}, {'attachments': [attachment]}, [attachment])
+
+        self.assertEqual(context['content_type'], 'post')
+        self.assertEqual(context['attachment_type'], 'ig_post')
+        self.assertEqual(context['post_id'], 'media-777')
+        self.assertIn('https://www.instagram.com/p/comfort-room/', context['urls'])
+
+    @patch('apps.leads.instagram_views.ai_service.is_configured', return_value=False)
+    @patch('apps.leads.instagram_views.requests.get')
+    def test_instagram_ig_post_uses_reviewed_social_content_context(self, get_mock, _ai_ready_mock):
+        from apps.hotel_media.models import HotelMediaItem, SocialContentItem
+
+        get_response = Mock()
+        get_response.ok = True
+        get_response.json.return_value = {'username': 'guestuser'}
+        get_mock.return_value = get_response
+
+        media_item = HotelMediaItem.objects.create(
+            organization=self.org,
+            title='Comfort',
+            category=HotelMediaItem.CATEGORY_ROOMS,
+            room_category=HotelMediaItem.ROOM_CATEGORY_COMFORT,
+            media_type=HotelMediaItem.MEDIA_TYPE_PHOTO,
+        )
+        SocialContentItem.objects.create(
+            organization=self.org,
+            platform=SocialContentItem.PLATFORM_INSTAGRAM,
+            external_id='graph-media-1',
+            content_type=SocialContentItem.TYPE_POST,
+            status=SocialContentItem.STATUS_ACTIVE,
+            review_status=SocialContentItem.REVIEW_REVIEWED,
+            linked_media_item=media_item,
+            title='Comfort',
+            caption='Наш номер комфорт двуспальный',
+            category=HotelMediaItem.CATEGORY_ROOMS,
+            room_category=HotelMediaItem.ROOM_CATEGORY_COMFORT,
+            media_url='https://lookaside.fbsbx.com/ig_messaging_cdn/room.jpg?asset_id=old-token',
+            permalink='https://www.instagram.com/p/comfort-room/',
+            reply_guidance='Это номер Комфорт.',
+        )
+
+        payload = {
+            'entry': [{
+                'id': 'business-account-id',
+                'messaging': [{
+                    'sender': {'id': 'guest-user-id'},
+                    'message': {
+                        'mid': 'ig-mid-social-1',
+                        'attachments': [{
+                            'type': 'ig_post',
+                            'payload': {
+                                'url': 'https://lookaside.fbsbx.com/ig_messaging_cdn/room.jpg?asset_id=new-token',
+                                'permalink': 'https://www.instagram.com/p/comfort-room/',
+                            },
+                        }],
+                    },
+                }],
+            }],
+        }
+        request = self.factory.post('/api/integrations/instagram/webhook/', payload, format='json')
+
+        response = instagram_webhook(request)
+
+        self.assertEqual(response.status_code, 200)
+        lead = Lead.objects.get(instagram_user_id='guest-user-id', organization=self.org)
+        activity = LeadActivity.objects.filter(
+            lead=lead,
+            activity_type=LeadActivity.TYPE_INSTAGRAM_RECEIVED,
+            metadata__message_id='ig-mid-social-1',
+        ).latest('id')
+        media_context = activity.metadata.get('media_context')
+        self.assertIsNotNone(media_context)
+        self.assertEqual(media_context['source'], 'social_content')
+        self.assertEqual(media_context['room_category'], HotelMediaItem.ROOM_CATEGORY_COMFORT)
+        self.assertEqual(media_context['match_method'], 'platform_url')
+        self.assertIn('room_category: comfort', activity.metadata.get('ai_text', ''))
 
 
 class GlobalChannelAiPauseTests(TestCase):
