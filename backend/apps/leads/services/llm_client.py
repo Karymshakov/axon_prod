@@ -913,10 +913,11 @@ class AIService:
             )
             for i, item in enumerate(needed, 1):
                 lc_parts.append(f"  {i}. {item}")
-            if 'phone' in needed_contact or any('guest name' in item for item in needed_contact):
+            if 'phone' in needed_contact or any('guest name' in item for item in needed_contact) or not lead_data.get('email'):
                 lc_parts.append(
                     "Contact collection rule: require guest name and phone. "
-                    "Email is optional; phrase it as 'email, если удобно', and continue without it if the guest does not provide one."
+                    "Email is optional; phrase it as 'email, если удобно', and continue without it if the guest does not provide one. "
+                    "Do NOT block the booking if the guest did not provide an email."
                 )
             if _needs_discovery:
                 try:

@@ -996,7 +996,41 @@ Return ONLY the message text, nothing else."""
             | Q(agent_context__pending_promise__followup_sent=False)
         )
 
-        return leads
+        # Deduplicate candidates to avoid spamming if duplicate leads exist for the same chat/channel.
+        # Group by channel identifier and keep only the latest active lead (by id / created_at).
+        active_candidates = []
+        seen_tg = set()
+        seen_ig = set()
+        seen_wa = set()
+
+        for lead in leads.order_by('-id'):
+            is_valid = False
+
+            # Check Telegram
+            if lead.telegram_chat_id:
+                if lead.telegram_chat_id in seen_tg:
+                    continue
+                seen_tg.add(lead.telegram_chat_id)
+                is_valid = True
+
+            # Check Instagram
+            if lead.instagram_user_id:
+                if lead.instagram_user_id in seen_ig:
+                    continue
+                seen_ig.add(lead.instagram_user_id)
+                is_valid = True
+
+            # Check WhatsApp
+            if lead.whatsapp_phone:
+                if lead.whatsapp_phone in seen_wa:
+                    continue
+                seen_wa.add(lead.whatsapp_phone)
+                is_valid = True
+
+            if is_valid:
+                active_candidates.append(lead)
+
+        return active_candidates
 
     def _should_follow_up(self, lead: Lead, config: AIConfig, force: bool = False) -> tuple[bool, str]:
         """
@@ -1620,6 +1654,7 @@ Return ONLY the JSON array, no other text."""
                 # Log task creation activity
                 LeadActivity.objects.create(
                     lead=lead,
+                    organization=lead.organization,
                     activity_type=LeadActivity.TYPE_TASK_CREATED,
                     description=f"AI Agent created task: {task.title}",
                     metadata={
@@ -1695,6 +1730,7 @@ Return ONLY the JSON array, no other text."""
             if result:
                 LeadActivity.objects.create(
                     lead=lead,
+                    organization=lead.organization,
                     activity_type=LeadActivity.TYPE_TELEGRAM_SENT,
                     description=f"AI Agent follow-up: {message[:100]}{'...' if len(message) > 100 else ''}",
                     metadata={
@@ -1718,6 +1754,7 @@ Return ONLY the JSON array, no other text."""
             if result:
                 LeadActivity.objects.create(
                     lead=lead,
+                    organization=lead.organization,
                     activity_type=LeadActivity.TYPE_INSTAGRAM_SENT,
                     description=f"AI Agent follow-up: {message[:100]}{'...' if len(message) > 100 else ''}",
                     echo_origin=LeadActivity.ECHO_ORIGIN_CRM,
@@ -1743,6 +1780,7 @@ Return ONLY the JSON array, no other text."""
             if result:
                 LeadActivity.objects.create(
                     lead=lead,
+                    organization=lead.organization,
                     activity_type=LeadActivity.TYPE_WHATSAPP_SENT,
                     description=f"AI Agent follow-up: {message[:100]}{'...' if len(message) > 100 else ''}",
                     metadata={

@@ -4081,3 +4081,76 @@ class LeadSortingAndDatesTests(TestCase):
         self.assertIsNotNone(lead_b_data['last_contacted'])
         self.assertIn('T', lead_b_data['last_contacted'])
 
+
+class FollowUpFixesTests(TestCase):
+    def setUp(self):
+        from django.contrib.auth import get_user_model
+        from apps.organizations.models import Organization
+        from apps.leads.models import Lead
+
+        user_model = get_user_model()
+        self.owner = user_model.objects.create_user(
+            email='test_owner_followup@example.com',
+            password='password123',
+            name='Owner',
+            role='admin',
+        )
+        self.org = Organization.objects.create(name='Followup Org', slug='followup-org', owner=self.owner)
+
+    @patch('apps.leads.telegram_service.telegram_service.send_message', new_callable=AsyncMock)
+    def test_followup_activity_organization(self, mock_send_message):
+        from apps.leads.models import Lead, LeadActivity
+        from apps.leads.agent_service import agent_service
+
+        lead = Lead.objects.create(
+            organization=self.org,
+            contact_person='Followup Guest',
+            telegram_chat_id='22222',
+        )
+
+        mock_send_message.return_value = {'message_id': 999}
+        success = agent_service._send_telegram(lead, "Hello from AI")
+        self.assertTrue(success)
+
+        # Retrieve lead activities (specifically telegram_sent activity)
+        activities = LeadActivity.objects.filter(lead=lead, activity_type=LeadActivity.TYPE_TELEGRAM_SENT)
+        self.assertEqual(activities.count(), 1)
+        activity = activities.first()
+        self.assertEqual(activity.organization, self.org)
+
+    def test_followup_candidates_deduplication(self):
+        from apps.leads.models import Lead, AIConfig
+        from apps.leads.agent_service import agent_service
+        from django.utils import timezone
+
+        # Create two leads with the same telegram_chat_id
+        lead_old = Lead.objects.create(
+            organization=self.org,
+            contact_person='Old Duplicate',
+            telegram_chat_id='33333',
+        )
+        lead_new = Lead.objects.create(
+            organization=self.org,
+            contact_person='New Duplicate',
+            telegram_chat_id='33333',
+        )
+
+        config = AIConfig.objects.create(
+            organization=self.org,
+            proactive_outreach_enabled=True,
+            max_followup_attempts=3,
+        )
+
+        # Both leads have next_follow_up_at set in the past
+        past_time = timezone.now() - timezone.timedelta(minutes=15)
+        Lead.objects.filter(id__in=[lead_old.id, lead_new.id]).update(next_follow_up_at=past_time)
+
+        # Get candidates
+        candidates = agent_service._get_followup_candidates(config)
+        
+        # Deduplication should only yield the newest lead (lead_new)
+        candidate_ids = [c.id for c in candidates]
+        self.assertIn(lead_new.id, candidate_ids)
+        self.assertNotIn(lead_old.id, candidate_ids)
+
+
