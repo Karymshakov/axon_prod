@@ -26,11 +26,13 @@ from .agent_dispatcher import agent_dispatcher
 from .channel_ai_control import get_channel_ai_status_label, is_channel_ai_globally_paused
 from .media_utils import (
     MEDIA_PLACEHOLDERS,
+    activity_text_for_ai,
     extension_from_filename,
     incoming_media_path,
     is_media_only_activity_metadata,
     media_metadata as build_media_metadata,
 )
+from .services.media_context import build_unresolved_media_summary, resolve_activity_media_context
 
 logger = logging.getLogger(__name__)
 
@@ -187,8 +189,8 @@ def _delayed_whatsapp_ai_response(lead_id: int, activity_id: int, sender_phone: 
         ]
         if len(pending_text_messages) > 1:
             combined_text = '\n'.join(
-                m.metadata.get('text', '') for m in pending_text_messages
-                if m.metadata and m.metadata.get('text')
+                activity_text_for_ai(m.metadata) for m in pending_text_messages
+                if m.metadata and activity_text_for_ai(m.metadata)
             ).strip() or text
             logger.info(f"Lead {lead.id}: pooled {len(pending_text_messages)} WhatsApp messages into one response")
         else:
@@ -214,7 +216,7 @@ def _delayed_whatsapp_ai_response(lead_id: int, activity_id: int, sender_phone: 
             meta = activity.metadata or {}
             if is_media_only_activity_metadata(meta):
                 continue
-            msg_text = meta.get('text', '') or activity.description or ''
+            msg_text = activity_text_for_ai(meta, activity.description)
             if activity.activity_type == LeadActivity.TYPE_WHATSAPP_RECEIVED:
                 conversation_history.append({"role": "user", "content": msg_text})
             elif meta.get('is_manager_manual'):
@@ -394,7 +396,7 @@ def _delayed_whatsapp_ai_response(lead_id: int, activity_id: int, sender_phone: 
                 if is_media_only_activity_metadata(activity.metadata):
                     continue
                 role = "user" if activity.activity_type == LeadActivity.TYPE_WHATSAPP_RECEIVED else "assistant"
-                msg_text = activity.metadata.get('text', '') if activity.metadata else activity.description
+                msg_text = activity_text_for_ai(activity.metadata, activity.description)
                 conversation_history_for_extract.append({"role": role, "content": msg_text})
 
             our_company_name = config.company_profile.split('\n')[0] if config.company_profile else None
@@ -664,11 +666,28 @@ def whatsapp_webhook(request):
                         description=desc,
                         metadata=metadata
                     )
+                    media_context = None
+                    if media_metadata:
+                        try:
+                            media_context = resolve_activity_media_context(current_activity)
+                        except Exception as exc:
+                            logger.warning(f"Could not resolve incoming WhatsApp media context: {exc}")
+
+                    ai_input_text = (
+                        (current_activity.metadata or {}).get('ai_text')
+                        if media_context
+                        else message_text
+                    ) or message_text
+                    unresolved_media_prompt = ''
+                    if media_metadata and not media_context:
+                        unresolved_media_prompt = build_unresolved_media_summary(current_activity.metadata)
+                        ai_input_text = unresolved_media_prompt
+
                     initialize_inbound_diagnostics(
                         current_activity,
                         lead=lead,
                         channel='whatsapp',
-                        message_text=message_text,
+                        message_text=ai_input_text,
                         created_new_lead=created_new_lead,
                     )
 
@@ -705,10 +724,10 @@ def whatsapp_webhook(request):
                         detail=eligibility_reason,
                         status='success' if eligible else 'warning',
                     )
-                    if eligible and not is_media_only:
+                    if eligible and (not is_media_only or media_context or unresolved_media_prompt):
                         thread = threading.Thread(
                             target=_delayed_whatsapp_ai_response,
-                            args=(lead.id, current_activity.id, sender_phone, message_id, message_text),
+                            args=(lead.id, current_activity.id, sender_phone, message_id, ai_input_text),
                             daemon=True,
                         )
                         thread.start()

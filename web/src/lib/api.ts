@@ -752,6 +752,7 @@ export interface HotelMediaItem {
   ai_send_count: number
   is_active: boolean
   photos: HotelMediaPhoto[]
+  fingerprint_count: number
   created_at: string
   updated_at: string
 }
@@ -833,6 +834,119 @@ export function deleteHotelMediaPhoto(photoId: number) {
 
 export function incrementHotelMediaAiSends(id: number) {
   return api.post<{ ai_send_count: number }>(`/hotel-media/${id}/increment_ai_sends/`, {})
+}
+
+export function rebuildHotelMediaFingerprints(id: number) {
+  return api.post<{ fingerprints_created: number }>(`/hotel-media/${id}/rebuild-fingerprints/`, {})
+}
+
+export type SocialContentType = 'post' | 'reel' | 'story' | 'highlight' | 'event' | 'unknown'
+export type SocialContentStatus = 'active' | 'expired' | 'archived' | 'deleted'
+export type SocialContentReviewStatus = 'auto' | 'needs_review' | 'reviewed'
+
+export interface SocialContentItem {
+  id: number
+  platform: 'instagram'
+  platform_display: string
+  external_id: string
+  parent_external_id: string
+  content_type: SocialContentType
+  content_type_display: string
+  status: SocialContentStatus
+  status_display: string
+  review_status: SocialContentReviewStatus
+  review_status_display: string
+  source: 'auto_sync' | 'webhook' | 'manual'
+  linked_media_item: number | null
+  linked_media_title: string | null
+  title: string
+  caption: string
+  category: string
+  category_display: string
+  room_category: RoomCategory | null
+  effective_category: string
+  effective_room_category: string
+  playbook_keys: string[]
+  auto_tags: string[]
+  reply_guidance: string
+  manager_notes: string
+  media_url: string
+  thumbnail_url: string
+  permalink: string
+  posted_at: string | null
+  expires_at: string | null
+  last_synced_at: string | null
+  metadata: Record<string, unknown>
+  is_active: boolean
+  fingerprint_count: number
+  created_at: string
+  updated_at: string
+}
+
+export interface UpdateSocialContentData {
+  linked_media_item?: number | null
+  title?: string
+  caption?: string
+  content_type?: SocialContentType
+  status?: SocialContentStatus
+  review_status?: SocialContentReviewStatus
+  category?: string
+  room_category?: RoomCategory | null
+  playbook_keys?: string[]
+  auto_tags?: string[]
+  reply_guidance?: string
+  manager_notes?: string
+  media_url?: string
+  thumbnail_url?: string
+  permalink?: string
+  posted_at?: string | null
+  expires_at?: string | null
+  is_active?: boolean
+}
+
+export function fetchSocialContentItems(params?: {
+  content_type?: SocialContentType
+  status?: SocialContentStatus
+  review_status?: SocialContentReviewStatus
+  category?: string
+  room_category?: string
+  needs_review?: boolean
+  search?: string
+}) {
+  const query = new URLSearchParams()
+  if (params?.content_type) query.set('content_type', params.content_type)
+  if (params?.status) query.set('status', params.status)
+  if (params?.review_status) query.set('review_status', params.review_status)
+  if (params?.category) query.set('category', params.category)
+  if (params?.room_category) query.set('room_category', params.room_category)
+  if (params?.needs_review) query.set('needs_review', 'true')
+  if (params?.search) query.set('search', params.search)
+  const qs = query.toString()
+  return api.get<SocialContentItem[]>(`/social-content/${qs ? `?${qs}` : ''}`)
+}
+
+export function updateSocialContentItem(id: number, data: UpdateSocialContentData) {
+  return api.patch<SocialContentItem>(`/social-content/${id}/`, data)
+}
+
+export function markSocialContentReviewed(id: number) {
+  return api.post<SocialContentItem>(`/social-content/${id}/mark-reviewed/`, {})
+}
+
+export function rebuildSocialContentFingerprints(id: number) {
+  return api.post<{ fingerprints_created: number }>(`/social-content/${id}/rebuild-fingerprints/`, {})
+}
+
+export interface SyncInstagramSocialContentResult {
+  connections: number
+  items_synced: number
+  stories_synced: number
+  stories_expired: number
+  errors: string[]
+}
+
+export function syncInstagramSocialContent() {
+  return api.post<SyncInstagramSocialContentResult>('/social-content/sync-instagram/', {})
 }
 
 // Lead Note types

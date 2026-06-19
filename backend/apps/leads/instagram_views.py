@@ -19,11 +19,13 @@ from .agent_dispatcher import agent_dispatcher
 from .channel_ai_control import is_channel_ai_globally_paused
 from .media_utils import (
     MEDIA_PLACEHOLDERS,
+    activity_text_for_ai,
     extension_from_filename,
     incoming_media_path,
     is_media_only_activity_metadata,
     media_metadata as build_media_metadata,
 )
+from .services.media_context import build_unresolved_media_summary, resolve_activity_media_context
 
 logger = logging.getLogger(__name__)
 INSTAGRAM_GRAPH_API_VERSION = 'v25.0'
@@ -77,6 +79,51 @@ def _split_into_messages(text: str) -> list:
         return []
     parts = re.split(r'\n{2,}', text)
     return [p.strip() for p in parts if p.strip()]
+
+
+def _extract_instagram_content_context(event: dict, message: dict, attachments: list | None = None) -> dict:
+    """Extract story/post/share identifiers from Instagram messaging payloads.
+
+    Meta payload shapes vary by event type and API version, so this intentionally
+    keeps the raw sub-payloads while normalizing the IDs we can use for lookup.
+    """
+    attachments = attachments or []
+    context: dict = {}
+
+    reply_to = message.get('reply_to') if isinstance(message.get('reply_to'), dict) else {}
+    story = reply_to.get('story') if isinstance(reply_to.get('story'), dict) else {}
+    if story:
+        story_id = str(story.get('id') or story.get('story_id') or '').strip()
+        if story_id:
+            context['story_id'] = story_id
+            context['content_type'] = 'story'
+        if story.get('url'):
+            context['story_url'] = story.get('url')
+        context['raw_story'] = story
+
+    referral = event.get('referral') if isinstance(event.get('referral'), dict) else {}
+    if referral:
+        ref_id = str(referral.get('media_id') or referral.get('id') or referral.get('ref') or '').strip()
+        if ref_id:
+            context['media_id'] = ref_id
+            context.setdefault('content_type', 'post')
+        context['raw_referral'] = referral
+
+    for attachment in attachments:
+        if not isinstance(attachment, dict):
+            continue
+        payload = attachment.get('payload') if isinstance(attachment.get('payload'), dict) else {}
+        attachment_type = attachment.get('type')
+        if attachment_type == 'share':
+            share_id = str(payload.get('id') or payload.get('media_id') or payload.get('url') or '').strip()
+            if share_id:
+                context['share_id'] = share_id
+                context.setdefault('content_type', 'post')
+            if payload.get('url'):
+                context['share_url'] = payload.get('url')
+            context['raw_share'] = payload
+
+    return context
 
 
 def _handle_echo_event(mid: str, echo_text: str, guest_user_id: str, org_id: int = None) -> None:
@@ -309,8 +356,8 @@ def _delayed_instagram_ai_response(
         ]
         if len(pending_text_messages) > 1:
             combined_text = '\n'.join(
-                m.metadata.get('text', '') for m in pending_text_messages
-                if m.metadata and m.metadata.get('text')
+                activity_text_for_ai(m.metadata) for m in pending_text_messages
+                if m.metadata and activity_text_for_ai(m.metadata)
             ).strip() or text
             logger.info(f"Lead {lead.id}: pooled {len(pending_text_messages)} Instagram messages into one response")
         else:
@@ -364,7 +411,7 @@ def _delayed_instagram_ai_response(
             meta = activity.metadata or {}
             if is_media_only_activity_metadata(meta):
                 continue
-            msg_text = meta.get('text', '') or activity.description or ''
+            msg_text = activity_text_for_ai(meta, activity.description)
             if activity.activity_type == LeadActivity.TYPE_INSTAGRAM_RECEIVED:
                 conversation_history.append({"role": "user", "content": msg_text})
             elif meta.get('is_manager_manual'):
@@ -503,7 +550,7 @@ def _delayed_instagram_ai_response(
                 if is_media_only_activity_metadata(activity.metadata):
                     continue
                 role = "user" if activity.activity_type == LeadActivity.TYPE_INSTAGRAM_RECEIVED else "assistant"
-                msg_text = activity.metadata.get('text', '') if activity.metadata else activity.description
+                msg_text = activity_text_for_ai(activity.metadata, activity.description)
                 conversation_history_for_extract.append({"role": role, "content": msg_text})
 
             our_company_name = config.company_profile.split('\n')[0] if config.company_profile else None
@@ -666,6 +713,7 @@ def instagram_webhook(request):
                 # Extract attachments and download media for manager playback.
                 # The AI receives only text/captions, never the media file.
                 attachments = message.get('attachments', [])
+                instagram_content_context = _extract_instagram_content_context(event, message, attachments)
                 media_type = None
                 media_metadata = {}
                 mid = message.get('mid')
@@ -799,6 +847,14 @@ def instagram_webhook(request):
                     'message_id': mid,
                     'sender_id': sender_id,
                 }
+                if instagram_content_context:
+                    activity_metadata['instagram_context'] = instagram_content_context
+                    if instagram_content_context.get('story_id'):
+                        activity_metadata['instagram_story_id'] = instagram_content_context['story_id']
+                    if instagram_content_context.get('media_id'):
+                        activity_metadata['instagram_media_id'] = instagram_content_context['media_id']
+                    if instagram_content_context.get('share_id'):
+                        activity_metadata['instagram_share_id'] = instagram_content_context['share_id']
                 if media_metadata:
                     activity_metadata.update(media_metadata)
 
@@ -826,12 +882,55 @@ def instagram_webhook(request):
 
                 logger.info(f"Received Instagram message from lead {lead.id}: {message_text[:50]}")
 
+                if instagram_content_context:
+                    try:
+                        from apps.hotel_media.models import SocialContentItem
+                        from apps.hotel_media.services import upsert_social_content_from_instagram_payload
+
+                        external_id = (
+                            instagram_content_context.get('story_id')
+                            or instagram_content_context.get('media_id')
+                            or instagram_content_context.get('share_id')
+                        )
+                        if external_id:
+                            upsert_social_content_from_instagram_payload(
+                                organization=lead.organization,
+                                external_id=external_id,
+                                content_type=instagram_content_context.get('content_type') or SocialContentItem.TYPE_UNKNOWN,
+                                media_url=(
+                                    instagram_content_context.get('story_url')
+                                    or instagram_content_context.get('share_url')
+                                    or ''
+                                ),
+                                metadata=instagram_content_context,
+                                source=SocialContentItem.SOURCE_WEBHOOK,
+                            )
+                    except Exception as exc:
+                        logger.warning(f"Could not upsert Instagram social content context: {exc}")
+
+                media_context = None
+                if media_metadata or instagram_content_context:
+                    try:
+                        media_context = resolve_activity_media_context(current_activity)
+                    except Exception as exc:
+                        logger.warning(f"Could not resolve incoming Instagram media context: {exc}")
+
+                ai_input_text = (
+                    (current_activity.metadata or {}).get('ai_text')
+                    if media_context
+                    else message_text
+                ) or message_text
+                unresolved_media_prompt = ''
+                if (media_metadata or instagram_content_context) and not media_context:
+                    unresolved_media_prompt = build_unresolved_media_summary(current_activity.metadata)
+                    ai_input_text = unresolved_media_prompt
+
                 # Spawn background thread when AI is configured — classification runs
                 # regardless of auto_response; the thread decides whether to reply.
                 config = AIConfig.get_config(org=lead.organization)
-                if ai_service.is_configured() and not is_media_only:
+                if ai_service.is_configured() and (not is_media_only or media_context or unresolved_media_prompt):
                     _delayed_instagram_ai_response.delay(
-                        lead.id, current_activity.id, sender_id, message_text
+                        lead.id, current_activity.id, sender_id, ai_input_text
                     )
                 elif is_media_only:
                     logger.info(f"Lead {lead.id}: skipping Instagram AI task — media-only message")

@@ -1,9 +1,10 @@
+from django.db.models import Q
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.parsers import MultiPartParser, FormParser
 from rest_framework.response import Response
-from .models import HotelMediaItem, HotelMediaPhoto
-from .serializers import HotelMediaItemSerializer, HotelMediaPhotoSerializer
+from .models import HotelMediaItem, HotelMediaPhoto, MediaFingerprint, SocialContentItem
+from .serializers import HotelMediaItemSerializer, HotelMediaPhotoSerializer, MediaFingerprintSerializer, SocialContentItemSerializer
 from .utils import compress_image_for_telegram
 from apps.organizations.mixins import OrganizationQuerysetMixin
 
@@ -48,6 +49,14 @@ class HotelMediaItemViewSet(OrganizationQuerysetMixin, viewsets.ModelViewSet):
         item.save(update_fields=['ai_send_count'])
         return Response({'ai_send_count': item.ai_send_count})
 
+    @action(detail=True, methods=['post'], url_path='rebuild-fingerprints')
+    def rebuild_fingerprints(self, request, pk=None):
+        from .services import rebuild_hotel_media_item_fingerprints
+
+        item = self.get_object()
+        count = rebuild_hotel_media_item_fingerprints(item)
+        return Response({'fingerprints_created': count})
+
     @action(detail=True, methods=['post'], url_path='add-photos',
             parser_classes=[MultiPartParser, FormParser])
     def add_photos(self, request, pk=None):
@@ -75,3 +84,62 @@ class HotelMediaPhotoViewSet(viewsets.GenericViewSet):
         photo.file.delete(save=False)
         photo.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class SocialContentItemViewSet(OrganizationQuerysetMixin, viewsets.ModelViewSet):
+    queryset = SocialContentItem.objects.all()
+    serializer_class = SocialContentItemSerializer
+    filterset_fields = ['platform', 'content_type', 'status', 'review_status', 'category', 'room_category']
+
+    def perform_create(self, serializer):
+        serializer.save(organization=self._get_organization(), source=SocialContentItem.SOURCE_MANUAL)
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        search = self.request.query_params.get('search')
+        needs_review = self.request.query_params.get('needs_review')
+
+        if search:
+            queryset = queryset.filter(
+                Q(title__icontains=search)
+                | Q(caption__icontains=search)
+                | Q(external_id__icontains=search)
+                | Q(reply_guidance__icontains=search)
+                | Q(manager_notes__icontains=search)
+            )
+        if needs_review in {'1', 'true', 'yes'}:
+            queryset = queryset.filter(review_status=SocialContentItem.REVIEW_NEEDS_REVIEW)
+        return queryset.order_by('-posted_at', '-created_at')
+
+    @action(detail=True, methods=['post'], url_path='mark-reviewed')
+    def mark_reviewed(self, request, pk=None):
+        item = self.get_object()
+        item.review_status = SocialContentItem.REVIEW_REVIEWED
+        item.save(update_fields=['review_status', 'updated_at'])
+        serializer = self.get_serializer(item)
+        return Response(serializer.data)
+
+    @action(detail=True, methods=['post'], url_path='rebuild-fingerprints')
+    def rebuild_fingerprints(self, request, pk=None):
+        from .services import rebuild_social_content_fingerprints
+
+        item = self.get_object()
+        count = rebuild_social_content_fingerprints(item)
+        return Response({'fingerprints_created': count})
+
+    @action(detail=False, methods=['post'], url_path='sync-instagram')
+    def sync_instagram(self, request):
+        from .services import sync_instagram_social_content
+
+        result = sync_instagram_social_content(organization=self._get_organization())
+        return Response(result)
+
+
+class MediaFingerprintViewSet(OrganizationQuerysetMixin, viewsets.ReadOnlyModelViewSet):
+    queryset = MediaFingerprint.objects.select_related(
+        'hotel_media_item',
+        'hotel_media_photo',
+        'social_content_item',
+    )
+    serializer_class = MediaFingerprintSerializer
+    filterset_fields = ['hash_kind', 'hotel_media_item', 'social_content_item']

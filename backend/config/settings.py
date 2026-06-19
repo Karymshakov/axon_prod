@@ -273,6 +273,10 @@ CELERY_BEAT_SCHEDULE = {
         'schedule': crontab(hour=3, minute=30),
         'args': (30,),
     },
+    'sync-instagram-social-content': {
+        'task': 'hotel_media.sync_instagram_social_content',
+        'schedule': crontab(minute=15),
+    },
 }
 
 # =============================================================================

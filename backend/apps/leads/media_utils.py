@@ -81,9 +81,24 @@ def is_media_only_activity_metadata(metadata: dict | None) -> bool:
     if not metadata or not metadata.get('media_type'):
         return False
 
+    if metadata.get('ai_text') or metadata.get('visual_summary') or metadata.get('media_context'):
+        return False
+
     text = str(metadata.get('text') or metadata.get('message') or '').strip()
     if not text:
         return True
 
     normalized_placeholders = {value.casefold() for value in MEDIA_PLACEHOLDERS.values()}
     return text.casefold() in normalized_placeholders
+
+
+def activity_text_for_ai(metadata: dict | None, fallback: str = '') -> str:
+    metadata = metadata or {}
+    return str(
+        metadata.get('ai_text')
+        or metadata.get('visual_summary')
+        or metadata.get('text')
+        or metadata.get('message')
+        or fallback
+        or ''
+    )

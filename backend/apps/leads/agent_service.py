@@ -346,8 +346,10 @@ Return ONLY the message text, nothing else."""
         return None
 
     def _get_activity_text(self, activity: LeadActivity) -> str:
+        from .media_utils import activity_text_for_ai
+
         metadata = activity.metadata or {}
-        return (metadata.get('text') or metadata.get('message') or activity.description or '').strip()
+        return activity_text_for_ai(metadata, activity.description).strip()
 
     def _get_latest_guest_message_activity(self, lead: Lead) -> Optional[LeadActivity]:
         from .media_utils import is_media_only_activity_metadata
@@ -380,7 +382,7 @@ Return ONLY the message text, nothing else."""
         conversation = []
         for msg in reversed(list(messages)):
             role = 'assistant' if msg.activity_type in ['telegram_sent', 'instagram_sent', 'whatsapp_sent'] else 'user'
-            text = msg.metadata.get('text', msg.description) if msg.metadata else msg.description
+            text = self._get_activity_text(msg)
             conversation.append({'role': role, 'content': text})
 
         return conversation
@@ -1161,7 +1163,7 @@ Return ONLY the message text, nothing else."""
         conversation = []
         for msg in reversed(list(messages)):
             role = 'assistant' if msg.activity_type in ['telegram_sent', 'instagram_sent', 'whatsapp_sent'] else 'user'
-            text = msg.metadata.get('text', msg.description) if msg.metadata else msg.description
+            text = self._get_activity_text(msg)
             if text and 'AI sent ' in text and 'photo(s)' in text:
                 continue
             conversation.append({'role': role, 'content': text})

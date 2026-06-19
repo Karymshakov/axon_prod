@@ -234,7 +234,7 @@ def build_activity_history(lead, exclude_ids=None):
     Build a full chronological activity timeline string for a lead.
     """
     from apps.leads.models import LeadActivity
-    from apps.leads.media_utils import is_media_only_activity_metadata
+    from apps.leads.media_utils import activity_text_for_ai, is_media_only_activity_metadata
 
     exclude_ids = exclude_ids or set()
 
@@ -265,7 +265,7 @@ def build_activity_history(lead, exclude_ids=None):
             type_label = type_label + ' (Manager)'
 
         if activity.activity_type in _MESSAGING_TYPES:
-            text = meta.get('text', '') or activity.description or ''
+            text = activity_text_for_ai(meta, activity.description)
         else:
             text = activity.description or ''
 
