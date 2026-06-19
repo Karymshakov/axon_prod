@@ -3997,3 +3997,87 @@ class DialogueFlowFixTests(TestCase):
         self.assertEqual(res.get('error'), 'past_date')
         self.assertIn('не может быть в прошлом', res.get('message'))
 
+
+class LeadSortingAndDatesTests(TestCase):
+    def setUp(self):
+        from django.contrib.auth import get_user_model
+        from apps.organizations.models import Organization
+        from apps.leads.models import Lead, LeadActivity
+        from django.utils import timezone
+        import datetime
+
+        user_model = get_user_model()
+        self.owner = user_model.objects.create_user(
+            email='test_owner_sort@example.com',
+            password='password123',
+            name='Owner',
+            role='admin',
+        )
+        self.org = Organization.objects.create(name='Sort Org', slug='sort-org', owner=self.owner)
+        from apps.organizations.models import OrganizationMember
+        OrganizationMember.objects.create(organization=self.org, user=self.owner, role='admin')
+        self.owner.current_organization = self.org
+        self.owner.save()
+
+        # Create three leads
+        self.lead_a = Lead.objects.create(
+            organization=self.org,
+            contact_person='Lead A',
+        )
+        self.lead_b = Lead.objects.create(
+            organization=self.org,
+            contact_person='Lead B',
+        )
+        self.lead_c = Lead.objects.create(
+            organization=self.org,
+            contact_person='Lead C',
+        )
+
+        # Create activities for them at different times
+        now = timezone.now()
+
+        # Lead A: active 1 hour ago
+        act_a = LeadActivity.objects.create(
+            organization=self.org,
+            lead=self.lead_a,
+            activity_type='telegram_received',
+            description='msg A',
+        )
+        LeadActivity.objects.filter(id=act_a.id).update(created_at=now - datetime.timedelta(hours=1))
+
+        # Lead B: active 5 minutes ago
+        act_b = LeadActivity.objects.create(
+            organization=self.org,
+            lead=self.lead_b,
+            activity_type='instagram_sent',
+            description='msg B',
+        )
+        LeadActivity.objects.filter(id=act_b.id).update(created_at=now - datetime.timedelta(minutes=5))
+
+        # Lead C: active 10 hours ago
+        act_c = LeadActivity.objects.create(
+            organization=self.org,
+            lead=self.lead_c,
+            activity_type='whatsapp_received',
+            description='msg C',
+        )
+        LeadActivity.objects.filter(id=act_c.id).update(created_at=now - datetime.timedelta(hours=10))
+
+    def test_leads_sorted_by_activity_recency(self):
+        from rest_framework.test import APIClient
+        
+        client = APIClient()
+        client.force_authenticate(user=self.owner)
+        
+        response = client.get('/api/leads/')
+        self.assertEqual(response.status_code, 200)
+        
+        # Check order
+        names = [lead['contact_person'] for lead in response.json()]
+        self.assertEqual(names, ['Lead B', 'Lead A', 'Lead C'])
+        
+        # Check date format (ISO datetime string instead of Date string)
+        lead_b_data = next(lead for lead in response.json() if lead['contact_person'] == 'Lead B')
+        self.assertIsNotNone(lead_b_data['last_contacted'])
+        self.assertIn('T', lead_b_data['last_contacted'])
+

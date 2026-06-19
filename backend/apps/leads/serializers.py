@@ -45,6 +45,7 @@ class LeadSerializer(serializers.ModelSerializer):
     overdue_tasks_count = serializers.SerializerMethodField()
     current_objection_display = serializers.CharField(source='get_current_objection_display', read_only=True)
     assigned_to_name = serializers.SerializerMethodField()
+    last_contacted = serializers.SerializerMethodField()
 
     def get_segment_display(self, obj):
         if obj.segment:
@@ -115,6 +116,40 @@ class LeadSerializer(serializers.ModelSerializer):
             'channel': channel,
             'contact': contact or '-',
         } if channel else None
+
+    def get_last_contacted(self, obj):
+        # 1. If annotated in queryset
+        last_message_at = getattr(obj, 'last_message_at', None)
+        if last_message_at:
+            if isinstance(last_message_at, str):
+                return last_message_at
+            return last_message_at.isoformat()
+
+        # 2. Fallback to querying the latest message activity
+        message_activity_types = [
+            'telegram_sent', 'telegram_received',
+            'instagram_sent', 'instagram_received',
+            'whatsapp_sent', 'whatsapp_received',
+            'ringcentral_sms_sent', 'ringcentral_sms_received',
+        ]
+        latest_activity = obj.activities.filter(
+            activity_type__in=message_activity_types
+        ).order_by('-created_at').first()
+        if latest_activity:
+            return latest_activity.created_at.isoformat()
+
+        # 3. Fallback to database last_contacted DateField if it exists
+        if obj.last_contacted:
+            import datetime
+            dt = datetime.datetime.combine(obj.last_contacted, datetime.time.min)
+            dt = timezone.make_aware(dt, timezone.get_current_timezone())
+            return dt.isoformat()
+
+        # 4. Fallback to created_at
+        if obj.created_at:
+            return obj.created_at.isoformat()
+
+        return None
 
     class Meta:
         model = Lead

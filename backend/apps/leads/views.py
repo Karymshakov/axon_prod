@@ -125,17 +125,32 @@ class LeadViewSet(OrganizationQuerysetMixin, viewsets.ModelViewSet):
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['status', 'segment', 'source', 'assigned_to']
     search_fields = ['contact_person', 'email', 'notes']
-    ordering_fields = ['last_contacted', 'created_at', 'contact_person']
-    ordering = ['-last_contacted']
+    ordering_fields = ['last_message_at', 'last_contacted', 'created_at', 'contact_person']
+    ordering = ['-last_message_at']
 
     def get_queryset(self):
+        from django.db.models import Max
+        from django.db.models.functions import Coalesce
         user = self.request.user
         active_task_statuses = [Task.STATUS_PENDING, Task.STATUS_IN_PROGRESS]
+        message_activity_types = [
+            'telegram_sent', 'telegram_received',
+            'instagram_sent', 'instagram_received',
+            'whatsapp_sent', 'whatsapp_received',
+            'ringcentral_sms_sent', 'ringcentral_sms_received',
+        ]
         base_qs = (
             Lead.objects
             .select_related('assigned_to', 'organization')
             .prefetch_related('customer')
             .annotate(
+                last_message_at=Coalesce(
+                    Max(
+                        'activities__created_at',
+                        filter=Q(activities__activity_type__in=message_activity_types)
+                    ),
+                    'created_at'
+                ),
                 active_tasks_count=Count(
                     'tasks',
                     filter=Q(tasks__status__in=active_task_statuses),
@@ -150,7 +165,7 @@ class LeadViewSet(OrganizationQuerysetMixin, viewsets.ModelViewSet):
                     distinct=True,
                 ),
             )
-            .order_by(F('last_contacted').desc(nulls_last=True))
+            .order_by(F('last_message_at').desc(nulls_last=True))
         )
         if getattr(user, 'is_superadmin', False):
             return base_qs
