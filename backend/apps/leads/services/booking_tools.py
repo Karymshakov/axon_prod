@@ -746,16 +746,23 @@ def execute_transfer_to_manager(args: dict, lead=None) -> dict:
             logger.info(f"WhatsApp transfer result: {result}")
 
         logger.info(f"Manager notification sent via {cfg.channel} to {cfg.recipient_id}")
-        if transfer_signature is not None and lead is not None:
+        if lead is not None:
             try:
-                ctx = dict(lead.agent_context or {})
-                ctx['last_booking_transfer_signature'] = transfer_signature
-                ctx['last_booking_transfer_notified_at'] = datetime.now(tz=ZoneInfo('UTC')).isoformat()
-                lead.agent_context = ctx
-                lead.save(update_fields=['agent_context'])
+                from django.utils import timezone
+                lead.ai_paused = True
+                lead.ai_paused_at = timezone.now()
+                lead.ai_paused_by = 'AI Handoff'
+                update_fields = ['ai_paused', 'ai_paused_at', 'ai_paused_by']
+                if transfer_signature is not None:
+                    ctx = dict(lead.agent_context or {})
+                    ctx['last_booking_transfer_signature'] = transfer_signature
+                    ctx['last_booking_transfer_notified_at'] = datetime.now(tz=ZoneInfo('UTC')).isoformat()
+                    lead.agent_context = ctx
+                    update_fields.append('agent_context')
+                lead.save(update_fields=update_fields)
             except Exception as save_err:
                 logger.warning(
-                    "Could not store booking transfer signature for lead=%s: %s",
+                    "Could not update lead status for handoff for lead=%s: %s",
                     getattr(lead, 'pk', None),
                     save_err,
                 )

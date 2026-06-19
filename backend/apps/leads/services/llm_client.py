@@ -176,10 +176,41 @@ def _blocked_transfer_stage_reply(lead) -> str:
     )
 
 
+def is_explicit_manager_request(message: str) -> bool:
+    if not message:
+        return False
+    msg_lower = message.lower()
+    patterns = [
+        r'связать\s+(?:меня\s+)?с\s+(?:живым\s+)?менеджером',
+        r'связаться\s+с\s+(?:живым\s+)?менеджером',
+        r'позови(?:те)?\s+(?:менеджера|человека|оператора|администратора)',
+        r'дай(?:те)?\s+(?:менеджера|человека|оператора|администратора)',
+        r'свяжи(?:те)?\s+(?:меня\s+)?с\s+(?:менеджером|человеком|оператором|администратором)',
+        r'соедини(?:те)?\s+(?:меня\s+)?с\s+(?:менеджером|человеком|оператором|администратором)',
+        r'переведи(?:те)?\s+(?:меня\s+)?на\s+(?:менеджера|человека|оператора|администратора)',
+        r'переключи(?:те)?\s+(?:меня\s+)?на\s+(?:менеджера|человека|оператора|администратора)',
+        r'поговорить\s+с\s+(?:человеком|менеджером|оператором|администратором)',
+        r'пообщаться\s+с\s+(?:человеком|менеджером|оператором|администратором)',
+        r'\bживой\s+менеджер',
+        r'\bживым\s+менеджером',
+        r'менеджера\s+(?:позвать|можно)',
+        r'можно\s+менеджера',
+        r'позовите\s+живого',
+        r'свяжитесь\s+со\s+мной',
+        r'передайте\s+(?:мой\s+запрос\s+)?менеджеру',
+    ]
+    for pattern in patterns:
+        if re.search(pattern, msg_lower):
+            return True
+    return False
+
+
 _AMBIGUOUS_TRANSFER_REASONS = {'', 'unknown_question', 'escalation', 'other'}
 
 
-def _ambiguous_transfer_block_result(args: dict, lead=None) -> dict | None:
+def _ambiguous_transfer_block_result(args: dict, lead=None, message: str = None) -> dict | None:
+    if message and is_explicit_manager_request(message):
+        return None
     reason = str((args or {}).get('reason') or '').strip().lower()
     if reason not in _AMBIGUOUS_TRANSFER_REASONS:
         return None
@@ -453,7 +484,7 @@ class AIService:
                         f"Auto-triggered transfer_to_manager: {reason}, "
                         f"guest_count={_bc_args.get('guest_count')}"
                     )
-                    _ambiguous_transfer_block = _ambiguous_transfer_block_result(_bc_args, lead=lead)
+                    _ambiguous_transfer_block = _ambiguous_transfer_block_result(_bc_args, lead=lead, message=message)
                     if _ambiguous_transfer_block:
                         logger.warning(
                             "Auto transfer blocked for ambiguous reason: %s",
@@ -906,14 +937,21 @@ class AIService:
         try:
             last_offer = (getattr(lead, 'agent_context', None) or {}).get('last_room_offer') if lead else None
             if last_offer:
+                pref_text = ""
+                if lead and lead.room_type_preference:
+                    pref_text = f"\nSelected room preference: {lead.room_type_preference}\n"
                 messages.add_raw_system(
                     'current_room_offer_data',
                     (
                         "[CURRENT ROOM OFFER DATA — authoritative, from pricing tool]\n"
                         f"{json.dumps(last_offer, ensure_ascii=False)}\n\n"
+                        f"{pref_text}"
                         "Use this data when the guest refers to the previously offered room or asks about meal plans. "
                         "Use only prices from this JSON. If there is exactly one combination, do not ask which room option is closer. "
                         "If the guest asks what meal plans exist, list the meal_plans from the selected/only combination. "
+                        "If the guest has selected or preferred a specific room category (e.g., standard/стандарт or comfort/комфорт), "
+                        "you must look up and quote the meal plans/prices ONLY for that selected category combination from the JSON. "
+                        "Do NOT switch to a different category (e.g., do not suggest Comfort prices if the guest selected Standard). "
                         "If the guest already chose a meal plan, do not list meal plans again; continue to the next missing flow field."
                     ),
                 )
@@ -1689,7 +1727,7 @@ Example output:
             """Process one tool call, appending the result to tool_msgs. Returns updated transfer state."""
             nonlocal needs_transfer, trigger_args, transfer_already_called, last_transfer_args
             if tc.function.name == 'transfer_to_manager':
-                blocked_ambiguous_transfer = _ambiguous_transfer_block_result(tc_args, lead=lead)
+                blocked_ambiguous_transfer = _ambiguous_transfer_block_result(tc_args, lead=lead, message=message)
                 if blocked_ambiguous_transfer:
                     result_json = json.dumps(blocked_ambiguous_transfer, ensure_ascii=False)
                     logger.warning(
