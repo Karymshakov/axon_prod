@@ -1227,7 +1227,11 @@ Return ONLY the message text, nothing else."""
                     f'The guest has been silent for 10 minutes since your last response.\n'
                     f'Act as a proactive, friendly, but highly focused sales manager.\n'
                     f'Gently follow up to check if they are ready to proceed with booking or have any questions.\n'
-                    f'CRITICAL: Do NOT apologize for keeping them waiting, and do NOT apologize for the delay (you did not delay; the guest went silent). '
+                    f'CRITICAL: Do NOT apologize for keeping them waiting, and do NOT apologize for the delay (you did not delay; the guest went silent).\n'
+                    f'CRITICAL GREETING RULE (ПРАВИЛО ПРИВЕТСТВИЯ):\n'
+                    f'Always use the time-neutral greeting "Доброго времени суток" (or no greeting at all if the conversation flows naturally without it).\n'
+                    f'NEVER use time-specific greetings like "Добрый день", "Доброе утро", "Добрый вечер", or "Доброй ночи" under any circumstances because it could be night or another time of day.\n'
+                    f'Приветствие должно быть строго нейтральным по времени суток. Пишите исключительно "Доброго времени суток" (или обходитесь без приветствия, если диалог продолжается естественно). Категорически ЗАПРЕЩЕНО писать "Добрый день", "Доброе утро", "Добрый вечер" или "Доброй ночи", так как автосообщение отправляется в любое время суток.\n'
                     f'Instead, focus on moving the booking forward naturally and presenting the value of Nomad Camp.'
                 )
             else:
@@ -1274,6 +1278,8 @@ INSTRUCTIONS:
 5. Work toward the primary goal if specified
 6. Be warm and professional, not pushy
 7. If this is attempt {context['followup_attempt']}, be more direct about next steps
+8. GREETING RULE (ПРАВИЛО ПРИВЕТСТВИЯ): Always use the time-neutral greeting "Доброго времени суток" (or no greeting if contextually appropriate). NEVER use time-specific greetings like "Добрый день", "Доброе утро", or "Добрый вечер".
+Всегда используйте нейтральное по времени приветствие «Доброго времени суток» (или пишите без приветствия, если диалог продолжается естественно). Категорически ЗАПРЕЩЕНО использовать привязанные ко времени приветствия вроде «Добрый день», «Доброе утро», «Добрый вечер» или «Доброй ночи», поскольку автонапоминания отправляются в любое время суток (включая ночь).
 
 Return ONLY the message text, nothing else."""
 

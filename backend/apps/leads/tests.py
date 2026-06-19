@@ -4153,4 +4153,33 @@ class FollowUpFixesTests(TestCase):
         self.assertIn(lead_new.id, candidate_ids)
         self.assertNotIn(lead_old.id, candidate_ids)
 
+    def test_followup_prompt_greeting_rule(self):
+        from apps.leads.models import Lead, AIConfig
+        from apps.leads.agent_service import agent_service
+
+        lead = Lead.objects.create(
+            organization=self.org,
+            contact_person='Test Guest',
+            telegram_chat_id='12345',
+            next_follow_up_hint='10-minute idle follow-up',
+        )
+        config = AIConfig.objects.create(
+            organization=self.org,
+            proactive_outreach_enabled=True,
+            max_followup_attempts=3,
+        )
+
+        context = agent_service._gather_lead_context(lead)
+        with patch('apps.leads.ai_service.ai_service.generate_response_with_messages') as mock_generate:
+            mock_generate.return_value = "Доброго времени суток! Как у вас дела?"
+            msg = agent_service._generate_followup_message(lead, context, config)
+            self.assertEqual(msg, "Доброго времени суток! Как у вас дела?")
+            
+            call_messages = mock_generate.call_args[0][0]
+            last_message_content = call_messages[-1]['content']
+            
+            self.assertIn("Доброго времени суток", last_message_content)
+            self.assertIn("ПРАВИЛО ПРИВЕТСТВИЯ", last_message_content)
+            self.assertIn("10-MINUTE IDLE NUDGE", last_message_content)
+
 
