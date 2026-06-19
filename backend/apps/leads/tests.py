@@ -3911,3 +3911,70 @@ class CleanupCommsMediaCommandTests(TestCase):
             self.assertTrue(os.path.exists(fresh_path))
 
 
+
+
+class DialogueFlowFixTests(TestCase):
+    def setUp(self):
+        from django.contrib.auth import get_user_model
+        from apps.organizations.models import Organization
+        from apps.leads.models import Lead
+
+        user_model = get_user_model()
+        self.owner = user_model.objects.create_user(
+            email='test_owner_fix@example.com',
+            password='password123',
+            name='Owner',
+            role='admin',
+        )
+        self.org = Organization.objects.create(name='Fix Org', slug='fix-org', owner=self.owner)
+        self.lead = Lead.objects.create(
+            organization=self.org,
+            contact_person='Test Guest',
+            telegram_chat_id='11111',
+        )
+
+    def test_is_explicit_manager_request(self):
+        from apps.leads.services.llm_client import is_explicit_manager_request
+
+        self.assertTrue(is_explicit_manager_request('Можете связать меня с живым менеджером'))
+        self.assertTrue(is_explicit_manager_request('позовите менеджера'))
+        self.assertTrue(is_explicit_manager_request('хочу поговорить с человеком'))
+        self.assertTrue(is_explicit_manager_request('свяжитесь со мной'))
+        self.assertTrue(is_explicit_manager_request('соедините с оператором'))
+        self.assertFalse(is_explicit_manager_request('какие цены на комфорт?'))
+        self.assertFalse(is_explicit_manager_request('завтрак входит в стоимость?'))
+
+    @patch('apps.flows.models.ManagerTransferConfig')
+    @patch('apps.leads.telegram_service.TelegramService')
+    def test_manager_handoff_pauses_ai(self, mock_telegram_service, mock_transfer_config_class):
+        from apps.leads.services.booking_tools import execute_transfer_to_manager
+
+        # Setup mock config
+        mock_cfg = Mock()
+        mock_cfg.recipient_id = '99999'
+        mock_cfg.channel = 'telegram'
+        mock_cfg.manager_name = 'Manager'
+        mock_cfg.notification_template = ''
+        mock_transfer_config_class.get_config.return_value = mock_cfg
+
+        # Mock telegram message sending
+        mock_svc = Mock()
+        mock_svc.send_message = AsyncMock(return_value=Mock(message_id=123))
+        mock_telegram_service.return_value = mock_svc
+
+        # Initially lead is not paused
+        self.assertFalse(self.lead.ai_paused)
+
+        args = {
+            'reason': 'escalation',
+            'notes': 'test escalation',
+            'guest_name': 'Test Guest',
+        }
+        res = execute_transfer_to_manager(args, lead=self.lead)
+
+        self.assertEqual(res['status'], 'success')
+        self.lead.refresh_from_db()
+        # Lead should be paused now
+        self.assertTrue(self.lead.ai_paused)
+        self.assertEqual(self.lead.ai_paused_by, 'AI Handoff')
+        self.assertIsNotNone(self.lead.ai_paused_at)
