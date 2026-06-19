@@ -11,6 +11,18 @@ logger = logging.getLogger(__name__)
 def _org_from_lead(lead):
     return getattr(lead, 'organization', None) if lead is not None else None
 
+
+def _is_past_date(date_str: str) -> bool:
+    if not date_str:
+        return False
+    try:
+        ci = date.fromisoformat(date_str)
+        today_bishkek = datetime.now(ZoneInfo('Asia/Bishkek')).date()
+        return ci < today_bishkek
+    except (ValueError, TypeError):
+        return False
+
+
 _TOOL_PARAMS = {
     'get_room_options': {
         "type": "object",
@@ -832,7 +844,16 @@ def execute_pricing_tool(tool_name: str, args: dict, lead=None):
             guest_count = args.get('guest_count', 1)
             checkin_date = args.get('checkin_date')
             checkout_date = args.get('checkout_date')
+
+            if checkin_date and _is_past_date(checkin_date):
+                today_str = datetime.now(ZoneInfo('Asia/Bishkek')).date().isoformat()
+                return {
+                    'error': 'past_date',
+                    'message': f'Дата заезда {checkin_date} не может быть в прошлом. Сегодня {today_str}. Вежливо сообщите гостю, что эта дата уже прошла, и попросите выбрать актуальные даты.',
+                }
+
             max_self_service_guest_count = int(runtime_config.get('max_self_service_guest_count') or 10)
+
             if guest_count > max_self_service_guest_count:
                 return {
                     'error': 'transfer_to_manager',
@@ -1000,7 +1021,16 @@ def execute_pricing_tool(tool_name: str, args: dict, lead=None):
             guest_count = args.get('guest_count', 1)
             checkin_date = args.get('checkin_date')
             checkout_date = args.get('checkout_date')
+
+            if checkin_date and _is_past_date(checkin_date):
+                today_str = datetime.now(ZoneInfo('Asia/Bishkek')).date().isoformat()
+                return {
+                    'error': 'past_date',
+                    'message': f'Дата заезда {checkin_date} не может быть в прошлом. Сегодня {today_str}. Вежливо сообщите гостю, что эта дата уже прошла, и попросите выбрать актуальные даты.',
+                }
+
             max_self_service_guest_count = int(runtime_config.get('max_self_service_guest_count') or 10)
+
             if guest_count > max_self_service_guest_count:
                 return {
                     'error': 'transfer_to_manager',

@@ -3978,3 +3978,22 @@ class DialogueFlowFixTests(TestCase):
         self.assertTrue(self.lead.ai_paused)
         self.assertEqual(self.lead.ai_paused_by, 'AI Handoff')
         self.assertIsNotNone(self.lead.ai_paused_at)
+
+    def test_past_date_validation(self):
+        from apps.leads.services.booking_tools import _is_past_date
+        
+        # Date in the past (10 years ago)
+        self.assertTrue(_is_past_date('2016-06-19'))
+        # Date in the future (10 years in the future)
+        self.assertFalse(_is_past_date('2036-06-19'))
+        
+        # Test that get_room_options returns error for past date
+        from apps.leads.services.booking_tools import execute_pricing_tool
+        res = execute_pricing_tool('get_room_options', {
+            'guest_count': 2,
+            'checkin_date': '2016-06-19',
+            'checkout_date': '2016-06-22',
+        }, lead=self.lead)
+        self.assertEqual(res.get('error'), 'past_date')
+        self.assertIn('не может быть в прошлом', res.get('message'))
+
