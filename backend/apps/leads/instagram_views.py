@@ -451,38 +451,35 @@ def _delayed_instagram_ai_response(
 
             # Send each sentence as a separate message with a typing burst between
             message_parts = _split_into_messages(ai_response)
-            all_message_ids = []  # Collect every part's message_id for echo detection
-            last_result = None
+            last_activity_id = None
             for i, part in enumerate(message_parts):
                 if i > 0:
                     _send_typing()
                 result = instagram_service.send_message(sender_id, part)
                 if result:
-                    last_result = result
                     part_mid = result.get('message_id')
                     if part_mid:
-                        all_message_ids.append(part_mid)
+                        # Log each sent message part immediately to prevent webhook echoes
+                        # from falsely triggering a manual takeover/AI pause.
+                        sent_activity = LeadActivity.objects.create(
+                            lead=lead,
+                            organization=lead.organization,
+                            activity_type=LeadActivity.TYPE_INSTAGRAM_SENT,
+                            description=f"AI auto-response: {part[:100]}{'...' if len(part) > 100 else ''}",
+                            echo_origin=LeadActivity.ECHO_ORIGIN_CRM,
+                            metadata={
+                                'message_id': part_mid,
+                                'all_message_ids': [part_mid],
+                                'text': part,
+                                'is_ai_generated': True,
+                                'echo_origin': LeadActivity.ECHO_ORIGIN_CRM,
+                            }
+                        )
+                        last_activity_id = sent_activity.id
 
-            if last_result:
-                sent_activity = LeadActivity.objects.create(
-                    lead=lead,
-                    organization=lead.organization,
-                    activity_type=LeadActivity.TYPE_INSTAGRAM_SENT,
-                    description=f"AI auto-response: {ai_response[:100]}{'...' if len(ai_response) > 100 else ''}",
-                    echo_origin=LeadActivity.ECHO_ORIGIN_CRM,
-                    metadata={
-                        'message_id': last_result.get('message_id'),
-                        # Store every part's ID so echo detection can identify any
-                        # of the sent parts, not just the last one.
-                        'all_message_ids': all_message_ids,
-                        'text': ai_response,
-                        'is_ai_generated': True,
-                        'echo_origin': LeadActivity.ECHO_ORIGIN_CRM,
-                    }
-                )
+            if last_activity_id:
                 logger.info(f"Sent AI auto-response to lead {lead.id} via Instagram ({len(message_parts)} message(s))")
-
-                agent_service.schedule_idle_or_promise_followup(lead, combined_text, conversation_history, sent_activity.id)
+                agent_service.schedule_idle_or_promise_followup(lead, combined_text, conversation_history, last_activity_id)
 
         # Regenerate conversation summary in lead.notes after each exchange
         try:
