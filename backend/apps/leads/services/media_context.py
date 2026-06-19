@@ -76,7 +76,25 @@ def _social_content_from_metadata(metadata: dict, organization) -> SocialContent
     )
     if organization is not None:
         queryset = queryset.filter(organization=organization)
-    return queryset.order_by('-updated_at').first()
+    item = queryset.order_by('-updated_at').first()
+    if not item:
+        return None
+
+    has_semantic_context = bool(
+        item.effective_category
+        or item.effective_room_category
+        or item.linked_media_item_id
+        or item.reply_guidance
+        or item.playbook_keys
+    )
+    if not has_semantic_context:
+        logger.info(
+            'Social content %s matched by platform ID but has no manager labels yet; treating media as unresolved',
+            item.id,
+        )
+        return None
+
+    return item
 
 
 def _context_from_social_content(item: SocialContentItem, *, match_method: str, confidence: float) -> dict:
@@ -142,6 +160,7 @@ def find_best_fingerprint_context(image_path: str, *, organization=None) -> dict
         return None
 
     best = None
+    best_seen = None
     queryset = MediaFingerprint.objects.select_related(
         'hotel_media_item',
         'hotel_media_photo',
@@ -149,6 +168,16 @@ def find_best_fingerprint_context(image_path: str, *, organization=None) -> dict
     )
     if organization is not None:
         queryset = queryset.filter(organization=organization)
+
+    candidate_count = queryset.count()
+    if candidate_count == 0:
+        logger.info(
+            'Media fingerprint match skipped for %s: no fingerprints found for organization=%s. '
+            'Run rebuild_media_fingerprints in this environment.',
+            image_path,
+            getattr(organization, 'id', organization),
+        )
+        return None
 
     by_kind = {record['hash_kind']: record for record in incoming_fingerprints}
     for hash_kind, incoming in by_kind.items():
@@ -160,6 +189,16 @@ def find_best_fingerprint_context(image_path: str, *, organization=None) -> dict
             if candidate.bit_length != incoming.get('bit_length'):
                 continue
             distance = hamming_distance(incoming['hash_value'], candidate.hash_value)
+            if best_seen is None or distance < best_seen['distance']:
+                best_seen = {
+                    'distance': distance,
+                    'hash_kind': hash_kind,
+                    'fingerprint_id': candidate.id,
+                    'hotel_media_item_id': candidate.hotel_media_item_id,
+                    'social_content_item_id': candidate.social_content_item_id,
+                    'threshold': threshold,
+                    'bit_length': candidate.bit_length,
+                }
             if distance > threshold:
                 continue
             score = 1 - (distance / max(1, candidate.bit_length))
@@ -174,14 +213,36 @@ def find_best_fingerprint_context(image_path: str, *, organization=None) -> dict
                 }
 
     if not best:
+        logger.info(
+            'Media fingerprint match unresolved for %s: candidates=%s best_seen=%s',
+            image_path,
+            candidate_count,
+            best_seen,
+        )
         return None
 
-    return _context_from_fingerprint(
+    context = _context_from_fingerprint(
         best['fingerprint'],
         match_kind=best['hash_kind'],
         distance=best['distance'],
         score=best['score'],
     )
+    logger.info(
+        'Media fingerprint matched for %s: context=%s',
+        image_path,
+        {
+            'source': context.get('source'),
+            'hotel_media_item_id': context.get('hotel_media_item_id'),
+            'social_content_id': context.get('social_content_id'),
+            'category': context.get('category'),
+            'room_category': context.get('room_category'),
+            'hash_kind': context.get('hash_kind'),
+            'hash_distance': context.get('hash_distance'),
+            'confidence': context.get('confidence'),
+            'needs_clarification': context.get('needs_clarification'),
+        },
+    )
+    return context
 
 
 def build_agent_media_summary(context: dict, original_text: str = '') -> str:
@@ -227,6 +288,7 @@ def build_unresolved_media_summary(metadata: dict | None) -> str:
     parts = [
         f'Guest sent {media_type}, but the system could not confidently match it to known hotel/social content.',
         'Do not guess the room/category/content as a fact.',
+        'Ignore any earlier guessed room category from unresolved media; do not continue booking a room category unless it was confirmed by the guest or verified media context.',
         'Ask one concise clarification about what they want to know or which item this is.',
     ]
     if original_text and original_text not in {'[Изображение получено]', '[Видео получено]', '[Файл получен]'}:
@@ -245,10 +307,11 @@ def resolve_activity_media_context(activity, *, save: bool = True) -> dict | Non
     context = None
     social_item = _social_content_from_metadata(metadata, organization)
     if social_item:
+        social_confidence = 1.0 if social_item.review_status == SocialContentItem.REVIEW_REVIEWED else 0.86
         context = _context_from_social_content(
             social_item,
             match_method='platform_external_id',
-            confidence=1.0,
+            confidence=social_confidence,
         )
 
     if context is None and metadata.get('media_type') in {'photo', 'image'}:

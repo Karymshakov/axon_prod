@@ -42,6 +42,29 @@ class HotelMediaItemViewSet(OrganizationQuerysetMixin, viewsets.ModelViewSet):
             )
         return queryset.order_by('-created_at')
 
+    def _rebuild_item_fingerprints_safely(self, item):
+        try:
+            from .services import rebuild_hotel_media_item_fingerprints
+
+            rebuild_hotel_media_item_fingerprints(item)
+        except Exception:
+            # Fingerprints are an acceleration/matching layer. Media CRUD must stay
+            # available even while migrations are rolling out or a file cannot be hashed.
+            pass
+
+    def perform_create(self, serializer):
+        user = self.request.user
+        if getattr(user, 'is_superadmin', False):
+            org = getattr(user, 'current_organization', None)
+            item = serializer.save(organization=org) if org else serializer.save()
+        else:
+            item = serializer.save(organization=self._get_organization())
+        self._rebuild_item_fingerprints_safely(item)
+
+    def perform_update(self, serializer):
+        item = serializer.save()
+        self._rebuild_item_fingerprints_safely(item)
+
     @action(detail=True, methods=['post'])
     def increment_ai_sends(self, request, pk=None):
         item = self.get_object()
@@ -68,7 +91,13 @@ class HotelMediaItemViewSet(OrganizationQuerysetMixin, viewsets.ModelViewSet):
         next_order = item.photos.count()
         for f in files:
             compressed = compress_image_for_telegram(f, filename=f.name)
-            HotelMediaPhoto.objects.create(item=item, file=compressed, order=next_order)
+            photo = HotelMediaPhoto.objects.create(item=item, file=compressed, order=next_order)
+            try:
+                from .services import rebuild_hotel_media_photo_fingerprints
+
+                rebuild_hotel_media_photo_fingerprints(photo)
+            except Exception:
+                pass
             next_order += 1
 
         serializer = HotelMediaItemSerializer(item, context={'request': request})

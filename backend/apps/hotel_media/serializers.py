@@ -1,4 +1,5 @@
 from rest_framework import serializers
+from django.db.utils import OperationalError, ProgrammingError
 from .models import HotelMediaItem, HotelMediaPhoto, MediaFingerprint, SocialContentItem
 
 
@@ -61,7 +62,12 @@ class HotelMediaItemSerializer(serializers.ModelSerializer):
         return None
 
     def get_fingerprint_count(self, obj):
-        return getattr(obj, 'fingerprints', None).count() if getattr(obj, 'pk', None) else 0
+        if not getattr(obj, 'pk', None):
+            return 0
+        try:
+            return getattr(obj, 'fingerprints', None).count()
+        except (OperationalError, ProgrammingError):
+            return 0
 
 
 class SocialContentItemSerializer(serializers.ModelSerializer):
@@ -118,7 +124,12 @@ class SocialContentItemSerializer(serializers.ModelSerializer):
         read_only_fields = ['id', 'source', 'fingerprint_count', 'created_at', 'updated_at']
 
     def get_fingerprint_count(self, obj):
-        return obj.fingerprints.count() if getattr(obj, 'pk', None) else 0
+        if not getattr(obj, 'pk', None):
+            return 0
+        try:
+            return obj.fingerprints.count()
+        except (OperationalError, ProgrammingError):
+            return 0
 
 
 class MediaFingerprintSerializer(serializers.ModelSerializer):
