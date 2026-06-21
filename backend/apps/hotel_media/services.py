@@ -201,30 +201,71 @@ def upsert_social_content_from_instagram_payload(
     source: str = SocialContentItem.SOURCE_AUTO_SYNC,
 ) -> SocialContentItem:
     """Create/update social content from sync or webhook data without manager labels."""
-    item, created = SocialContentItem.objects.update_or_create(
+    item = SocialContentItem.objects.filter(
         organization=organization,
         platform=SocialContentItem.PLATFORM_INSTAGRAM,
         external_id=external_id,
-        defaults={
-            'content_type': content_type or SocialContentItem.TYPE_UNKNOWN,
-            'title': title[:255],
-            'caption': caption or '',
-            'media_url': media_url or '',
-            'thumbnail_url': thumbnail_url or '',
-            'permalink': permalink or '',
-            'posted_at': posted_at,
-            'expires_at': expires_at,
-            'last_synced_at': timezone.now(),
-            'metadata': metadata or {},
-            'source': source,
-            'status': SocialContentItem.STATUS_ACTIVE,
-            'is_active': True,
-        },
-    )
-    if created:
-        item.review_status = SocialContentItem.REVIEW_NEEDS_REVIEW
-        item.save(update_fields=['review_status'])
-    return item
+    ).first()
+
+    if item:
+        if item.status == SocialContentItem.STATUS_DELETED:
+            return item
+
+        update_fields = ['last_synced_at']
+        item.last_synced_at = timezone.now()
+
+        if media_url and item.media_url != media_url:
+            item.media_url = media_url
+            update_fields.append('media_url')
+
+        if thumbnail_url and item.thumbnail_url != thumbnail_url:
+            item.thumbnail_url = thumbnail_url
+            update_fields.append('thumbnail_url')
+
+        if permalink and item.permalink != permalink:
+            item.permalink = permalink
+            update_fields.append('permalink')
+
+        if expires_at and item.expires_at != expires_at:
+            item.expires_at = expires_at
+            update_fields.append('expires_at')
+
+        if posted_at and not item.posted_at:
+            item.posted_at = posted_at
+            update_fields.append('posted_at')
+
+        if metadata:
+            item.metadata = metadata
+            update_fields.append('metadata')
+
+        if item.status == SocialContentItem.STATUS_EXPIRED and expires_at and expires_at > timezone.now():
+            item.status = SocialContentItem.STATUS_ACTIVE
+            item.is_active = True
+            update_fields.extend(['status', 'is_active'])
+
+        item.save(update_fields=update_fields)
+        return item
+    else:
+        item = SocialContentItem.objects.create(
+            organization=organization,
+            platform=SocialContentItem.PLATFORM_INSTAGRAM,
+            external_id=external_id,
+            content_type=content_type or SocialContentItem.TYPE_UNKNOWN,
+            title=title[:255] if title else '',
+            caption=caption or '',
+            media_url=media_url or '',
+            thumbnail_url=thumbnail_url or '',
+            permalink=permalink or '',
+            posted_at=posted_at,
+            expires_at=expires_at,
+            last_synced_at=timezone.now(),
+            metadata=metadata or {},
+            source=source,
+            status=SocialContentItem.STATUS_ACTIVE,
+            is_active=True,
+            review_status=SocialContentItem.REVIEW_NEEDS_REVIEW,
+        )
+        return item
 
 
 def external_id_from_url(value: str) -> str:

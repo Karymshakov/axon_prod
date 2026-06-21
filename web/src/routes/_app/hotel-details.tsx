@@ -135,6 +135,7 @@ import {
   type RoomCategory,
   fetchSocialContentItems,
   updateSocialContentItem,
+  deleteSocialContentItem,
   markSocialContentReviewed,
   rebuildSocialContentFingerprints,
   syncInstagramSocialContent,
@@ -3183,6 +3184,15 @@ function SocialContentTab({ mediaItems }: { mediaItems: HotelMediaItem[] }) {
     onError: () => toast.error('Не удалось пересобрать отпечатки'),
   })
 
+  const deleteMutation = useMutation({
+    mutationFn: (id: number) => deleteSocialContentItem(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['social-content'] })
+      toast.success('Соцконтент удален')
+    },
+    onError: () => toast.error('Не удалось удалить соцконтент'),
+  })
+
   function openEdit(item: SocialContentItem) {
     setEditing(item)
     setForm({
@@ -3270,7 +3280,7 @@ function SocialContentTab({ mediaItems }: { mediaItems: HotelMediaItem[] }) {
                     <span>·</span>
                     {SOCIAL_STATUS_LABELS[item.status]}
                   </div>
-                  <div className="flex gap-2">
+                  <div className="flex gap-2 flex-wrap">
                     <Button size="sm" variant="outline" onClick={() => openEdit(item)}>
                       <PencilIcon className="h-3.5 w-3.5 mr-1.5" />
                       Настроить
@@ -3281,6 +3291,19 @@ function SocialContentTab({ mediaItems }: { mediaItems: HotelMediaItem[] }) {
                         Проверено
                       </Button>
                     ) : null}
+                    <Button
+                      size="sm"
+                      variant="destructive"
+                      onClick={() => {
+                        if (confirm('Вы уверены, что хотите удалить этот элемент соцконтента?')) {
+                          deleteMutation.mutate(item.id)
+                        }
+                      }}
+                      disabled={deleteMutation.isPending}
+                    >
+                      {deleteMutation.isPending ? <Loader2Icon className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : <Trash2Icon className="h-3.5 w-3.5 mr-1.5" />}
+                      Удалить
+                    </Button>
                   </div>
                 </div>
               </div>

@@ -109,21 +109,7 @@ def _apply_fast_lead_extraction(lead, text: str) -> list[str]:
         elif len(digits) >= 7:
             phone_value = phone_match.group(0)
 
-    if phone_value:
-        try:
-            from apps.leads.services.stage_resolver import is_reliable_contact_person
 
-            if not is_reliable_contact_person(lead):
-                name_candidate = value
-                name_candidate = re.sub(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}', ' ', name_candidate)
-                name_candidate = name_candidate.replace(phone_value, ' ')
-                name_candidate = re.sub(r'[\n\r,;:]+', ' ', name_candidate).strip()
-                name_candidate = re.sub(r'\s+', ' ', name_candidate)
-                if is_reliable_contact_person(lead, name_candidate):
-                    lead.contact_person = name_candidate
-                    updated_fields.append('contact_person')
-        except Exception:
-            pass
 
     try:
         from apps.leads.services.booking_tools import _extract_guest_count_from_text, _infer_relative_booking_dates

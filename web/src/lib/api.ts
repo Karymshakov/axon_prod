@@ -929,6 +929,10 @@ export function updateSocialContentItem(id: number, data: UpdateSocialContentDat
   return api.patch<SocialContentItem>(`/social-content/${id}/`, data)
 }
 
+export function deleteSocialContentItem(id: number) {
+  return api.delete(`/social-content/${id}/`)
+}
+
 export function markSocialContentReviewed(id: number) {
   return api.post<SocialContentItem>(`/social-content/${id}/mark-reviewed/`, {})
 }

@@ -124,7 +124,7 @@ class SocialContentItemViewSet(OrganizationQuerysetMixin, viewsets.ModelViewSet)
         serializer.save(organization=self._get_organization(), source=SocialContentItem.SOURCE_MANUAL)
 
     def get_queryset(self):
-        queryset = super().get_queryset()
+        queryset = super().get_queryset().exclude(status=SocialContentItem.STATUS_DELETED)
         search = self.request.query_params.get('search')
         needs_review = self.request.query_params.get('needs_review')
 
@@ -139,6 +139,14 @@ class SocialContentItemViewSet(OrganizationQuerysetMixin, viewsets.ModelViewSet)
         if needs_review in {'1', 'true', 'yes'}:
             queryset = queryset.filter(review_status=SocialContentItem.REVIEW_NEEDS_REVIEW)
         return queryset.order_by('-posted_at', '-created_at')
+
+    def destroy(self, request, *args, **kwargs):
+        instance = self.get_object()
+        instance.status = SocialContentItem.STATUS_DELETED
+        instance.is_active = False
+        instance.save(update_fields=['status', 'is_active'])
+        instance.fingerprints.all().delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
     @action(detail=True, methods=['post'], url_path='mark-reviewed')
     def mark_reviewed(self, request, pk=None):
