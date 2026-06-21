@@ -20,14 +20,9 @@ HASH_THRESHOLDS = {
     'ahash': 7,
     'colorhash': 36,
 }
-SCREENSHOT_REGION_THRESHOLD_BONUS = {
-    'phash': 2,
-    'dhash': 2,
-    'ahash': 2,
-}
-
 HIGH_CONFIDENCE_SCORE = 0.88
-MIN_ACCEPTED_SCORE = 0.82
+MIN_ACCEPTED_SCORE = HIGH_CONFIDENCE_SCORE
+MIN_SCREENSHOT_REGION_SCORE = 0.93
 
 INSTAGRAM_ID_KEYS = {
     'id',
@@ -254,35 +249,6 @@ def _social_content_match_from_metadata(metadata: dict, organization) -> tuple[S
             if normalized_urls.intersection(item_normalized) and _has_social_semantic_context(item):
                 return item, 'platform_url'
 
-    content_type = ''
-    if isinstance(social_context, dict):
-        content_type = str(social_context.get('content_type') or '').strip()
-    attachment_type = str((social_context or {}).get('attachment_type') or '').strip() if isinstance(social_context, dict) else ''
-    if content_type in {
-        SocialContentItem.TYPE_POST,
-        SocialContentItem.TYPE_REEL,
-        SocialContentItem.TYPE_STORY,
-        SocialContentItem.TYPE_HIGHLIGHT,
-    } or attachment_type.startswith('ig_'):
-        fallback_queryset = queryset.filter(
-            review_status=SocialContentItem.REVIEW_REVIEWED,
-            status=SocialContentItem.STATUS_ACTIVE,
-        )
-        if content_type:
-            fallback_queryset = fallback_queryset.filter(content_type=content_type)
-        semantic_items = [
-            item
-            for item in fallback_queryset.order_by('-updated_at')[:20]
-            if _has_social_semantic_context(item)
-        ]
-        if len(semantic_items) == 1:
-            logger.info(
-                'Social content matched by single reviewed %s item fallback: social_content_id=%s',
-                content_type or attachment_type,
-                semantic_items[0].id,
-            )
-            return semantic_items[0], 'single_reviewed_social_content'
-
     return None, ''
 
 
@@ -409,9 +375,7 @@ def find_best_fingerprint_context(image_path: str, *, organization=None) -> dict
                 if candidate.bit_length != incoming.get('bit_length'):
                     continue
                 crop_label = str(incoming.get('crop_label') or '')
-                effective_threshold = threshold + (
-                    SCREENSHOT_REGION_THRESHOLD_BONUS.get(hash_kind, 0) if crop_label else 0
-                )
+                effective_threshold = threshold
                 distance = hamming_distance(incoming['hash_value'], candidate.hash_value)
                 if best_seen is None or distance < best_seen['distance']:
                     best_seen = {
@@ -427,7 +391,9 @@ def find_best_fingerprint_context(image_path: str, *, organization=None) -> dict
                 if distance > effective_threshold:
                     continue
                 score = 1 - (distance / max(1, candidate.bit_length))
-                if score < MIN_ACCEPTED_SCORE:
+                is_screenshot_region = bool(crop_label) and hash_kind != 'center_phash'
+                min_score = MIN_SCREENSHOT_REGION_SCORE if is_screenshot_region else MIN_ACCEPTED_SCORE
+                if score < min_score:
                     continue
                 if best is None or score > best['score']:
                     best = {

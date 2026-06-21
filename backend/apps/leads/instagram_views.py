@@ -1095,6 +1095,12 @@ def instagram_webhook(request):
                 if (media_metadata or instagram_content_context) and not media_context:
                     unresolved_media_prompt = build_unresolved_media_summary(current_activity.metadata)
                     ai_input_text = unresolved_media_prompt
+                    unresolved_metadata = dict(current_activity.metadata or {})
+                    unresolved_metadata['visual_summary'] = unresolved_media_prompt
+                    unresolved_metadata['ai_text'] = unresolved_media_prompt
+                    unresolved_metadata['media_context_unresolved'] = True
+                    current_activity.metadata = unresolved_metadata
+                    current_activity.save(update_fields=['metadata'])
 
                 # Spawn background thread when AI is configured — classification runs
                 # regardless of auto_response; the thread decides whether to reply.

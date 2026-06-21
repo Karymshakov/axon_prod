@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import logging
+import os
+import tempfile
 from datetime import timezone as datetime_timezone, timedelta
 from urllib.parse import urlparse
 
@@ -49,6 +51,39 @@ def _create_fingerprints(records: list[dict], *, organization, hotel_media_item=
     return created
 
 
+def _fingerprints_from_remote_image_url(url: str) -> list[dict]:
+    if not url:
+        return []
+
+    temp_path = ''
+    try:
+        response = requests.get(url, timeout=20)
+        response.raise_for_status()
+        content_type = (response.headers.get('Content-Type') or '').split(';', 1)[0].lower()
+        if content_type and not content_type.startswith('image/'):
+            return []
+
+        suffix = '.jpg'
+        parsed_suffix = os.path.splitext(urlparse(url).path or '')[1]
+        if parsed_suffix and len(parsed_suffix) <= 8:
+            suffix = parsed_suffix
+
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+            tmp.write(response.content)
+            temp_path = tmp.name
+
+        return compute_image_fingerprints(temp_path)
+    except (requests.RequestException, FingerprintError, OSError) as exc:
+        logger.info('Could not fingerprint remote social image %s: %s', url[:120], exc)
+        return []
+    finally:
+        if temp_path:
+            try:
+                os.remove(temp_path)
+            except OSError:
+                pass
+
+
 def rebuild_hotel_media_item_fingerprints(item: HotelMediaItem) -> int:
     """Rebuild fingerprints for a curated hotel media item and its photo album."""
     MediaFingerprint.objects.filter(hotel_media_item=item, social_content_item__isnull=True).delete()
@@ -93,11 +128,11 @@ def rebuild_hotel_media_photo_fingerprints(photo: HotelMediaPhoto) -> int:
 
 
 def rebuild_social_content_fingerprints(item: SocialContentItem) -> int:
-    """Rebuild fingerprints for social content when it points at local curated media."""
+    """Rebuild fingerprints for linked media or downloaded Instagram image previews."""
     MediaFingerprint.objects.filter(social_content_item=item).delete()
 
+    created = 0
     if item.linked_media_item_id:
-        created = 0
         source_item = item.linked_media_item
         if source_item.file:
             path = _file_path(source_item.file)
@@ -127,7 +162,18 @@ def rebuild_social_content_fingerprints(item: SocialContentItem) -> int:
                 logger.warning('Could not fingerprint linked social photo %s: %s', photo.id, exc)
         return created
 
-    return 0
+    for url in (item.thumbnail_url, item.media_url):
+        records = _fingerprints_from_remote_image_url(url)
+        if not records:
+            continue
+        created += _create_fingerprints(
+            records,
+            organization=item.organization,
+            social_content_item=item,
+        )
+        break
+
+    return created
 
 
 def upsert_social_content_from_instagram_payload(

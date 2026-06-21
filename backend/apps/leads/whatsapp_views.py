@@ -682,6 +682,12 @@ def whatsapp_webhook(request):
                     if media_metadata and not media_context:
                         unresolved_media_prompt = build_unresolved_media_summary(current_activity.metadata)
                         ai_input_text = unresolved_media_prompt
+                        unresolved_metadata = dict(current_activity.metadata or {})
+                        unresolved_metadata['visual_summary'] = unresolved_media_prompt
+                        unresolved_metadata['ai_text'] = unresolved_media_prompt
+                        unresolved_metadata['media_context_unresolved'] = True
+                        current_activity.metadata = unresolved_metadata
+                        current_activity.save(update_fields=['metadata'])
 
                     initialize_inbound_diagnostics(
                         current_activity,

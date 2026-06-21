@@ -362,6 +362,47 @@ class InstagramSocialContentWebhookTests(TestCase):
         self.assertEqual(media_context['match_method'], 'platform_url')
         self.assertIn('room_category: comfort', activity.metadata.get('ai_text', ''))
 
+    def test_instagram_context_without_id_or_url_does_not_fallback_to_only_reviewed_item(self):
+        from apps.hotel_media.models import HotelMediaItem, SocialContentItem
+        from apps.leads.services.media_context import resolve_activity_media_context
+
+        media_item = HotelMediaItem.objects.create(
+            organization=self.org,
+            title='Comfort',
+            category=HotelMediaItem.CATEGORY_ROOMS,
+            room_category=HotelMediaItem.ROOM_CATEGORY_COMFORT,
+            media_type=HotelMediaItem.MEDIA_TYPE_PHOTO,
+        )
+        SocialContentItem.objects.create(
+            organization=self.org,
+            platform=SocialContentItem.PLATFORM_INSTAGRAM,
+            external_id='comfort-only-reviewed',
+            content_type=SocialContentItem.TYPE_POST,
+            status=SocialContentItem.STATUS_ACTIVE,
+            review_status=SocialContentItem.REVIEW_REVIEWED,
+            linked_media_item=media_item,
+            title='Comfort',
+            category=HotelMediaItem.CATEGORY_ROOMS,
+            room_category=HotelMediaItem.ROOM_CATEGORY_COMFORT,
+            reply_guidance='Это номер Комфорт.',
+        )
+        lead = Lead.objects.create(organization=self.org, instagram_user_id='guest-social-no-id')
+        activity = LeadActivity.objects.create(
+            lead=lead,
+            organization=self.org,
+            activity_type=LeadActivity.TYPE_INSTAGRAM_RECEIVED,
+            description='Received from Instagram: [Получено: ig_post]',
+            metadata={
+                'text': '[Получено: ig_post]',
+                'instagram_context': {
+                    'content_type': 'post',
+                    'attachment_type': 'ig_post',
+                },
+            },
+        )
+
+        self.assertIsNone(resolve_activity_media_context(activity))
+
 
 class GlobalChannelAiPauseTests(TestCase):
     def setUp(self):

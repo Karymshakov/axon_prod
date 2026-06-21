@@ -54,10 +54,9 @@ def rebuild_photo_fingerprints_on_save(sender, instance: HotelMediaPhoto, **kwar
 
 @receiver(post_save, sender=SocialContentItem)
 def rebuild_social_content_fingerprints_on_save(sender, instance: SocialContentItem, **kwargs):
-    if not instance.linked_media_item_id:
-        return
     update_fields = kwargs.get('update_fields')
-    if update_fields is not None and 'linked_media_item' not in set(update_fields):
+    relevant_fields = {'linked_media_item', 'media_url', 'thumbnail_url'}
+    if update_fields is not None and not relevant_fields.intersection(set(update_fields)):
         return
 
     def _rebuild():
