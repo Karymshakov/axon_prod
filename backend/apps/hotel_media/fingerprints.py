@@ -5,7 +5,9 @@ from pathlib import Path
 from typing import Iterable
 
 import numpy as np
-from PIL import Image, ImageOps, UnidentifiedImageError
+from PIL import Image, ImageOps, UnidentifiedImageError, ImageFile
+
+ImageFile.LOAD_TRUNCATED_IMAGES = True
 
 
 HASH_SIZE = 8

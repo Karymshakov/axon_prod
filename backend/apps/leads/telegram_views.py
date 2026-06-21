@@ -922,6 +922,30 @@ def telegram_webhook(request):
         if media_metadata:
             metadata.update(media_metadata)
 
+        reply_to_message = message.get('reply_to_message')
+        if reply_to_message:
+            reply_from = reply_to_message.get('from', {})
+            reply_text = reply_to_message.get('text') or reply_to_message.get('caption')
+            if not reply_text:
+                if reply_to_message.get('photo'):
+                    reply_text = '[Фото]'
+                elif reply_to_message.get('video') or reply_to_message.get('video_note'):
+                    reply_text = '[Видео]'
+                elif reply_to_message.get('voice') or reply_to_message.get('audio'):
+                    reply_text = '[Голосовое сообщение]'
+                elif reply_to_message.get('document'):
+                    reply_text = '[Файл]'
+                else:
+                    reply_text = '[Сообщение]'
+
+            reply_sender_name = reply_from.get('first_name') or reply_from.get('username') or ('Бот' if reply_from.get('is_bot') else 'Гость')
+            metadata['reply_to'] = {
+                'message_id': reply_to_message.get('message_id'),
+                'text': reply_text,
+                'sender_name': reply_sender_name,
+                'from_bot': bool(reply_from.get('is_bot')),
+            }
+
         if media_type:
             desc_media = {
                 'photo': 'photo',
