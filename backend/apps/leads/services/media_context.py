@@ -341,7 +341,8 @@ def find_best_fingerprint_context(image_path: str, *, organization=None) -> dict
         logger.warning('Could not fingerprint incoming media %s: %s', image_path, exc)
         return None
 
-    best = None
+    best_social = None
+    best_hotel = None
     best_seen = None
     queryset = MediaFingerprint.objects.select_related(
         'hotel_media_item',
@@ -395,14 +396,28 @@ def find_best_fingerprint_context(image_path: str, *, organization=None) -> dict
                 min_score = MIN_SCREENSHOT_REGION_SCORE if is_screenshot_region else MIN_ACCEPTED_SCORE
                 if score < min_score:
                     continue
-                if best is None or score > best['score']:
-                    best = {
-                        'score': score,
-                        'distance': distance,
-                        'hash_kind': hash_kind,
-                        'fingerprint': candidate,
-                        'incoming_crop_label': crop_label,
-                    }
+
+                record_data = {
+                    'score': score,
+                    'distance': distance,
+                    'hash_kind': hash_kind,
+                    'fingerprint': candidate,
+                    'incoming_crop_label': crop_label,
+                }
+
+                if candidate.social_content_item_id is not None:
+                    if best_social is None or score > best_social['score']:
+                        best_social = record_data
+                else:
+                    if best_hotel is None or score > best_hotel['score']:
+                        best_hotel = record_data
+
+    # Choose between best_social and best_hotel
+    best = None
+    if best_social:
+        best = best_social
+    elif best_hotel:
+        best = best_hotel
 
     if not best:
         logger.info(

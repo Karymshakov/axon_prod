@@ -129,10 +129,9 @@ def rebuild_hotel_media_photo_fingerprints(photo: HotelMediaPhoto) -> int:
 
 def rebuild_social_content_fingerprints(item: SocialContentItem) -> int:
     """Rebuild fingerprints for linked media or downloaded Instagram image previews."""
-    MediaFingerprint.objects.filter(social_content_item=item).delete()
-
     created = 0
     if item.linked_media_item_id:
+        MediaFingerprint.objects.filter(social_content_item=item).delete()
         source_item = item.linked_media_item
         if source_item.file:
             path = _file_path(source_item.file)
@@ -162,16 +161,26 @@ def rebuild_social_content_fingerprints(item: SocialContentItem) -> int:
                 logger.warning('Could not fingerprint linked social photo %s: %s', photo.id, exc)
         return created
 
+    records = []
     for url in (item.thumbnail_url, item.media_url):
         records = _fingerprints_from_remote_image_url(url)
-        if not records:
-            continue
-        created += _create_fingerprints(
+        if records:
+            break
+
+    if records:
+        MediaFingerprint.objects.filter(social_content_item=item).delete()
+        created = _create_fingerprints(
             records,
             organization=item.organization,
             social_content_item=item,
         )
-        break
+    else:
+        existing_count = MediaFingerprint.objects.filter(social_content_item=item).count()
+        if existing_count > 0:
+            logger.info('Instagram URLs expired for SocialContentItem %s, but keeping %s existing fingerprints.', item.id, existing_count)
+            created = existing_count
+        else:
+            logger.warning('Could not fetch fingerprints for SocialContentItem %s and no existing fingerprints found.', item.id)
 
     return created
 
