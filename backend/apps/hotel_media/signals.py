@@ -65,6 +65,14 @@ def rebuild_social_content_fingerprints_on_save(sender, instance: SocialContentI
 
             count = rebuild_social_content_fingerprints(instance)
             logger.info('Rebuilt %s fingerprints for SocialContentItem %s', count, instance.id)
+            if not instance.fingerprints.exists():
+                from .tasks import rebuild_social_content_fingerprints_task
+
+                rebuild_social_content_fingerprints_task.apply_async(
+                    args=[instance.id],
+                    countdown=20,
+                )
+                logger.info('Scheduled fingerprint retry for SocialContentItem %s', instance.id)
         except Exception as exc:
             logger.warning('Could not rebuild fingerprints for SocialContentItem %s: %s', instance.id, exc)
 

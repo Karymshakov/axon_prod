@@ -120,6 +120,97 @@ class ScreenshotFingerprintTests(TestCase):
 
         self.assertIsNone(context)
 
+    def test_single_strong_hash_collision_is_not_treated_as_a_match(self):
+        from apps.leads.services.media_context import find_best_fingerprint_context
+
+        with TemporaryDirectory() as temp_dir:
+            trash_path = f'{temp_dir}/trash.jpg'
+            trash = Image.new('RGB', (640, 480), '#707070')
+            draw = ImageDraw.Draw(trash)
+            for index in range(16):
+                x = (index % 4) * 160
+                y = (index // 4) * 120
+                draw.rectangle((x + 8, y + 8, x + 145, y + 105), fill=(40 + index * 9, 80, 120))
+            trash.save(trash_path)
+
+            item = HotelMediaItem.objects.create(
+                organization=self.org,
+                title='Events',
+                category=HotelMediaItem.CATEGORY_CONFERENCE,
+                media_type=HotelMediaItem.MEDIA_TYPE_PHOTO,
+            )
+            exact_phash = next(
+                record for record in compute_image_fingerprints(trash_path)
+                if record['hash_kind'] == 'phash'
+            )
+            MediaFingerprint.objects.create(
+                organization=self.org,
+                hotel_media_item=item,
+                hash_kind='phash',
+                hash_value=exact_phash['hash_value'],
+                bit_length=exact_phash['bit_length'],
+                width=exact_phash['width'],
+                height=exact_phash['height'],
+            )
+
+            context = find_best_fingerprint_context(trash_path, organization=self.org)
+
+        self.assertIsNone(context)
+
+    def test_story_screenshot_matches_social_content_with_hash_consensus(self):
+        from apps.leads.services.media_context import find_best_fingerprint_context
+
+        with TemporaryDirectory() as temp_dir:
+            pool_path = f'{temp_dir}/pool_story.jpg'
+            screenshot_path = f'{temp_dir}/pool_story_screenshot.jpg'
+
+            pool = Image.new('RGB', (470, 702), '#17232d')
+            draw = ImageDraw.Draw(pool)
+            draw.rectangle((0, 260, 470, 702), fill='#168ec0')
+            for x in range(30, 470, 90):
+                draw.line((x, 270, x - 40, 700), fill='#f4f4f4', width=5)
+            for x in range(70, 430, 60):
+                draw.ellipse((x, 400, x + 42, 470), fill='#b8835f')
+            draw.text((95, 80), 'nomadcamp pool', fill='#ffffff')
+            pool.save(pool_path)
+
+            social = SocialContentItem.objects.create(
+                organization=self.org,
+                platform=SocialContentItem.PLATFORM_INSTAGRAM,
+                external_id='pool-story-consensus',
+                content_type=SocialContentItem.TYPE_STORY,
+                status=SocialContentItem.STATUS_ACTIVE,
+                review_status=SocialContentItem.REVIEW_REVIEWED,
+                title='Pool',
+                category=HotelMediaItem.CATEGORY_POOL,
+            )
+            for record in compute_image_fingerprints(pool_path):
+                MediaFingerprint.objects.create(
+                    organization=self.org,
+                    social_content_item=social,
+                    hash_kind=record['hash_kind'],
+                    hash_value=record['hash_value'],
+                    bit_length=record['bit_length'],
+                    width=record['width'],
+                    height=record['height'],
+                    crop_label=record.get('crop_label', ''),
+                )
+
+            screenshot = Image.new('RGB', (500, 900), '#080b0f')
+            screenshot.paste(pool, (15, 90))
+            draw = ImageDraw.Draw(screenshot)
+            draw.rectangle((0, 0, 500, 80), fill='#080b0f')
+            draw.rectangle((0, 810, 500, 900), fill='#080b0f')
+            screenshot.save(screenshot_path)
+
+            context = find_best_fingerprint_context(screenshot_path, organization=self.org)
+
+        self.assertIsNotNone(context)
+        self.assertEqual(context['source'], 'social_content')
+        self.assertEqual(context['category'], HotelMediaItem.CATEGORY_POOL)
+        self.assertGreaterEqual(len(context['match_evidence']), 2)
+        self.assertFalse(context['needs_clarification'])
+
 
 class SocialContentFingerprintTests(TestCase):
     def setUp(self):

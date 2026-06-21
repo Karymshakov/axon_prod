@@ -43,7 +43,10 @@ class Command(BaseCommand):
             'hash_kind',
             'hash_distance',
             'confidence',
+            'raw_similarity',
+            'match_evidence',
+            'match_margin',
+            'incoming_crop_label',
             'needs_clarification',
         ]:
             self.stdout.write(f'  {key}: {context.get(key)}')
-

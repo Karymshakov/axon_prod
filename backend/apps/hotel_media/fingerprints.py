@@ -59,14 +59,19 @@ def _candidate_screenshot_crops(image: Image.Image) -> list[tuple[str, Image.Ima
     image = ImageOps.exif_transpose(image)
     width, height = image.size
     crops: list[tuple[str, Image.Image]] = []
-    seen: set[tuple[int, int, int, int]] = set()
 
     regions = [
+        # Full-screen story viewers usually leave only a narrow status/header/footer frame.
+        ('story_viewer_full', (0.00, 0.05, 1.00, 0.90)),
+        ('story_viewer_body', (0.00, 0.06, 1.00, 0.88)),
+        ('story_viewer_inset', (0.04, 0.06, 0.96, 0.90)),
         ('center_80', (0.10, 0.10, 0.90, 0.90)),
         ('story_body', (0.03, 0.10, 0.97, 0.88)),
         ('story_body_tight', (0.07, 0.13, 0.93, 0.84)),
         ('post_media', (0.00, 0.12, 1.00, 0.78)),
         ('post_media_tight', (0.04, 0.16, 0.96, 0.72)),
+        ('post_media_upper', (0.00, 0.14, 1.00, 0.70)),
+        ('post_media_center', (0.02, 0.18, 0.98, 0.74)),
         ('upper_media', (0.00, 0.08, 1.00, 0.68)),
         ('middle_media', (0.00, 0.20, 1.00, 0.82)),
     ]
@@ -86,11 +91,6 @@ def _candidate_screenshot_crops(image: Image.Image) -> list[tuple[str, Image.Ima
         crop = _relative_crop(image, box)
         if crop is None:
             continue
-        key = crop.getbbox() or (0, 0, crop.size[0], crop.size[1])
-        signature = (crop.size[0], crop.size[1], *key)
-        if signature in seen:
-            continue
-        seen.add(signature)
         crops.append((label, crop))
 
     center = _center_crop(image)

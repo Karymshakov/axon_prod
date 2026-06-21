@@ -13,16 +13,23 @@ from apps.hotel_media.models import HotelMediaItem, MediaFingerprint, SocialCont
 logger = logging.getLogger(__name__)
 
 
-HASH_THRESHOLDS = {
-    'phash': 8,
-    'center_phash': 8,
-    'dhash': 8,
-    'ahash': 7,
-    'colorhash': 36,
-}
 HIGH_CONFIDENCE_SCORE = 0.88
-MIN_ACCEPTED_SCORE = 0.76
-MIN_SCREENSHOT_REGION_SCORE = 0.76
+
+# A single perceptual hash is deliberately insufficient. With hundreds of
+# candidates, unrelated images regularly have one accidental 80-86% match.
+STRUCTURAL_HASH_WEIGHTS = {
+    'phash': 0.45,
+    'dhash': 0.35,
+    'ahash': 0.20,
+}
+STRUCTURAL_HASH_MIN_SCORES = {
+    'phash': 0.78,
+    'dhash': 0.78,
+    'ahash': 0.82,
+}
+MIN_DIRECT_CONSENSUS_SCORE = 0.86
+MIN_SCREENSHOT_CONSENSUS_SCORE = 0.82
+MIN_WINNER_MARGIN = 0.025
 
 INSTAGRAM_ID_KEYS = {
     'id',
@@ -334,6 +341,46 @@ def _context_from_fingerprint(fingerprint: MediaFingerprint, *, match_kind: str,
     return context
 
 
+def _fingerprint_owner_key(fingerprint: MediaFingerprint) -> tuple:
+    if fingerprint.social_content_item_id:
+        return ('social', fingerprint.social_content_item_id)
+    if fingerprint.hotel_media_photo_id:
+        return ('hotel_photo', fingerprint.hotel_media_photo_id)
+    return ('hotel_item', fingerprint.hotel_media_item_id)
+
+
+def _fingerprint_variant_key(fingerprint: MediaFingerprint) -> tuple:
+    """Keep album photos separate while grouping hash kinds of one source image."""
+    owner = _fingerprint_owner_key(fingerprint)
+    if fingerprint.hotel_media_photo_id:
+        return (*owner, 'photo', fingerprint.hotel_media_photo_id)
+    if fingerprint.hotel_media_item_id:
+        return (*owner, 'item', fingerprint.hotel_media_item_id)
+    return (*owner, 'remote')
+
+
+def _consensus_score(evidence: dict[str, dict]) -> float:
+    total_weight = sum(STRUCTURAL_HASH_WEIGHTS[kind] for kind in evidence)
+    if not total_weight:
+        return 0.0
+    return sum(
+        item['score'] * STRUCTURAL_HASH_WEIGHTS[kind]
+        for kind, item in evidence.items()
+    ) / total_weight
+
+
+def _is_consensus_match(evidence: dict[str, dict], *, is_screenshot_region: bool) -> bool:
+    kinds = set(evidence)
+    if len(kinds) < 2:
+        return False
+    # Two weak brightness/edge hashes are not enough without pHash. All three
+    # algorithms may agree when pHash is mildly affected by text overlays.
+    if 'phash' not in kinds and len(kinds) < 3:
+        return False
+    minimum = MIN_SCREENSHOT_CONSENSUS_SCORE if is_screenshot_region else MIN_DIRECT_CONSENSUS_SCORE
+    return _consensus_score(evidence) >= minimum
+
+
 def find_best_fingerprint_context(image_path: str, *, organization=None) -> dict | None:
     try:
         incoming_fingerprints = compute_image_fingerprints(image_path, include_screenshot_regions=True)
@@ -341,8 +388,6 @@ def find_best_fingerprint_context(image_path: str, *, organization=None) -> dict
         logger.warning('Could not fingerprint incoming media %s: %s', image_path, exc)
         return None
 
-    best_social = None
-    best_hotel = None
     best_seen = None
     queryset = MediaFingerprint.objects.select_related(
         'hotel_media_item',
@@ -364,39 +409,34 @@ def find_best_fingerprint_context(image_path: str, *, organization=None) -> dict
 
     by_kind: dict[str, list[dict]] = {}
     for record in incoming_fingerprints:
-        by_kind.setdefault(record['hash_kind'], []).append(record)
+        if record['hash_kind'] in STRUCTURAL_HASH_WEIGHTS:
+            by_kind.setdefault(record['hash_kind'], []).append(record)
 
+    grouped_evidence: dict[tuple, dict[str, dict]] = {}
     for hash_kind, incoming_records in by_kind.items():
-        threshold = HASH_THRESHOLDS.get(hash_kind)
-        if threshold is None:
-            continue
-
         for candidate in queryset.filter(hash_kind=hash_kind).iterator():
             for incoming in incoming_records:
                 if candidate.bit_length != incoming.get('bit_length'):
                     continue
                 crop_label = str(incoming.get('crop_label') or '')
-                is_screenshot_region = bool(crop_label)
-                effective_threshold = threshold + (6 if is_screenshot_region else 0)
                 distance = hamming_distance(incoming['hash_value'], candidate.hash_value)
+                score = 1 - (distance / max(1, candidate.bit_length))
                 if best_seen is None or distance < best_seen['distance']:
                     best_seen = {
                         'distance': distance,
+                        'score': round(score, 3),
                         'hash_kind': hash_kind,
                         'fingerprint_id': candidate.id,
                         'hotel_media_item_id': candidate.hotel_media_item_id,
                         'social_content_item_id': candidate.social_content_item_id,
-                        'threshold': effective_threshold,
                         'bit_length': candidate.bit_length,
                         'incoming_crop_label': crop_label,
                     }
-                if distance > effective_threshold:
-                    continue
-                score = 1 - (distance / max(1, candidate.bit_length))
-                min_score = MIN_SCREENSHOT_REGION_SCORE if is_screenshot_region else MIN_ACCEPTED_SCORE
-                if score < min_score:
+                if score < STRUCTURAL_HASH_MIN_SCORES[hash_kind]:
                     continue
 
+                group_key = (_fingerprint_variant_key(candidate), crop_label)
+                evidence = grouped_evidence.setdefault(group_key, {})
                 record_data = {
                     'score': score,
                     'distance': distance,
@@ -404,36 +444,79 @@ def find_best_fingerprint_context(image_path: str, *, organization=None) -> dict
                     'fingerprint': candidate,
                     'incoming_crop_label': crop_label,
                 }
+                previous = evidence.get(hash_kind)
+                if previous is None or score > previous['score']:
+                    evidence[hash_kind] = record_data
 
-                if candidate.social_content_item_id is not None:
-                    if best_social is None or score > best_social['score']:
-                        best_social = record_data
-                else:
-                    if best_hotel is None or score > best_hotel['score']:
-                        best_hotel = record_data
+    ranked = []
+    for (variant_key, crop_label), evidence in grouped_evidence.items():
+        if not _is_consensus_match(evidence, is_screenshot_region=bool(crop_label)):
+            continue
+        raw_score = _consensus_score(evidence)
+        evidence_count = len(evidence)
+        # Convert raw visual similarity into calibrated identification confidence.
+        # Agreement of independent hashes is substantially stronger than one score.
+        confidence = min(0.99, raw_score + (0.08 if evidence_count >= 3 else 0.05))
+        strongest = max(evidence.values(), key=lambda item: item['score'])
+        ranked.append({
+            **strongest,
+            'owner_key': _fingerprint_owner_key(strongest['fingerprint']),
+            'variant_key': variant_key,
+            'raw_score': raw_score,
+            'score': confidence,
+            'evidence': evidence,
+            'incoming_crop_label': crop_label,
+        })
 
-    # Choose between best_social and best_hotel
-    best = None
-    if best_social:
-        best = best_social
-    elif best_hotel:
-        best = best_hotel
+    ranked.sort(key=lambda item: (item['score'], item['raw_score'], len(item['evidence'])), reverse=True)
+    best = ranked[0] if ranked else None
 
     if not best:
         logger.info(
-            'Media fingerprint match unresolved for %s: candidates=%s best_seen=%s',
+            'Media fingerprint consensus unresolved for %s: candidates=%s best_seen=%s groups=%s',
             image_path,
             candidate_count,
             best_seen,
+            len(grouped_evidence),
+        )
+        return None
+
+    runner_up = next(
+        (item for item in ranked[1:] if item['owner_key'] != best['owner_key']),
+        None,
+    )
+    margin = best['score'] - runner_up['score'] if runner_up else 1.0
+    if runner_up and margin < MIN_WINNER_MARGIN and best['score'] < 0.95:
+        logger.info(
+            'Media fingerprint consensus ambiguous for %s: best=%s runner_up=%s margin=%.3f',
+            image_path,
+            {
+                'owner': best['owner_key'],
+                'score': round(best['score'], 3),
+                'raw_score': round(best['raw_score'], 3),
+                'hashes': sorted(best['evidence']),
+                'crop': best['incoming_crop_label'],
+            },
+            {
+                'owner': runner_up['owner_key'],
+                'score': round(runner_up['score'], 3),
+                'raw_score': round(runner_up['raw_score'], 3),
+                'hashes': sorted(runner_up['evidence']),
+                'crop': runner_up['incoming_crop_label'],
+            },
+            margin,
         )
         return None
 
     context = _context_from_fingerprint(
         best['fingerprint'],
-        match_kind=best['hash_kind'],
+        match_kind='consensus',
         distance=best['distance'],
         score=best['score'],
     )
+    context['raw_similarity'] = round(best['raw_score'], 3)
+    context['match_evidence'] = sorted(best['evidence'])
+    context['match_margin'] = round(margin, 3)
     if best.get('incoming_crop_label'):
         context['incoming_crop_label'] = best['incoming_crop_label']
     logger.info(
@@ -448,6 +531,9 @@ def find_best_fingerprint_context(image_path: str, *, organization=None) -> dict
             'hash_kind': context.get('hash_kind'),
             'hash_distance': context.get('hash_distance'),
             'confidence': context.get('confidence'),
+            'raw_similarity': context.get('raw_similarity'),
+            'match_evidence': context.get('match_evidence'),
+            'match_margin': context.get('match_margin'),
             'needs_clarification': context.get('needs_clarification'),
         },
     )

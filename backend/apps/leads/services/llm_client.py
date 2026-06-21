@@ -1084,6 +1084,36 @@ class AIService:
                 if tool['function']['name'] in _flow_card_tool_allowlist
             ]
 
+        _recent_history_text = ' '.join(
+            str(turn.get('content') or '').lower()
+            for turn in (conversation_history or [])[-6:]
+            if isinstance(turn, dict)
+        )
+        _history_has_media_context = (
+            'система распознала контекст медиа:' in _recent_history_text
+            or 'система не смогла уверенно сопоставить медиа' in _recent_history_text
+        )
+        _explicit_image_request = bool(
+            re.search(r'(фот|покаж|изображ|image|photo|picture)', _msg_lower)
+        )
+        _short_media_followup = bool(
+            len(_msg_lower.split()) <= 12
+            and re.search(r'(а\s+это|что\s+это|что\s+за|как\s+называ|расскаж)', _msg_lower)
+        )
+        _is_media_identification_request = (
+            'гость отправил медиа. система распознала контекст медиа:' in _msg_lower
+            or 'система не смогла уверенно сопоставить медиа' in _msg_lower
+            or (_history_has_media_context and _short_media_followup and not _explicit_image_request)
+        )
+        if _is_media_identification_request:
+            # Identifying an attached image must never fan out into room albums.
+            # A later explicit guest request for more photos is handled normally.
+            logger.info('[AI tools filter] media identification request; removing get_room_images')
+            _pricing_tools = [
+                tool for tool in _pricing_tools
+                if tool['function']['name'] != 'get_room_images'
+            ]
+
         _selected_media_requires_manager_handoff = False
         _selected_media_only_request = False
         if selected_media:
