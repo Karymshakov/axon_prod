@@ -63,7 +63,7 @@ def _clean_public_playbook_line(line: str) -> str | None:
             text = f"{cells[0]} — {cells[1]}"
 
     text = re.sub(r'^\s{0,3}#{1,6}\s*', '', text)
-    text = re.sub(r'^\s*[-*•]\s*', '', text)
+    text = re.sub(r'^\s*[-*•—–/]\s*', '', text)
     text = re.sub(r'\(\s*уточни\s+у\s+менеджера\s*\)', '(уточнить у менеджера)', text, flags=re.IGNORECASE)
     text = re.split(r'\s+(?:если|когда)\s+гость\b', text, maxsplit=1, flags=re.IGNORECASE | re.UNICODE)[0].strip()
     if not text:
@@ -411,4 +411,4 @@ def fallback_answer_from_playbooks(message: str, *, org=None, playbooks: list | 
     if map_request:
         return f"Вот ссылки на карту {org_name}:\n" + "\n".join(deduped)
 
-    return f"По {org_name} могу подсказать так:\n" + "\n".join(f"- {line}" for line in deduped)
+    return f"С радостью подскажу вам по {org_name} 😊:\n" + "\n".join(f"- {line}" for line in deduped)

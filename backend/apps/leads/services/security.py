@@ -221,9 +221,8 @@ def sanitize_public_response(response_text: str | None, message: str = '', *, le
         f'for lead={getattr(lead, "pk", None)}; no safe fallback found'
     )
     return normalize_guest_reply(
-        "Извините, сейчас не смогла корректно подготовить ответ по базе. "
-        "Напишите, пожалуйста, вопрос чуть точнее, и я подскажу по отелю."
-        ,
+        "Извините, пожалуйста, возникла небольшая техническая заминка. "
+        "Напишите ваш вопрос чуть точнее, и я обязательно подскажу всё по отелю! 😊",
         lead=lead,
     )
 
