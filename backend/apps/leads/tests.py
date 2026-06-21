@@ -2138,6 +2138,16 @@ class AIConnectionAndIntentClassifierTests(TestCase):
 
         self.assertEqual(infer_required_fields_from_card(self.card), ['room_type_preference'])
 
+    def test_email_is_never_required_by_flow_card(self):
+        from apps.leads.services.stage_resolver import infer_required_fields_from_card
+
+        self.card.title = 'Collect Contacts'
+        self.card.goal = 'Collect contact details.'
+        self.card.required_fields = ['contact_person', 'phone', 'email']
+        self.card.save(update_fields=['title', 'goal', 'required_fields'])
+
+        self.assertEqual(infer_required_fields_from_card(self.card), ['contact_person', 'phone'])
+
     def test_prompt_preview_reports_stage_policy_without_llm_call(self):
         from apps.flows.models import LeadFlowState
         from apps.leads.models import Lead

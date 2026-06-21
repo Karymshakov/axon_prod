@@ -928,7 +928,10 @@ class AIService:
                     pass
         if stage_policy and stage_policy.resolution:
             try:
-                missing = list(stage_policy.resolution.missing_fields or [])
+                missing = [
+                    field for field in (stage_policy.resolution.missing_fields or [])
+                    if field != 'email'
+                ]
                 if missing:
                     lc_parts.append(
                         "\nCURRENT NO-CODE FLOW REQUIREMENTS — do not skip these missing fields:"
@@ -939,6 +942,9 @@ class AIService:
                         lc_parts.append(
                             "When collecting contacts, ask for BOTH guest name and phone before saying the booking is ready."
                         )
+                    lc_parts.append(
+                        "Email is optional. Do not ask for email as a required booking field and do not delay transfer_to_manager because email is missing."
+                    )
             except Exception:
                 pass
 

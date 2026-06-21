@@ -43,6 +43,61 @@ def _center_crop(image: Image.Image) -> Image.Image:
     return image.crop((left, top, left + side, top + side))
 
 
+def _relative_crop(image: Image.Image, box: tuple[float, float, float, float]) -> Image.Image | None:
+    width, height = image.size
+    left = max(0, min(width - 1, round(width * box[0])))
+    top = max(0, min(height - 1, round(height * box[1])))
+    right = max(left + 1, min(width, round(width * box[2])))
+    bottom = max(top + 1, min(height, round(height * box[3])))
+    if right - left < 48 or bottom - top < 48:
+        return None
+    return image.crop((left, top, right, bottom))
+
+
+def _candidate_screenshot_crops(image: Image.Image) -> list[tuple[str, Image.Image]]:
+    """Regions that usually isolate reposted Instagram/story media inside screenshots."""
+    image = ImageOps.exif_transpose(image)
+    width, height = image.size
+    crops: list[tuple[str, Image.Image]] = []
+    seen: set[tuple[int, int, int, int]] = set()
+
+    regions = [
+        ('center_80', (0.10, 0.10, 0.90, 0.90)),
+        ('story_body', (0.03, 0.10, 0.97, 0.88)),
+        ('story_body_tight', (0.07, 0.13, 0.93, 0.84)),
+        ('post_media', (0.00, 0.12, 1.00, 0.78)),
+        ('post_media_tight', (0.04, 0.16, 0.96, 0.72)),
+        ('upper_media', (0.00, 0.08, 1.00, 0.68)),
+        ('middle_media', (0.00, 0.20, 1.00, 0.82)),
+    ]
+    if height > width * 1.45:
+        regions.extend([
+            ('portrait_content', (0.00, 0.08, 1.00, 0.84)),
+            ('portrait_content_lower', (0.00, 0.15, 1.00, 0.91)),
+        ])
+    if width > height * 1.25:
+        regions.extend([
+            ('landscape_left', (0.00, 0.06, 0.72, 0.94)),
+            ('landscape_center', (0.14, 0.06, 0.86, 0.94)),
+            ('landscape_right', (0.28, 0.06, 1.00, 0.94)),
+        ])
+
+    for label, box in regions:
+        crop = _relative_crop(image, box)
+        if crop is None:
+            continue
+        key = crop.getbbox() or (0, 0, crop.size[0], crop.size[1])
+        signature = (crop.size[0], crop.size[1], *key)
+        if signature in seen:
+            continue
+        seen.add(signature)
+        crops.append((label, crop))
+
+    center = _center_crop(image)
+    crops.append(('center_square', center))
+    return crops
+
+
 @lru_cache(maxsize=8)
 def _dct_matrix(size: int) -> np.ndarray:
     n = np.arange(size)
@@ -91,7 +146,7 @@ def color_hash(image: Image.Image, hash_size: int = HASH_SIZE) -> tuple[str, int
     return _bits_to_hex(bits)
 
 
-def compute_image_fingerprints(image_path: str | Path) -> list[dict]:
+def compute_image_fingerprints(image_path: str | Path, *, include_screenshot_regions: bool = False) -> list[dict]:
     try:
         with Image.open(image_path) as image:
             image = ImageOps.exif_transpose(image)
@@ -115,6 +170,22 @@ def compute_image_fingerprints(image_path: str | Path) -> list[dict]:
                     'height': height,
                     'crop_label': crop_label,
                 })
+            if include_screenshot_regions:
+                for crop_label, crop in _candidate_screenshot_crops(image):
+                    for kind, func in [
+                        ('phash', perceptual_hash),
+                        ('dhash', difference_hash),
+                        ('ahash', average_hash),
+                    ]:
+                        hash_value, bit_length = func(crop)
+                        fingerprints.append({
+                            'hash_kind': kind,
+                            'hash_value': hash_value,
+                            'bit_length': bit_length,
+                            'width': crop.size[0],
+                            'height': crop.size[1],
+                            'crop_label': crop_label,
+                        })
             return fingerprints
     except (FileNotFoundError, OSError, UnidentifiedImageError) as exc:
         raise FingerprintError(str(exc)) from exc
@@ -126,4 +197,3 @@ def hamming_distance(left_hex: str, right_hex: str) -> int:
     left = int(left_hex, 16)
     right = int(right_hex, 16)
     return (left ^ right).bit_count()
-

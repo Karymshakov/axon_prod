@@ -20,6 +20,11 @@ HASH_THRESHOLDS = {
     'ahash': 7,
     'colorhash': 36,
 }
+SCREENSHOT_REGION_THRESHOLD_BONUS = {
+    'phash': 2,
+    'dhash': 2,
+    'ahash': 2,
+}
 
 HIGH_CONFIDENCE_SCORE = 0.88
 MIN_ACCEPTED_SCORE = 0.82
@@ -286,6 +291,13 @@ def _context_from_social_content(item: SocialContentItem, *, match_method: str, 
     room_category = item.effective_room_category
     linked = item.linked_media_item
     title = item.title or (linked.title if linked else '') or item.caption[:80]
+    linked_media_url = ''
+    if linked and linked.file:
+        try:
+            linked_media_url = linked.file.url
+        except ValueError:
+            linked_media_url = ''
+    preview_url = item.thumbnail_url or item.media_url or linked_media_url
 
     return {
         'source': 'social_content',
@@ -298,6 +310,11 @@ def _context_from_social_content(item: SocialContentItem, *, match_method: str, 
         'external_id': item.external_id,
         'title': title,
         'caption': item.caption[:500],
+        'media_url': item.media_url,
+        'thumbnail_url': item.thumbnail_url,
+        'permalink': item.permalink,
+        'preview_url': preview_url,
+        'linked_media_url': linked_media_url,
         'category': category,
         'room_category': room_category or '',
         'playbook_keys': item.playbook_keys if isinstance(item.playbook_keys, list) else [],
@@ -315,6 +332,18 @@ def _context_from_fingerprint(fingerprint: MediaFingerprint, *, match_kind: str,
         )
     else:
         media_item = fingerprint.hotel_media_item
+        media_url = ''
+        photo_url = ''
+        if media_item and media_item.file:
+            try:
+                media_url = media_item.file.url
+            except ValueError:
+                media_url = ''
+        if fingerprint.hotel_media_photo and fingerprint.hotel_media_photo.file:
+            try:
+                photo_url = fingerprint.hotel_media_photo.file.url
+            except ValueError:
+                photo_url = ''
         context = {
             'source': 'hotel_media',
             'match_method': f'{match_kind}_hash',
@@ -324,6 +353,9 @@ def _context_from_fingerprint(fingerprint: MediaFingerprint, *, match_kind: str,
             'hotel_media_photo_id': fingerprint.hotel_media_photo_id,
             'title': media_item.title if media_item else '',
             'description': media_item.description[:500] if media_item else '',
+            'media_url': media_url,
+            'photo_url': photo_url,
+            'preview_url': photo_url or media_url,
             'category': media_item.category if media_item else '',
             'room_category': media_item.room_category or '' if media_item else '',
             'tags': media_item.tags if media_item and isinstance(media_item.tags, list) else [],
@@ -338,7 +370,7 @@ def _context_from_fingerprint(fingerprint: MediaFingerprint, *, match_kind: str,
 
 def find_best_fingerprint_context(image_path: str, *, organization=None) -> dict | None:
     try:
-        incoming_fingerprints = compute_image_fingerprints(image_path)
+        incoming_fingerprints = compute_image_fingerprints(image_path, include_screenshot_regions=True)
     except FingerprintError as exc:
         logger.warning('Could not fingerprint incoming media %s: %s', image_path, exc)
         return None
@@ -363,38 +395,48 @@ def find_best_fingerprint_context(image_path: str, *, organization=None) -> dict
         )
         return None
 
-    by_kind = {record['hash_kind']: record for record in incoming_fingerprints}
-    for hash_kind, incoming in by_kind.items():
+    by_kind: dict[str, list[dict]] = {}
+    for record in incoming_fingerprints:
+        by_kind.setdefault(record['hash_kind'], []).append(record)
+
+    for hash_kind, incoming_records in by_kind.items():
         threshold = HASH_THRESHOLDS.get(hash_kind)
         if threshold is None:
             continue
 
         for candidate in queryset.filter(hash_kind=hash_kind).iterator():
-            if candidate.bit_length != incoming.get('bit_length'):
-                continue
-            distance = hamming_distance(incoming['hash_value'], candidate.hash_value)
-            if best_seen is None or distance < best_seen['distance']:
-                best_seen = {
-                    'distance': distance,
-                    'hash_kind': hash_kind,
-                    'fingerprint_id': candidate.id,
-                    'hotel_media_item_id': candidate.hotel_media_item_id,
-                    'social_content_item_id': candidate.social_content_item_id,
-                    'threshold': threshold,
-                    'bit_length': candidate.bit_length,
-                }
-            if distance > threshold:
-                continue
-            score = 1 - (distance / max(1, candidate.bit_length))
-            if score < MIN_ACCEPTED_SCORE:
-                continue
-            if best is None or score > best['score']:
-                best = {
-                    'score': score,
-                    'distance': distance,
-                    'hash_kind': hash_kind,
-                    'fingerprint': candidate,
-                }
+            for incoming in incoming_records:
+                if candidate.bit_length != incoming.get('bit_length'):
+                    continue
+                crop_label = str(incoming.get('crop_label') or '')
+                effective_threshold = threshold + (
+                    SCREENSHOT_REGION_THRESHOLD_BONUS.get(hash_kind, 0) if crop_label else 0
+                )
+                distance = hamming_distance(incoming['hash_value'], candidate.hash_value)
+                if best_seen is None or distance < best_seen['distance']:
+                    best_seen = {
+                        'distance': distance,
+                        'hash_kind': hash_kind,
+                        'fingerprint_id': candidate.id,
+                        'hotel_media_item_id': candidate.hotel_media_item_id,
+                        'social_content_item_id': candidate.social_content_item_id,
+                        'threshold': effective_threshold,
+                        'bit_length': candidate.bit_length,
+                        'incoming_crop_label': crop_label,
+                    }
+                if distance > effective_threshold:
+                    continue
+                score = 1 - (distance / max(1, candidate.bit_length))
+                if score < MIN_ACCEPTED_SCORE:
+                    continue
+                if best is None or score > best['score']:
+                    best = {
+                        'score': score,
+                        'distance': distance,
+                        'hash_kind': hash_kind,
+                        'fingerprint': candidate,
+                        'incoming_crop_label': crop_label,
+                    }
 
     if not best:
         logger.info(
@@ -411,6 +453,8 @@ def find_best_fingerprint_context(image_path: str, *, organization=None) -> dict
         distance=best['distance'],
         score=best['score'],
     )
+    if best.get('incoming_crop_label'):
+        context['incoming_crop_label'] = best['incoming_crop_label']
     logger.info(
         'Media fingerprint matched for %s: context=%s',
         image_path,

@@ -125,7 +125,227 @@ function getTelegramMessageText(activity: { description: string; metadata: Recor
   return activity.description.replace(/^Telegram message sent:\s*/i, '').trim()
 }
 
-function sortActivitiesChronologically<T extends { created_at: string; id: number }>(items: T[]) {
+function objectValue(value: unknown): Record<string, unknown> {
+
+  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}
+
+}
+
+
+
+function stringValue(value: unknown): string {
+
+  return typeof value === 'string' ? value.trim() : ''
+
+}
+
+
+
+function firstString(values: unknown[]): string {
+
+  for (const value of values) {
+
+    if (Array.isArray(value)) {
+
+      const nested = firstString(value)
+
+      if (nested) return nested
+
+      continue
+
+    }
+
+    const text = stringValue(value)
+
+    if (text) return text
+
+  }
+
+  return ''
+
+}
+
+
+
+function trimPreviewText(value: string, maxLength = 140): string {
+
+  return value.length > maxLength ? `${value.slice(0, maxLength - 1)}…` : value
+
+}
+
+
+
+function isRenderablePreviewUrl(value: string): boolean {
+
+  const lower = value.toLowerCase()
+
+  return Boolean(value)
+
+    && !lower.includes('instagram.com/p/')
+
+    && !lower.includes('instagram.com/reel/')
+
+    && !lower.includes('instagram.com/stories/')
+
+}
+
+
+
+const INSTAGRAM_CONTENT_LABELS: Record<string, string> = {
+
+  post: 'пост',
+
+  story: 'сторис',
+
+  reel: 'Reels',
+
+  highlight: 'актуальное',
+
+}
+
+
+
+const ROOM_CATEGORY_LABELS: Record<string, string> = {
+
+  standard_queen: 'Стандарт Квин',
+
+  standard_twin: 'Стандарт Твин',
+
+  comfort: 'Комфорт',
+
+  family: 'Семейный',
+
+  other: 'Другой номер',
+
+}
+
+
+
+const MEDIA_CATEGORY_LABELS: Record<string, string> = {
+
+  rooms: 'Номера',
+
+  cafeteria: 'Кафе',
+
+  pool: 'Бассейн',
+
+  spa: 'SPA',
+
+  conference: 'Конференции',
+
+  exterior: 'Территория',
+
+  lobby: 'Лобби',
+
+  other: 'Другое',
+
+}
+
+
+
+function getInstagramContextPreview(metadata: Record<string, unknown> | null) {
+
+  if (!metadata) return null
+
+  const mediaContext = objectValue(metadata.media_context)
+
+  const instagramContext = objectValue(metadata.instagram_context)
+
+  const hasInstagramContext = Object.keys(instagramContext).length > 0
+
+  const hasMediaContext = Object.keys(mediaContext).length > 0
+
+  if (!hasInstagramContext && !hasMediaContext) return null
+
+  const source = stringValue(mediaContext.source)
+
+  const contentType = stringValue(mediaContext.content_type) || stringValue(instagramContext.content_type)
+
+  const contentLabel = INSTAGRAM_CONTENT_LABELS[contentType] || (contentType ? contentType : 'контент')
+
+  const rawTitle = firstString([
+
+    mediaContext.title,
+
+    mediaContext.caption,
+
+    instagramContext.title,
+
+    instagramContext.caption,
+
+  ]) || (source === 'hotel_media' ? 'Фото из медиабазы' : `Instagram ${contentLabel}`)
+
+  const title = trimPreviewText(rawTitle)
+
+  const roomCategory = stringValue(mediaContext.room_category)
+
+  const category = stringValue(mediaContext.category)
+
+  const confidence = typeof mediaContext.confidence === 'number' ? mediaContext.confidence : null
+
+  const previewUrl = firstString([
+
+    mediaContext.preview_url,
+
+    mediaContext.thumbnail_url,
+
+    mediaContext.media_url,
+
+    mediaContext.photo_url,
+
+    mediaContext.linked_media_url,
+
+    instagramContext.thumbnail_url,
+
+    instagramContext.media_url,
+
+    instagramContext.story_url,
+
+    instagramContext.share_url,
+
+    instagramContext.urls,
+
+  ])
+
+  const linkUrl = firstString([
+
+    mediaContext.permalink,
+
+    instagramContext.permalink,
+
+    instagramContext.share_url,
+
+  ])
+
+  const badges = [
+
+    roomCategory ? ROOM_CATEGORY_LABELS[roomCategory] || roomCategory : '',
+
+    category ? MEDIA_CATEGORY_LABELS[category] || category : '',
+
+    confidence !== null ? `${Math.round(confidence * 100)}%` : '',
+
+  ].filter(Boolean)
+
+  return {
+
+    title,
+
+    heading: source === 'hotel_media' ? 'Распознано по фото' : `Ответ на ${contentLabel}`,
+
+    previewUrl: isRenderablePreviewUrl(previewUrl) ? resolveMediaUrl(previewUrl) : '',
+
+    linkUrl,
+
+    badges,
+
+  }
+
+}
+
+
+
+function sortActivitiesChronologically<T extends { created_at: string; id: number }>(items: T[]) {
   return [...items].sort((a, b) => {
     const createdAtDiff = new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
     if (createdAtDiff !== 0) {
@@ -1248,7 +1468,9 @@ function CommunicationsPage() {
                         lowerText === '[файл получен]' ||
                         lowerText === '[получено: image]' ||
                         lowerText === '[получено: video]' ||
-                        lowerText === '[получено: audio]' ||
+                        lowerText === '[получено: audio]' ||
+
+                        lowerText.startsWith('[получено: ig_') ||
                         lowerText === 'received photo from whatsapp' ||
                         lowerText === 'received video from whatsapp' ||
                         lowerText === 'received audio from whatsapp' ||
@@ -1273,7 +1495,13 @@ function CommunicationsPage() {
                       const fileName = activity.metadata?.file_name as string | undefined
                       const isVoice = Boolean(activity.metadata?.is_voice)
                       const rawMediaUrls = fileUrls && fileUrls.length > 0 ? fileUrls : (fileUrl ? [fileUrl] : [])
-                      const mediaUrls = rawMediaUrls.map(resolveMediaUrl)
+                      const mediaUrls = rawMediaUrls.map(resolveMediaUrl)
+
+                      const instagramContextPreview = isInstagram && !isSent
+
+                        ? getInstagramContextPreview(activity.metadata)
+
+                        : null
 
                       const timestamp = new Date(activity.created_at).toLocaleString('ru-RU', {
                         month: 'short',
@@ -1347,7 +1575,91 @@ function CommunicationsPage() {
                               </a>
                             )}
 
-                            {/* Text */}
+                            {instagramContextPreview && (
+
+                              <div className={`mb-2 overflow-hidden rounded-lg border text-left ${
+
+                                isSent ? 'border-white/25 bg-white/10' : 'border-border bg-background/80'
+
+                              }`}>
+
+                                {instagramContextPreview.previewUrl && (
+
+                                  <img
+
+                                    src={instagramContextPreview.previewUrl}
+
+                                    alt={instagramContextPreview.title}
+
+                                    className="h-28 w-full object-cover"
+
+                                  />
+
+                                )}
+
+                                <div className="space-y-1.5 px-3 py-2.5">
+
+                                  <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-normal text-muted-foreground">
+
+                                    <InstagramIcon className="h-3 w-3 text-pink-500" />
+
+                                    <span>{instagramContextPreview.heading}</span>
+
+                                  </div>
+
+                                  <div className="text-[13px] font-semibold leading-snug text-foreground">
+
+                                    {instagramContextPreview.title}
+
+                                  </div>
+
+                                  {instagramContextPreview.badges.length > 0 && (
+
+                                    <div className="flex flex-wrap gap-1">
+
+                                      {instagramContextPreview.badges.map((badge) => (
+
+                                        <span key={badge} className="rounded-md bg-muted px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground">
+
+                                          {badge}
+
+                                        </span>
+
+                                      ))}
+
+                                    </div>
+
+                                  )}
+
+                                  {instagramContextPreview.linkUrl && (
+
+                                    <a
+
+                                      href={instagramContextPreview.linkUrl}
+
+                                      target="_blank"
+
+                                      rel="noreferrer"
+
+                                      className="inline-flex text-[11px] font-medium text-pink-600 hover:text-pink-700"
+
+                                    >
+
+                                      Открыть в Instagram
+
+                                    </a>
+
+                                  )}
+
+                                </div>
+
+                              </div>
+
+                            )}
+
+
+
+                            {/* Text */}
                             {messageText && (
                               <p className="text-[14px] sm:text-[15px] leading-relaxed whitespace-pre-wrap break-words">{messageText}</p>
                             )}

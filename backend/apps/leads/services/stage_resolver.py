@@ -141,6 +141,7 @@ def infer_required_fields_from_card(card) -> list[str]:
         for field in (getattr(card, 'required_fields', None) or [])
         if str(field).strip()
     ]
+    explicit = [field for field in explicit if field != 'email']
     title = (
         f"{getattr(card, 'title', '') or ''} "
         f"{getattr(card, 'goal', '') or ''}"
@@ -148,7 +149,7 @@ def infer_required_fields_from_card(card) -> list[str]:
     is_contact_stage = any(marker in title for marker in ('contact', 'контакт', 'телефон', 'phone'))
     if explicit:
         if is_contact_stage:
-            fields = [field for field in explicit if field != 'email']
+            fields = list(explicit)
             for field in ('contact_person', 'phone'):
                 if field not in fields:
                     fields.append(field)
@@ -260,12 +261,15 @@ def sync_stage_state(flow_state, lead, lead_data: dict[str, Any] | None = None, 
 
 
 def stage_resolution_instruction(resolution: StageResolution) -> str:
-    if not resolution.required_fields:
+    required_fields = [field for field in resolution.required_fields if field != 'email']
+    missing_fields = [field for field in resolution.missing_fields if field != 'email']
+    if not required_fields:
         return ''
-    if resolution.is_complete:
+    if not missing_fields:
         return 'Stage status: all required fields are collected.'
     return (
         'Stage status: stay on this stage until these fields are collected: '
-        + ', '.join(resolution.missing_fields)
-        + '. If the guest asks a side question, answer it briefly and then return to collecting the missing fields.'
+        + ', '.join(missing_fields)
+        + '. If the guest asks a side question, answer it briefly and then return to collecting the missing fields. '
+        + 'Email is optional and must never block stage completion.'
     )

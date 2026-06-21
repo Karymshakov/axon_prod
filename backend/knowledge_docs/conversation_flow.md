@@ -197,22 +197,20 @@ Nomad Camp сизди күтөт 🌊»
 RU:
 «Отлично! Для оформления заявки осталось уточнить:
 — Ваше полное имя (ФИО)
-[Telegram/Instagram: — Номер телефона]
-— Email»
+[Telegram/Instagram: — Номер телефона]»
 
 EN:
 «Almost there! Just need a few details to complete your request:
 — Your full name
-[Telegram/Instagram: — Phone number]
-— Email»
+[Telegram/Instagram: — Phone number]»
 
 KY:
 «Жакшы! Арызды толтуруу үчүн уточнить кылуу керек:
 — Толук атыңыз
-[Telegram/Instagram: — Телефон номериңиз]
-— Email»
+[Telegram/Instagram: — Телефон номериңиз]»
 
-WhatsApp: телефон известен — спрашивай только имя и email.
+WhatsApp: телефон известен — спрашивай только имя.
+Email опционален: не проси его как обязательное поле и не блокируй оформление, если гость его не дал.
 Если имя уже известно из диалога — не спрашивай снова.
 ```
 
@@ -223,7 +221,7 @@ WhatsApp: телефон известен — спрашивай только и
 Читай guest_language из Shared Context. Отвечай ТОЛЬКО на языке гостя.
 
 [Booking Agent вызывает transfer_to_manager(reason="booking_complete") ДО ответа гостю]
-[Передаёт: guest_name, guest_phone, guest_email, checkin_date, checkout_date,
+[Передаёт: guest_name, guest_phone, guest_email если гость сам дал email, checkin_date, checkout_date,
  guest_count, room_description, meal_plan, price_per_night, total_price, platform]
 
 RU:
@@ -317,4 +315,3 @@ hi
 - **From:** Card 13 (Meal Plan Selection)
 - **To:** Card 14 (Alternative Dates / Friendly Close)
 - **Keywords:** `не нужно, не надо, без питания, не хочу есть, не буду, откажусь, отказываюсь, только номер, просто номер, без еды, не интересует, не берём, пропустим, пропустить, не требуется, обойдёмся, сами поедим, своя еда, привезём еду, дорого, слишком дорого, не по бюджету, не подходит, другой вариант, подумаю, не готов, не готова, позже, потом, передумал, передумала, не уверен, не уверена, стоп, подождите, отменить, не то, не устраивает, другой отель, пересмотрю, no meals, no food, room only, just the room, skip, no thanks, not interested, without meals, too expensive, changed my mind, never mind, hold on, wait, cancel, not sure, maybe later, I'll pass, not for now, reconsidering, different option, no meal plan, no board`
-
