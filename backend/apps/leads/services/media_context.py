@@ -157,6 +157,19 @@ def _base_social_queryset(organization):
     return queryset
 
 
+def _social_content_types_for_context(content_type: str) -> tuple[str, ...]:
+    normalized = str(content_type or '').strip().lower()
+    if normalized in {SocialContentItem.TYPE_STORY, SocialContentItem.TYPE_HIGHLIGHT}:
+        return (SocialContentItem.TYPE_STORY, SocialContentItem.TYPE_HIGHLIGHT)
+    if normalized == SocialContentItem.TYPE_POST:
+        return (SocialContentItem.TYPE_POST,)
+    if normalized == SocialContentItem.TYPE_REEL:
+        return (SocialContentItem.TYPE_REEL,)
+    if normalized == SocialContentItem.TYPE_EVENT:
+        return (SocialContentItem.TYPE_EVENT,)
+    return ()
+
+
 def _first_semantic_social_item(queryset, *, match_reason: str) -> SocialContentItem | None:
     items = list(queryset.order_by('-updated_at')[:100])
     items.sort(
@@ -181,28 +194,42 @@ def _first_semantic_social_item(queryset, *, match_reason: str) -> SocialContent
 
 
 def _social_content_match_from_metadata(metadata: dict, organization) -> tuple[SocialContentItem | None, str]:
-    candidates: list[str] = []
-    for key in (
-        'instagram_story_id',
-        'instagram_media_id',
-        'instagram_share_id',
-        'instagram_reel_id',
-        'instagram_post_id',
-    ):
-        value = str(metadata.get(key) or '').strip()
-        if value:
-            _append_unique(candidates, value)
-
     social_context = metadata.get('instagram_context') or {}
-    if isinstance(social_context, dict):
-        for value in _collect_keyed_values(social_context, INSTAGRAM_ID_KEYS):
-            _append_unique(candidates, value)
+    if not isinstance(social_context, dict):
+        social_context = {}
+
+    content_type = str(social_context.get('content_type') or '').strip().lower()
+    if content_type in {SocialContentItem.TYPE_STORY, SocialContentItem.TYPE_HIGHLIGHT}:
+        id_keys = ('instagram_story_id',)
+        context_id_keys = ('story_id',)
+    elif content_type == SocialContentItem.TYPE_REEL:
+        id_keys = ('instagram_reel_id', 'instagram_share_id', 'instagram_media_id')
+        context_id_keys = ('reel_id', 'share_id', 'media_id')
+    elif content_type == SocialContentItem.TYPE_POST:
+        id_keys = ('instagram_post_id', 'instagram_share_id', 'instagram_media_id')
+        context_id_keys = ('post_id', 'share_id', 'media_id')
+    else:
+        id_keys = (
+            'instagram_story_id',
+            'instagram_reel_id',
+            'instagram_post_id',
+            'instagram_share_id',
+            'instagram_media_id',
+        )
+        context_id_keys = ('story_id', 'reel_id', 'post_id', 'share_id', 'media_id')
+
+    candidates: list[str] = []
+    for key in id_keys:
+        _append_unique(candidates, metadata.get(key))
+    for key in context_id_keys:
+        _append_unique(candidates, social_context.get(key))
 
     urls: list[str] = []
-    if isinstance(social_context, dict):
-        for value in _collect_keyed_values(social_context, INSTAGRAM_URL_KEYS):
-            _append_unique(urls, value)
-        for value in _collect_urls(social_context):
+    for key in INSTAGRAM_URL_KEYS:
+        _append_unique(urls, social_context.get(key))
+    context_urls = social_context.get('urls')
+    if isinstance(context_urls, list):
+        for value in context_urls:
             _append_unique(urls, value)
     for key in INSTAGRAM_URL_KEYS:
         _append_unique(urls, metadata.get(key))
@@ -211,6 +238,9 @@ def _social_content_match_from_metadata(metadata: dict, organization) -> tuple[S
             _append_unique(candidates, candidate)
 
     queryset = _base_social_queryset(organization)
+    compatible_types = _social_content_types_for_context(content_type)
+    if compatible_types:
+        queryset = queryset.filter(content_type__in=compatible_types)
     if candidates:
         item = _first_semantic_social_item(
             queryset.filter(
@@ -550,6 +580,7 @@ def build_agent_media_summary(context: dict, original_text: str = '') -> str:
 
     parts = [
         'Гость отправил медиа. Система распознала контекст медиа:',
+        '- current_media_rule: это контекст ТЕКУЩЕГО сообщения; не подменяй его предыдущими фото/постами/сторис из истории',
         f'- тема/категория: {topic}',
     ]
     if room_category:

@@ -403,6 +403,67 @@ class InstagramSocialContentWebhookTests(TestCase):
 
         self.assertIsNone(resolve_activity_media_context(activity))
 
+    def test_story_reply_ignores_nested_post_id_and_matches_current_story(self):
+        from apps.hotel_media.models import HotelMediaItem, SocialContentItem
+        from apps.leads.services.media_context import resolve_activity_media_context
+
+        comfort = HotelMediaItem.objects.create(
+            organization=self.org,
+            title='Comfort',
+            category=HotelMediaItem.CATEGORY_ROOMS,
+            room_category=HotelMediaItem.ROOM_CATEGORY_COMFORT,
+            media_type=HotelMediaItem.MEDIA_TYPE_PHOTO,
+        )
+        SocialContentItem.objects.create(
+            organization=self.org,
+            platform=SocialContentItem.PLATFORM_INSTAGRAM,
+            external_id='old-comfort-post-id',
+            content_type=SocialContentItem.TYPE_POST,
+            status=SocialContentItem.STATUS_ACTIVE,
+            review_status=SocialContentItem.REVIEW_REVIEWED,
+            linked_media_item=comfort,
+            title='Comfort post',
+            category=HotelMediaItem.CATEGORY_ROOMS,
+            room_category=HotelMediaItem.ROOM_CATEGORY_COMFORT,
+        )
+        pool_story = SocialContentItem.objects.create(
+            organization=self.org,
+            platform=SocialContentItem.PLATFORM_INSTAGRAM,
+            external_id='current-pool-story-id',
+            content_type=SocialContentItem.TYPE_HIGHLIGHT,
+            status=SocialContentItem.STATUS_ACTIVE,
+            review_status=SocialContentItem.REVIEW_REVIEWED,
+            title='Pool highlight',
+            category=HotelMediaItem.CATEGORY_POOL,
+        )
+        lead = Lead.objects.create(organization=self.org, instagram_user_id='guest-story-switch')
+        activity = LeadActivity.objects.create(
+            lead=lead,
+            organization=self.org,
+            activity_type=LeadActivity.TYPE_INSTAGRAM_RECEIVED,
+            description='Received story reply from Instagram',
+            metadata={
+                'text': 'что это',
+                'instagram_story_id': 'current-pool-story-id',
+                'instagram_context': {
+                    'content_type': 'story',
+                    'story_id': 'current-pool-story-id',
+                    'raw_attachments': [{
+                        'id': 'old-comfort-post-id',
+                        'payload': {'id': 'old-comfort-post-id'},
+                    }],
+                },
+            },
+        )
+
+        context = resolve_activity_media_context(activity)
+
+        self.assertIsNotNone(context)
+        self.assertEqual(context['social_content_id'], pool_story.id)
+        self.assertEqual(context['content_type'], SocialContentItem.TYPE_HIGHLIGHT)
+        self.assertEqual(context['category'], HotelMediaItem.CATEGORY_POOL)
+        self.assertNotEqual(context.get('room_category'), HotelMediaItem.ROOM_CATEGORY_COMFORT)
+
 
 class GlobalChannelAiPauseTests(TestCase):
     def setUp(self):

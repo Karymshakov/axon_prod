@@ -90,13 +90,11 @@ _INSTAGRAM_SOCIAL_ATTACHMENT_TYPES = {
     'ig_story': 'story',
 }
 _INSTAGRAM_CONTEXT_ID_KEYS = {
-    'id',
     'media_id',
     'story_id',
     'share_id',
     'reel_id',
     'post_id',
-    'attachment_id',
     'asset_id',
 }
 _INSTAGRAM_CONTEXT_URL_KEYS = {
@@ -217,6 +215,10 @@ def _extract_instagram_content_context(event: dict, message: dict, attachments: 
         for url in url_values:
             for url_id in _ids_from_instagram_url(url):
                 _append_unique(id_values, url_id)
+        if not id_values:
+            # Generic nested `id` values may belong to the sender or webhook
+            # attachment. Only a direct payload ID is safe as a final fallback.
+            _append_unique(id_values, payload.get('id'))
         if url_values:
             context['urls'] = list(dict.fromkeys([*(context.get('urls') or []), *url_values]))
             context.setdefault('share_url', url_values[0])
