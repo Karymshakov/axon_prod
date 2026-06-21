@@ -23,7 +23,9 @@ def rebuild_social_content_fingerprints_task(self, item_id: int):
     from .services import rebuild_social_content_fingerprints
 
     try:
-        item = SocialContentItem.objects.get(pk=item_id, is_active=True)
+        item = SocialContentItem.objects.exclude(
+            status=SocialContentItem.STATUS_DELETED,
+        ).get(pk=item_id)
     except SocialContentItem.DoesNotExist:
         return {'item_id': item_id, 'status': 'missing'}
 

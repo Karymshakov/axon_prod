@@ -30,6 +30,12 @@ STRUCTURAL_HASH_MIN_SCORES = {
 MIN_DIRECT_CONSENSUS_SCORE = 0.86
 MIN_SCREENSHOT_CONSENSUS_SCORE = 0.82
 MIN_WINNER_MARGIN = 0.025
+KNOWN_ROOM_CATEGORIES = {
+    HotelMediaItem.ROOM_CATEGORY_STANDARD_QUEEN,
+    HotelMediaItem.ROOM_CATEGORY_STANDARD_TWIN,
+    HotelMediaItem.ROOM_CATEGORY_COMFORT,
+    HotelMediaItem.ROOM_CATEGORY_FAMILY,
+}
 
 INSTAGRAM_ID_KEYS = {
     'id',
@@ -147,11 +153,16 @@ def _has_social_semantic_context(item: SocialContentItem) -> bool:
     )
 
 
+def _is_exact_room_context(category: str, room_category: str) -> bool:
+    return category == HotelMediaItem.CATEGORY_ROOMS and room_category in KNOWN_ROOM_CATEGORIES
+
+
 def _base_social_queryset(organization):
+    # Expired stories may still be reachable through Instagram Highlights.
+    # Keep them matchable; only explicitly deleted registry entries are excluded.
     queryset = SocialContentItem.objects.filter(
         platform=SocialContentItem.PLATFORM_INSTAGRAM,
-        is_active=True,
-    )
+    ).exclude(status=SocialContentItem.STATUS_DELETED)
     if organization is not None:
         queryset = queryset.filter(organization=organization)
     return queryset
@@ -306,7 +317,14 @@ def _context_from_social_content(item: SocialContentItem, *, match_method: str, 
         'source': 'social_content',
         'match_method': match_method,
         'confidence': round(confidence, 3),
-        'needs_clarification': confidence < HIGH_CONFIDENCE_SCORE,
+        'needs_clarification': (
+            confidence < HIGH_CONFIDENCE_SCORE
+            or (
+                category == HotelMediaItem.CATEGORY_ROOMS
+                and not _is_exact_room_context(category, room_category)
+            )
+        ),
+        'exact_room_category_verified': _is_exact_room_context(category, room_category),
         'social_content_id': item.id,
         'platform': item.platform,
         'content_type': item.content_type,
@@ -351,7 +369,18 @@ def _context_from_fingerprint(fingerprint: MediaFingerprint, *, match_kind: str,
             'source': 'hotel_media',
             'match_method': f'{match_kind}_hash',
             'confidence': round(score, 3),
-            'needs_clarification': score < HIGH_CONFIDENCE_SCORE,
+            'needs_clarification': (
+                score < HIGH_CONFIDENCE_SCORE
+                or (
+                    media_item
+                    and media_item.category == HotelMediaItem.CATEGORY_ROOMS
+                    and not _is_exact_room_context(media_item.category, media_item.room_category or '')
+                )
+            ),
+            'exact_room_category_verified': _is_exact_room_context(
+                media_item.category if media_item else '',
+                media_item.room_category or '' if media_item else '',
+            ),
             'hotel_media_item_id': media_item.id if media_item else None,
             'hotel_media_photo_id': fingerprint.hotel_media_photo_id,
             'title': media_item.title if media_item else '',
@@ -577,14 +606,30 @@ def build_agent_media_summary(context: dict, original_text: str = '') -> str:
     confidence = context.get('confidence')
     guidance = context.get('reply_guidance') or ''
     playbooks = context.get('playbook_keys') or []
+    exact_room_verified = bool(context.get('exact_room_category_verified'))
 
     parts = [
+        '[CURRENT MEDIA CONTEXT]',
         'Гость отправил медиа. Система распознала контекст медиа:',
         '- current_media_rule: это контекст ТЕКУЩЕГО сообщения; не подменяй его предыдущими фото/постами/сторис из истории',
         f'- тема/категория: {topic}',
     ]
     if room_category:
         parts.append(f'- room_category: {room_category}')
+    if topic == HotelMediaItem.CATEGORY_ROOMS:
+        parts.append(f'- exact_room_category_verified: {str(exact_room_verified).lower()}')
+        if exact_room_verified:
+            parts.append('- strict_room_rule: называй точную категорию номера только как room_category выше')
+        else:
+            parts.append(
+                '- strict_room_rule: точная категория этого номера НЕ подтверждена; '
+                'не называй его Comfort/Standard Queen/Standard Twin/Family как факт'
+            )
+    elif topic and topic != 'unknown':
+        parts.append(
+            '- strict_topic_rule: это НЕ номер; не отвечай про категории номеров, '
+            'если гость прямо не попросил перейти к выбору номера'
+        )
     if title:
         parts.append(f'- найденный_контент: {title}')
     if confidence is not None:

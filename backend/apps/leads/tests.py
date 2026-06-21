@@ -464,6 +464,110 @@ class InstagramSocialContentWebhookTests(TestCase):
         self.assertEqual(context['category'], HotelMediaItem.CATEGORY_POOL)
         self.assertNotEqual(context.get('room_category'), HotelMediaItem.ROOM_CATEGORY_COMFORT)
 
+    def test_expired_story_remains_matchable_as_highlight_content(self):
+        from apps.hotel_media.models import HotelMediaItem, SocialContentItem
+        from apps.leads.services.media_context import resolve_activity_media_context
+
+        pool_story = SocialContentItem.objects.create(
+            organization=self.org,
+            platform=SocialContentItem.PLATFORM_INSTAGRAM,
+            external_id='expired-pool-story-id',
+            content_type=SocialContentItem.TYPE_STORY,
+            status=SocialContentItem.STATUS_EXPIRED,
+            is_active=False,
+            review_status=SocialContentItem.REVIEW_REVIEWED,
+            title='Pool saved to highlights',
+            category=HotelMediaItem.CATEGORY_POOL,
+        )
+        lead = Lead.objects.create(organization=self.org, instagram_user_id='guest-expired-story')
+        activity = LeadActivity.objects.create(
+            lead=lead,
+            organization=self.org,
+            activity_type=LeadActivity.TYPE_INSTAGRAM_RECEIVED,
+            description='Received reply to saved story',
+            metadata={
+                'text': 'что это',
+                'instagram_story_id': 'expired-pool-story-id',
+                'instagram_context': {
+                    'content_type': 'story',
+                    'story_id': 'expired-pool-story-id',
+                },
+            },
+        )
+
+        context = resolve_activity_media_context(activity)
+
+        self.assertIsNotNone(context)
+        self.assertEqual(context['social_content_id'], pool_story.id)
+        self.assertEqual(context['category'], HotelMediaItem.CATEGORY_POOL)
+
+    def test_room_other_media_context_does_not_authorize_specific_room_guess(self):
+        from apps.hotel_media.models import HotelMediaItem
+        from apps.leads.services.media_context import build_agent_media_summary
+
+        summary = build_agent_media_summary(
+            {
+                'source': 'social_content',
+                'category': HotelMediaItem.CATEGORY_ROOMS,
+                'room_category': HotelMediaItem.ROOM_CATEGORY_OTHER,
+                'title': 'Instagram сторис',
+                'confidence': 1.0,
+                'needs_clarification': True,
+                'exact_room_category_verified': False,
+            },
+            'а это что?',
+        )
+
+        self.assertIn('exact_room_category_verified: false', summary)
+        self.assertIn('точная категория этого номера НЕ подтверждена', summary)
+        self.assertIn('не называй его Comfort/Standard Queen/Standard Twin/Family как факт', summary)
+
+    def test_new_media_context_demotes_previous_media_history(self):
+        from apps.hotel_media.models import HotelMediaItem
+        from apps.leads.services.llm_client import (
+            _build_current_media_context_instruction,
+            _demote_past_media_contexts,
+        )
+        from apps.leads.services.media_context import build_agent_media_summary
+
+        previous = build_agent_media_summary(
+            {
+                'source': 'social_content',
+                'category': HotelMediaItem.CATEGORY_ROOMS,
+                'room_category': HotelMediaItem.ROOM_CATEGORY_COMFORT,
+                'title': 'Comfort post',
+                'confidence': 1.0,
+                'needs_clarification': False,
+                'exact_room_category_verified': True,
+            },
+            'что это?',
+        )
+        current = build_agent_media_summary(
+            {
+                'source': 'social_content',
+                'category': HotelMediaItem.CATEGORY_POOL,
+                'title': 'Pool highlight',
+                'confidence': 1.0,
+                'needs_clarification': False,
+                'exact_room_category_verified': False,
+            },
+            'а это?',
+        )
+
+        demoted_history, demoted_activity = _demote_past_media_contexts(
+            [{'role': 'user', 'content': previous}],
+            f'[2026-06-21 23:00] [Instagram Received] Guest: {previous}',
+            current_message=current,
+        )
+        current_instruction = _build_current_media_context_instruction(current)
+
+        self.assertIn('PAST MEDIA CONTEXT OMITTED', demoted_history[0]['content'])
+        self.assertNotIn('room_category: comfort', demoted_history[0]['content'])
+        self.assertIn('PAST MEDIA CONTEXT OMITTED', demoted_activity)
+        self.assertNotIn('room_category: comfort', demoted_activity)
+        self.assertIn('Pool highlight', current_instruction)
+        self.assertIn('overrides any older media context', current_instruction)
+
 
 class GlobalChannelAiPauseTests(TestCase):
     def setUp(self):

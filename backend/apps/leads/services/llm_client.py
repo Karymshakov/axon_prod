@@ -105,6 +105,93 @@ class _PromptBuildResult(NamedTuple):
     selected_media_only_request: bool
     org: object             # Organization | None
 
+
+_CURRENT_MEDIA_MARKERS = (
+    'Гость отправил медиа. Система распознала контекст медиа:',
+    '[CURRENT MEDIA CONTEXT]',
+    'Гость отправил photo, но система не смогла уверенно сопоставить медиа',
+    'Гость отправил media, но система не смогла уверенно сопоставить медиа',
+    'Гость отправил изображение, но система не смогла уверенно сопоставить медиа',
+)
+_ACTIVITY_HISTORY_ENTRY_RE = re.compile(r'^\[\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}\]\s+\[')
+
+
+def _has_current_media_context(text: str | None) -> bool:
+    text = str(text or '')
+    return any(marker in text for marker in _CURRENT_MEDIA_MARKERS)
+
+
+def _collapse_past_media_context_text(text: str | None) -> str:
+    text = str(text or '')
+    if not _has_current_media_context(text):
+        return text
+    return (
+        '[PAST MEDIA CONTEXT OMITTED]\n'
+        'В истории выше было предыдущее фото/сторис/пост. '
+        'Не используй его для определения текущего изображения или текущего вопроса.'
+    )
+
+
+def _collapse_past_media_activity_history(activity_history: str | None) -> str | None:
+    if not activity_history:
+        return activity_history
+
+    lines = str(activity_history).splitlines()
+    collapsed_lines: list[str] = []
+    index = 0
+    while index < len(lines):
+        line = lines[index]
+        if _has_current_media_context(line):
+            collapsed_lines.append(_collapse_past_media_context_text(line))
+            index += 1
+            while index < len(lines) and not _ACTIVITY_HISTORY_ENTRY_RE.match(lines[index]):
+                index += 1
+            continue
+        collapsed_lines.append(line)
+        index += 1
+
+    return '\n'.join(collapsed_lines)
+
+
+def _demote_past_media_contexts(
+    conversation_history: list | None,
+    activity_history: str | None,
+    *,
+    current_message: str | None,
+) -> tuple[list | None, str | None]:
+    if not _has_current_media_context(current_message):
+        return conversation_history, activity_history
+
+    demoted_history = []
+    for turn in conversation_history or []:
+        if not isinstance(turn, dict):
+            demoted_history.append(turn)
+            continue
+        content = str(turn.get('content') or '')
+        if _has_current_media_context(content):
+            turn = {**turn, 'content': _collapse_past_media_context_text(content)}
+        demoted_history.append(turn)
+
+    activity_history = _collapse_past_media_activity_history(activity_history)
+
+    return demoted_history, activity_history
+
+
+def _build_current_media_context_instruction(message: str | None) -> str:
+    if not _has_current_media_context(message):
+        return ''
+    return (
+        '[CURRENT MEDIA CONTEXT - AUTHORITATIVE]\n'
+        'The block below describes the latest Instagram/Telegram/WhatsApp media the guest is asking about. '
+        'It overrides any older media context, room preference, booking preference, activity history, and playbook guess.\n\n'
+        f'{message}\n\n'
+        'Hard rules:\n'
+        '- If exact_room_category_verified is false, do not call the current media Comfort, Standard Queen, Standard Twin, or Family as a fact.\n'
+        '- If strict_topic_rule says this is not a room, answer about that facility/content, not about room categories.\n'
+        '- If current media and previous history disagree, trust current media only.\n'
+        '- A previously selected or extracted room preference is about booking, not proof of what is shown in the current media.'
+    )
+
 _STAGE_FIELD_LABELS_RU = {
     'contact_person': 'имя',
     'phone': 'телефон',
@@ -551,6 +638,13 @@ class AIService:
     ) -> '_PromptBuildResult':
         """Assemble the full prompt and tool list for one booking conversation turn."""
         _org = _org_from_lead(lead)
+        current_media_context_instruction = _build_current_media_context_instruction(message)
+        if current_media_context_instruction:
+            conversation_history, activity_history = _demote_past_media_contexts(
+                conversation_history,
+                activity_history,
+                current_message=message,
+            )
         _booking_agent_cfg = None
         _booking_agent_playbooks = []
         _booking_agent_tool_allowlist = None
@@ -976,6 +1070,8 @@ class AIService:
 
         if activity_history:
             messages.add_system('activity_history', 'ACTIVITY HISTORY', activity_history)
+        if current_media_context_instruction:
+            messages.add_raw_system('current_media_context', current_media_context_instruction)
 
         if conversation_history:
             messages.add_history(conversation_history)

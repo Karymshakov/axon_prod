@@ -256,3 +256,32 @@ class SocialContentFingerprintTests(TestCase):
 
         self.assertGreater(created, 0)
         self.assertTrue(MediaFingerprint.objects.filter(social_content_item=item).exists())
+
+    def test_webhook_upsert_reactivates_expired_story_for_highlight_matching(self):
+        from apps.hotel_media.services import upsert_social_content_from_instagram_payload
+
+        item = SocialContentItem.objects.create(
+            organization=self.org,
+            platform=SocialContentItem.PLATFORM_INSTAGRAM,
+            external_id='expired-story-now-highlight',
+            content_type=SocialContentItem.TYPE_STORY,
+            status=SocialContentItem.STATUS_EXPIRED,
+            is_active=False,
+            review_status=SocialContentItem.REVIEW_REVIEWED,
+            title='Pool story',
+            category=HotelMediaItem.CATEGORY_POOL,
+        )
+
+        saved = upsert_social_content_from_instagram_payload(
+            organization=self.org,
+            external_id='expired-story-now-highlight',
+            content_type=SocialContentItem.TYPE_HIGHLIGHT,
+            media_url='https://cdn.example.test/pool-highlight.jpg',
+            source=SocialContentItem.SOURCE_WEBHOOK,
+        )
+        item.refresh_from_db()
+
+        self.assertEqual(saved.id, item.id)
+        self.assertTrue(item.is_active)
+        self.assertEqual(item.status, SocialContentItem.STATUS_ACTIVE)
+        self.assertEqual(item.content_type, SocialContentItem.TYPE_HIGHLIGHT)

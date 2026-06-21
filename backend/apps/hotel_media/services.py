@@ -218,6 +218,7 @@ def upsert_social_content_from_instagram_payload(
             'metadata': metadata or {},
             'source': source,
             'status': SocialContentItem.STATUS_ACTIVE,
+            'is_active': True,
         },
     )
     if created:

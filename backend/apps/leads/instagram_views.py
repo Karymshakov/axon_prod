@@ -8,6 +8,7 @@ from datetime import date
 from urllib.parse import parse_qs, urlparse
 from .instagram_integration_views import _get_app_config
 from django.db import models
+from django.utils import timezone
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
@@ -1055,11 +1056,19 @@ def instagram_webhook(request):
                             or next(iter(instagram_content_context.get('urls') or []), '')
                         )
                         existing_by_url = None
+                        existing_by_id = None
+                        if external_id and lead.organization:
+                            existing_by_id = SocialContentItem.objects.filter(
+                                organization=lead.organization,
+                                platform=SocialContentItem.PLATFORM_INSTAGRAM,
+                                external_id=external_id,
+                            ).first()
                         if primary_url and lead.organization:
                             existing_by_url = SocialContentItem.objects.filter(
                                 organization=lead.organization,
                                 platform=SocialContentItem.PLATFORM_INSTAGRAM,
-                                is_active=True,
+                            ).exclude(
+                                status=SocialContentItem.STATUS_DELETED,
                             ).filter(
                                 models.Q(media_url=primary_url)
                                 | models.Q(thumbnail_url=primary_url)
@@ -1068,16 +1077,46 @@ def instagram_webhook(request):
                         if not external_id and primary_url and not existing_by_url:
                             external_id = external_id_from_url(primary_url)
                         if external_id:
-                            upsert_social_content_from_instagram_payload(
+                            existing_item = existing_by_id or existing_by_url
+                            incoming_content_type = (
+                                instagram_content_context.get('content_type')
+                                or SocialContentItem.TYPE_UNKNOWN
+                            )
+                            if (
+                                incoming_content_type == SocialContentItem.TYPE_STORY
+                                and existing_item
+                                and (
+                                    existing_item.content_type == SocialContentItem.TYPE_HIGHLIGHT
+                                    or existing_item.status in {
+                                        SocialContentItem.STATUS_EXPIRED,
+                                        SocialContentItem.STATUS_ARCHIVED,
+                                    }
+                                    or (
+                                        existing_item.expires_at
+                                        and existing_item.expires_at <= timezone.now()
+                                    )
+                                )
+                            ):
+                                incoming_content_type = SocialContentItem.TYPE_HIGHLIGHT
+
+                            lookup_external_id = (
+                                existing_by_url.external_id
+                                if existing_by_url and not existing_by_id and existing_by_url.external_id
+                                else external_id
+                            )
+                            saved_item = upsert_social_content_from_instagram_payload(
                                 organization=lead.organization,
-                                external_id=external_id,
-                                content_type=instagram_content_context.get('content_type') or SocialContentItem.TYPE_UNKNOWN,
+                                external_id=lookup_external_id,
+                                content_type=incoming_content_type,
                                 media_url=primary_url or '',
                                 thumbnail_url=instagram_content_context.get('thumbnail_url') or '',
                                 permalink=instagram_content_context.get('permalink') or '',
                                 metadata=instagram_content_context,
                                 source=SocialContentItem.SOURCE_WEBHOOK,
                             )
+                            if external_id != lookup_external_id and saved_item.parent_external_id != external_id:
+                                saved_item.parent_external_id = external_id
+                                saved_item.save(update_fields=['parent_external_id', 'updated_at'])
                     except Exception as exc:
                         logger.warning(f"Could not upsert Instagram social content context: {exc}")
 
