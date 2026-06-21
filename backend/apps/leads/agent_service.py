@@ -213,7 +213,7 @@ class AgentService:
         # Step 7: Build response context for message generation
         if config.conversation_goals_enabled:
             result['response_context']['goals'] = goal_manager.get_goals_context_for_ai(lead)
-            active_goals = lead.goals.filter(status=LeadGoal.STATUS_ACTIVE)
+            active_goals = lead.goals.filter(status=LeadGoal.STATUS_ACTIVE).order_by('-priority', '-created_at')
             if active_goals.exists():
                 result['response_context']['primary_goal'] = active_goals.first().goal_type
 
@@ -1195,10 +1195,11 @@ Return ONLY the message text, nothing else."""
         goal_instruction = ''
         if config.conversation_goals_enabled:
             goals_context = goal_manager.get_goals_context_for_ai(lead)
-            active_goals = lead.goals.filter(status=LeadGoal.STATUS_ACTIVE).order_by('priority')
+            active_goals = lead.goals.filter(status=LeadGoal.STATUS_ACTIVE).order_by('-priority', '-created_at')
             if active_goals.exists():
                 primary_goal = active_goals.first()
-                goal_instruction = f"\n\nPRIMARY GOAL: Your main objective is to {primary_goal.goal_type.replace('_', ' ')}. Work toward this naturally in your message."
+                if primary_goal.priority > LeadGoal.PRIORITY_LOW:
+                    goal_instruction = f"\n\nPRIMARY GOAL: Your main objective is to {primary_goal.goal_type.replace('_', ' ')}. Work toward this naturally in your message."
 
         # Get objection context if there's a current objection
         objection_context = ''
@@ -1492,7 +1493,9 @@ Return ONLY the message text, nothing else."""
 
             # Clear the AI-scheduled follow-up time — will be rescheduled when lead replies
             if lead.next_follow_up_at:
-                Lead.objects.filter(id=lead.id).update(next_follow_up_at=None, next_follow_up_hint='')
+                lead.next_follow_up_at = None
+                lead.next_follow_up_hint = ''
+                lead.save(update_fields=['next_follow_up_at', 'next_follow_up_hint'])
 
             logger.info(
                 f"Sent AI follow-up to lead {lead.id} via {channel} "

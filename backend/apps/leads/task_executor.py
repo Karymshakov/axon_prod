@@ -80,6 +80,7 @@ class TaskExecutor:
                 # Log activity
                 LeadActivity.objects.create(
                     lead=task.lead,
+                    organization=task.lead.organization,
                     activity_type=LeadActivity.TYPE_TASK_AUTO_COMPLETED,
                     description=f"AI completed task: {task.title}",
                     metadata={
@@ -238,6 +239,7 @@ Respond with ONLY the message text, nothing else."""
                     if success:
                         LeadActivity.objects.create(
                             lead=lead,
+                            organization=lead.organization,
                             activity_type=LeadActivity.TYPE_TELEGRAM_SENT,
                             description="AI sent message via Telegram",
                             metadata={'text': message[:500], 'is_ai_action': True}
@@ -269,6 +271,7 @@ Respond with ONLY the message text, nothing else."""
                     if success:
                         LeadActivity.objects.create(
                             lead=lead,
+                            organization=lead.organization,
                             activity_type=LeadActivity.TYPE_WHATSAPP_SENT,
                             description="AI sent message via WhatsApp",
                             metadata={'text': message[:500], 'is_ai_action': True}
@@ -316,6 +319,7 @@ Respond with ONLY the message text, nothing else."""
         # Log activity
         LeadActivity.objects.create(
             lead=lead,
+            organization=lead.organization,
             activity_type=LeadActivity.TYPE_TASK_CREATED,
             description=f"AI created auto-task: {title}",
             metadata={

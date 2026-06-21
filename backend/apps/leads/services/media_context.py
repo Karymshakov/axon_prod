@@ -21,8 +21,8 @@ HASH_THRESHOLDS = {
     'colorhash': 36,
 }
 HIGH_CONFIDENCE_SCORE = 0.88
-MIN_ACCEPTED_SCORE = HIGH_CONFIDENCE_SCORE
-MIN_SCREENSHOT_REGION_SCORE = 0.93
+MIN_ACCEPTED_SCORE = 0.76
+MIN_SCREENSHOT_REGION_SCORE = 0.76
 
 INSTAGRAM_ID_KEYS = {
     'id',
@@ -375,7 +375,8 @@ def find_best_fingerprint_context(image_path: str, *, organization=None) -> dict
                 if candidate.bit_length != incoming.get('bit_length'):
                     continue
                 crop_label = str(incoming.get('crop_label') or '')
-                effective_threshold = threshold
+                is_screenshot_region = bool(crop_label)
+                effective_threshold = threshold + (6 if is_screenshot_region else 0)
                 distance = hamming_distance(incoming['hash_value'], candidate.hash_value)
                 if best_seen is None or distance < best_seen['distance']:
                     best_seen = {
@@ -391,7 +392,6 @@ def find_best_fingerprint_context(image_path: str, *, organization=None) -> dict
                 if distance > effective_threshold:
                     continue
                 score = 1 - (distance / max(1, candidate.bit_length))
-                is_screenshot_region = bool(crop_label) and hash_kind != 'center_phash'
                 min_score = MIN_SCREENSHOT_REGION_SCORE if is_screenshot_region else MIN_ACCEPTED_SCORE
                 if score < min_score:
                     continue

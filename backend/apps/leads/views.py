@@ -444,6 +444,7 @@ class LeadViewSet(OrganizationQuerysetMixin, viewsets.ModelViewSet):
                 # Create activity record
                 LeadActivity.objects.create(
                     lead=lead,
+                    organization=lead.organization,
                     activity_type='telegram_sent',
                     description=f'Telegram message sent: {message[:100]}{"..." if len(message) > 100 else ""}',
                     metadata={
@@ -600,6 +601,7 @@ class TaskViewSet(OrganizationQuerysetMixin, viewsets.ModelViewSet):
         # Create activity for task completed
         LeadActivity.objects.create(
             lead=task.lead,
+            organization=task.organization,
             activity_type='task_completed',
             description=f'Task completed: {task.title}',
             metadata={'task_id': task.id},
