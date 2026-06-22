@@ -760,8 +760,9 @@ def execute_transfer_to_manager(args: dict, lead=None) -> dict:
         message_text = cfg.notification_template.format_map(_SafeDict(template_vars))
     else:
         lines = [
-            f'📋 Новая заявка — {business_name}',
-            f'Причина: {reason_label}',
+            f'🔔 Новая заявка — {business_name}',
+            f'───────────────────',
+            f'📌 Причина: {reason_label}',
             '',
         ]
 
@@ -772,7 +773,7 @@ def execute_transfer_to_manager(args: dict, lead=None) -> dict:
         if template_vars['guest_email']:
             lines.append(f'📧 Email: {template_vars["guest_email"]}')
         if template_vars['platform']:
-            lines.append(f'💬 Канал: {template_vars["platform"]}')
+            lines.append(f'💬 Источник: {template_vars["platform"]}')
         if template_vars['discovery_source']:
             lines.append(f'📣 Откуда узнал: {template_vars["discovery_source"]}')
         if contact_id:
@@ -783,25 +784,25 @@ def execute_transfer_to_manager(args: dict, lead=None) -> dict:
 
         booking_lines = []
         if checkin:
-            booking_lines.append(f'  Заезд: {checkin}')
+            booking_lines.append(f'  ├─ Заезд: {checkin}')
         if checkout:
-            booking_lines.append(f'  Выезд: {checkout}')
+            booking_lines.append(f'  ├─ Выезд: {checkout}')
         if nights:
-            booking_lines.append(f'  Ночей: {nights}')
+            booking_lines.append(f'  ├─ Ночей: {nights}')
         if template_vars['guest_count']:
-            booking_lines.append(f'  Гостей: {template_vars["guest_count"]}')
+            booking_lines.append(f'  ├─ Гостей: {template_vars["guest_count"]}')
         if template_vars['room_description']:
-            booking_lines.append(f'  Номер: {template_vars["room_description"]}')
+            booking_lines.append(f'  ├─ Номер: {template_vars["room_description"]}')
         if template_vars['meal_plan']:
-            booking_lines.append(f'  Питание: {template_vars["meal_plan"]}')
+            booking_lines.append(f'  ├─ Питание: {template_vars["meal_plan"]}')
         if template_vars['price_per_night']:
-            booking_lines.append(f'  Цена/ночь: {template_vars["price_per_night"]} сом')
+            booking_lines.append(f'  ├─ Цена/ночь: {template_vars["price_per_night"]} сом')
         if template_vars['total_price']:
-            booking_lines.append(f'  Итого: {template_vars["total_price"]} сом')
+            booking_lines.append(f'  └─ Итого: {template_vars["total_price"]} сом')
 
         if booking_lines:
             lines.append('')
-            lines.append('🗓 Детали бронирования:')
+            lines.append('🗓 Детали проживания:')
             lines.extend(booking_lines)
 
         if template_vars['notes']:
@@ -837,6 +838,21 @@ def execute_transfer_to_manager(args: dict, lead=None) -> dict:
                 lead.ai_paused_at = timezone.now()
                 lead.ai_paused_by = 'AI Handoff'
                 update_fields = ['ai_paused', 'ai_paused_at', 'ai_paused_by']
+                
+                # Update CRM fields on lead for booking_complete
+                if reason == 'booking_complete':
+                    room_desc = args.get('room_description') or ''
+                    if room_desc:
+                        lead.room_type_preference = room_desc
+                        update_fields.append('room_type_preference')
+                    tot_price = args.get('total_price')
+                    if tot_price is not None:
+                        try:
+                            lead.estimated_value = float(tot_price)
+                            update_fields.append('estimated_value')
+                        except (ValueError, TypeError):
+                            pass
+
                 if transfer_signature is not None:
                     ctx = dict(lead.agent_context or {})
                     ctx['last_booking_transfer_signature'] = transfer_signature
