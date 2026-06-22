@@ -2247,7 +2247,7 @@ Example output:
             logger.error(f"Intent classification failed: {e}", exc_info=True)
             return 'booking_intent'
 
-    def extract_lead_data(self, message: str, conversation_history: list = None, our_company_name: str = None) -> dict:
+    def extract_lead_data(self, message: str, conversation_history: list = None, our_company_name: str = None, organization: Any = None) -> dict:
         if not self.is_configured():
             return {}
 
@@ -2264,6 +2264,9 @@ Messages from "assistant" role are from our bot - ignore any company names menti
             today_str = now_bishkek.strftime('%Y-%m-%d')
             tomorrow_str = (now_bishkek + timedelta(days=1)).strftime('%Y-%m-%d')
 
+            from apps.leads.services.discovery_sources import build_discovery_sources_prompt_block
+            discovery_block = build_discovery_sources_prompt_block(organization)
+
             extraction_prompt = f"""Today's date: {today_str} (Kyrgyzstan time, UTC+6). Tomorrow is {tomorrow_str}.
 
 Extract the following information about the CUSTOMER from the conversation:
@@ -2278,9 +2281,13 @@ Extract the following information about the CUSTOMER from the conversation:
 - guest_count (number of guests as an integer, e.g. from "нас будет 3", "2 adults", "семья из 4", "4 человека")
 - room_type_preference (preferred room type mentioned, e.g. "Deluxe Balcony", "семейный номер", "стандарт", "люкс")
 - meal_plan (meal plan preference — return ONLY one of these exact values: "none", "breakfast", "lunch", "dinner", "half_board_bl", "half_board_bd", "full_board"; map guest's words like "завтрак" → "breakfast", "завтрак и обед" → "half_board_bl", "завтрак и ужин" → "half_board_bd", "всё включено" → "full_board")
+- discovery_source (the channel or source how they found out about us, return ONLY one of the values specified below in the discovery source block, e.g. "friends", "ads", "instagram", etc. Match strictly by meaning as instructed)
+- discovery_source_detail (additional details they provided about how they found out about us, e.g. "посоветовали друзья", "реклама в фейсбуке")
 {exclusion_instruction}
 
-LANGUAGE NOTE: The conversation may be in Russian, Kyrgyz, English, or a mix of these. Extract information regardless of the language used. Return text field values in the exact language the customer used (except meal_plan and dates which must follow the exact formats above).
+{discovery_block}
+
+LANGUAGE NOTE: The conversation may be in Russian, Kyrgyz, English, or a mix of these. Extract information regardless of the language used. Return text field values in the exact language the customer used (except meal_plan, discovery_source, and dates which must follow the exact formats above).
 
 IMPORTANT RULES:
 1. Only extract information that the CUSTOMER (role: "user") explicitly provides about THEMSELVES
@@ -2292,7 +2299,7 @@ IMPORTANT RULES:
    - Only include REAL data that the customer actually provided
 6. If the customer gives only day numbers/range without a month (for example "с 1 по 7") and no month is clear from nearby customer messages, OMIT check_in_date/check_out_date. Never assume January.
 
-Return JSON with keys: company_name, contact_person, phone, email, problem_description, preferred_contact_time, check_in_date, check_out_date, guest_count, room_type_preference, meal_plan.
+Return JSON with keys: company_name, contact_person, phone, email, problem_description, preferred_contact_time, check_in_date, check_out_date, guest_count, room_type_preference, meal_plan, discovery_source, discovery_source_detail.
 OMIT any field where no REAL customer-provided information is found. Empty or placeholder values are NOT acceptable.
 
 Example format:
@@ -2310,19 +2317,11 @@ Example format:
 
             messages = [
                 {"role": "system", "content": extraction_prompt},
-                # Note: _SAFETY_SYSTEM_INSTRUCTION is intentionally NOT included here.
-                # It is a prompt-injection guard for the booking agent, and its wording
-                # ("never query/export data", "raw JSON context") causes Gemini to refuse
-                # to extract any fields at all. Extraction is a pure internal backend call—
-                # no guest is sending messages to this endpoint.
             ]
 
             if conversation_history:
                 messages.extend(conversation_history)
 
-            # Append the current message as the final user turn.
-            # When called with conversation_history that already ends with the current
-            # user turn (e.g. from the booking agent’s history), avoid duplicating it.
             last_is_current = (
                 conversation_history
                 and conversation_history[-1].get('role') == 'user'
@@ -2362,7 +2361,8 @@ Example format:
                 'company_name', 'contact_person', 'phone', 'email',
                 'problem_description', 'preferred_contact_time',
                 'check_in_date', 'check_out_date', 'guest_count',
-                'room_type_preference', 'meal_plan',
+                'room_type_preference', 'meal_plan', 'discovery_source',
+                'discovery_source_detail',
             }
 
             filtered_data = {}

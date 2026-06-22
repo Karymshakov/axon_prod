@@ -4507,3 +4507,346 @@ class FollowUpFixesTests(TestCase):
             self.assertIn("10-MINUTE IDLE NUDGE", last_message_content)
 
 
+class HandoffBypassTests(TestCase):
+    def setUp(self):
+        user_model = get_user_model()
+        self.owner = user_model.objects.create_user(
+            email='handoff_bypass@example.com',
+            password='password123',
+            name='Handoff Owner',
+            role='admin',
+        )
+        self.org = Organization.objects.create(name='Handoff Org', slug='handoff-org', owner=self.owner)
+        self.owner.current_organization = self.org
+        self.owner.save(update_fields=['current_organization'])
+        AIConfig.objects.create(organization=self.org, ai_auto_response=True, response_delay=0)
+        self.lead = Lead.objects.create(
+            organization=self.org,
+            contact_person='Handoff Lead',
+            phone='+996700000222',
+            email='guest2@example.com',
+            telegram_chat_id='tg-handoff',
+            telegram_username='handofflead',
+            whatsapp_phone='+996700000222',
+            instagram_user_id='ig-handoff',
+            instagram_username='ig_handoff_user',
+        )
+
+    @patch('apps.leads.telegram_views.ai_service.generate_conversation_summary', return_value=None)
+    @patch('django.db.close_old_connections')
+    @patch('apps.leads.telegram_views.telegram_service.send_chat_action', new_callable=AsyncMock)
+    @patch('apps.leads.telegram_views.telegram_service.send_message', new_callable=AsyncMock, return_value={'message_id': 99})
+    @patch('apps.leads.telegram_views.telegram_service.is_configured_sync', return_value=True)
+    @patch('apps.leads.telegram_views.ai_service.is_configured', return_value=True)
+    @patch('apps.leads.telegram_views.agent_service.process_incoming_message')
+    @patch('apps.leads.telegram_views.agent_dispatcher.dispatch', return_value='Final booking confirmation')
+    def test_telegram_final_confirmation_not_suppressed_by_ai_handoff(
+        self,
+        dispatch_mock,
+        _process_mock,
+        _ai_ready_mock,
+        _channel_ready_mock,
+        send_message_mock,
+        _send_chat_action_mock,
+        _close_connections_mock,
+        _summary_mock,
+    ):
+        inbound = LeadActivity.objects.create(
+            lead=self.lead,
+            organization=self.org,
+            activity_type=LeadActivity.TYPE_TELEGRAM_RECEIVED,
+            description='Received: Book me standard room please',
+            metadata={'text': 'Book me standard room please'},
+        )
+        initialize_inbound_diagnostics(inbound, lead=self.lead, channel='telegram', message_text=inbound.description)
+
+        def mock_dispatch(*args, **kwargs):
+            self.lead.ai_paused = True
+            self.lead.ai_paused_by = 'AI Handoff'
+            self.lead.save(update_fields=['ai_paused', 'ai_paused_by'])
+            return 'Final booking confirmation'
+        dispatch_mock.side_effect = mock_dispatch
+
+        _delayed_ai_response(self.lead.id, inbound.id, self.lead.telegram_chat_id, inbound.description, self.lead.telegram_username)
+
+        send_message_mock.assert_awaited_once()
+        send_message_mock.reset_mock()
+
+        self.lead.ai_paused = True
+        self.lead.ai_paused_by = self.owner.name
+        self.lead.save(update_fields=['ai_paused', 'ai_paused_by'])
+
+        dispatch_mock.side_effect = None
+        dispatch_mock.return_value = 'Should be suppressed'
+
+        _delayed_ai_response(self.lead.id, inbound.id, self.lead.telegram_chat_id, inbound.description, self.lead.telegram_username)
+
+        send_message_mock.assert_not_awaited()
+
+    @patch('apps.leads.whatsapp_views.ai_service.generate_conversation_summary', return_value=None)
+    @patch('django.db.close_old_connections')
+    @patch('apps.leads.whatsapp_views.whatsapp_service.send_message', return_value={'message_id': 'wa-99'})
+    @patch('apps.leads.whatsapp_views.whatsapp_service.is_configured', return_value=True)
+    @patch('apps.leads.whatsapp_views.ai_service.is_configured', return_value=True)
+    @patch('apps.leads.whatsapp_views.agent_service.process_incoming_message')
+    @patch('apps.leads.whatsapp_views.agent_dispatcher.dispatch', return_value='Final booking confirmation')
+    def test_whatsapp_final_confirmation_not_suppressed_by_ai_handoff(
+        self,
+        dispatch_mock,
+        _process_mock,
+        _ai_ready_mock,
+        _channel_ready_mock,
+        send_message_mock,
+        _close_connections_mock,
+        _summary_mock,
+    ):
+        inbound = LeadActivity.objects.create(
+            lead=self.lead,
+            organization=self.org,
+            activity_type=LeadActivity.TYPE_WHATSAPP_RECEIVED,
+            description='Received: Book me standard room please',
+            metadata={'text': 'Book me standard room please'},
+        )
+        initialize_inbound_diagnostics(inbound, lead=self.lead, channel='whatsapp', message_text=inbound.description)
+
+        def mock_dispatch(*args, **kwargs):
+            self.lead.ai_paused = True
+            self.lead.ai_paused_by = 'AI Handoff'
+            self.lead.save(update_fields=['ai_paused', 'ai_paused_by'])
+            return 'Final booking confirmation'
+        dispatch_mock.side_effect = mock_dispatch
+
+        _delayed_whatsapp_ai_response(self.lead.id, inbound.id, self.lead.whatsapp_phone, 'wa-msg-123', inbound.description)
+
+        send_message_mock.assert_called_once()
+        send_message_mock.reset_mock()
+
+        self.lead.ai_paused = True
+        self.lead.ai_paused_by = self.owner.name
+        self.lead.save(update_fields=['ai_paused', 'ai_paused_by'])
+
+        dispatch_mock.side_effect = None
+        dispatch_mock.return_value = 'Should be suppressed'
+
+        _delayed_whatsapp_ai_response(self.lead.id, inbound.id, self.lead.whatsapp_phone, 'wa-msg-124', inbound.description)
+
+        send_message_mock.assert_not_called()
+
+    @patch('apps.leads.instagram_views.ai_service.generate_conversation_summary', return_value=None)
+    @patch('django.db.close_old_connections')
+    @patch('apps.leads.instagram_views.instagram_service.send_message', return_value={'message_id': 'ig-99'})
+    @patch('apps.leads.instagram_views.instagram_service.send_typing_indicator')
+    @patch('apps.leads.instagram_views.instagram_service.is_configured', return_value=True)
+    @patch('apps.leads.instagram_views.ai_service.is_configured', return_value=True)
+    @patch('apps.leads.instagram_views.agent_service.process_incoming_message')
+    @patch('apps.leads.instagram_views.agent_dispatcher.dispatch', return_value='Final booking confirmation')
+    def test_instagram_final_confirmation_not_suppressed_by_ai_handoff(
+        self,
+        dispatch_mock,
+        _process_mock,
+        _ai_ready_mock,
+        _channel_ready_mock,
+        _typing_mock,
+        send_message_mock,
+        _close_connections_mock,
+        _summary_mock,
+    ):
+        from apps.leads.instagram_views import _delayed_instagram_ai_response
+        inbound = LeadActivity.objects.create(
+            lead=self.lead,
+            organization=self.org,
+            activity_type=LeadActivity.TYPE_INSTAGRAM_RECEIVED,
+            description='Received: Book me standard room please',
+            metadata={'text': 'Book me standard room please'},
+        )
+        initialize_inbound_diagnostics(inbound, lead=self.lead, channel='instagram', message_text=inbound.description)
+
+        def mock_dispatch(*args, **kwargs):
+            self.lead.ai_paused = True
+            self.lead.ai_paused_by = 'AI Handoff'
+            self.lead.save(update_fields=['ai_paused', 'ai_paused_by'])
+            return 'Final booking confirmation'
+        dispatch_mock.side_effect = mock_dispatch
+
+        _delayed_instagram_ai_response(self.lead.id, inbound.id, self.lead.instagram_user_id, inbound.description)
+
+        send_message_mock.assert_called_once()
+        send_message_mock.reset_mock()
+
+        self.lead.ai_paused = True
+        self.lead.ai_paused_by = self.owner.name
+        self.lead.save(update_fields=['ai_paused', 'ai_paused_by'])
+
+        dispatch_mock.side_effect = None
+        dispatch_mock.return_value = 'Should be suppressed'
+
+        _delayed_instagram_ai_response(self.lead.id, inbound.id, self.lead.instagram_user_id, inbound.description)
+
+        send_message_mock.assert_not_called()
+
+
+class DiscoverySourceExtractionTests(TestCase):
+    def setUp(self):
+        user_model = get_user_model()
+        self.owner = user_model.objects.create_user(
+            email='extractor@example.com',
+            password='password123',
+            name='Extractor Owner',
+            role='admin',
+        )
+        self.org = Organization.objects.create(name='Extractor Org', slug='extractor-org', owner=self.owner)
+        self.owner.current_organization = self.org
+        self.owner.save(update_fields=['current_organization'])
+        AIConfig.objects.create(organization=self.org, ai_auto_response=True, response_delay=0, auto_extract_data=True)
+        self.lead = Lead.objects.create(
+            organization=self.org,
+            contact_person='Test Guest',
+            phone='+996700000333',
+            email='guest3@example.com',
+            telegram_chat_id='tg-extractor',
+            telegram_username='extractorlead',
+            whatsapp_phone='+996700000333',
+            instagram_user_id='ig-extractor',
+            instagram_username='ig_extractor_user',
+        )
+
+    @patch('apps.leads.telegram_views.ai_service.generate_conversation_summary', return_value=None)
+    @patch('django.db.close_old_connections')
+    @patch('apps.leads.telegram_views.telegram_service.send_chat_action', new_callable=AsyncMock)
+    @patch('apps.leads.telegram_views.telegram_service.send_message', new_callable=AsyncMock, return_value={'message_id': 99})
+    @patch('apps.leads.telegram_views.telegram_service.is_configured_sync', return_value=True)
+    @patch('apps.leads.telegram_views.ai_service.is_configured', return_value=True)
+    @patch('apps.leads.telegram_views.agent_service.process_incoming_message')
+    @patch('apps.leads.telegram_views.agent_dispatcher.dispatch', return_value='Final reply')
+    @patch('apps.leads.telegram_views.ai_service.extract_lead_data')
+    def test_telegram_active_intake_extracts_discovery_source(
+        self,
+        extract_mock,
+        dispatch_mock,
+        _process_mock,
+        _ai_ready_mock,
+        _channel_ready_mock,
+        send_message_mock,
+        _send_chat_action_mock,
+        _close_connections_mock,
+        _summary_mock,
+    ):
+        extract_mock.return_value = {
+            'discovery_source': 'от друзей',
+            'discovery_source_detail': 'узнал от лучших друзей',
+        }
+
+        inbound = LeadActivity.objects.create(
+            lead=self.lead,
+            organization=self.org,
+            activity_type=LeadActivity.TYPE_TELEGRAM_RECEIVED,
+            description='узнал от друзей',
+            metadata={'text': 'узнал от друзей'},
+        )
+        initialize_inbound_diagnostics(inbound, lead=self.lead, channel='telegram', message_text=inbound.description)
+
+        _delayed_ai_response(self.lead.id, inbound.id, self.lead.telegram_chat_id, inbound.description, self.lead.telegram_username)
+
+        self.lead.refresh_from_db()
+        self.assertEqual(self.lead.discovery_source, 'friends')
+        self.assertEqual(self.lead.discovery_source_detail, 'узнал от лучших друзей')
+
+    @patch('apps.leads.whatsapp_views.ai_service.generate_conversation_summary', return_value=None)
+    @patch('django.db.close_old_connections')
+    @patch('apps.leads.whatsapp_views.whatsapp_service.send_message', return_value={'message_id': 'wa-99'})
+    @patch('apps.leads.whatsapp_views.whatsapp_service.is_configured', return_value=True)
+    @patch('apps.leads.whatsapp_views.ai_service.is_configured', return_value=True)
+    @patch('apps.leads.whatsapp_views.agent_service.process_incoming_message')
+    @patch('apps.leads.whatsapp_views.agent_dispatcher.dispatch', return_value='Final reply')
+    @patch('apps.leads.whatsapp_views.ai_service.extract_lead_data')
+    def test_whatsapp_active_intake_extracts_discovery_source(
+        self,
+        extract_mock,
+        dispatch_mock,
+        _process_mock,
+        _ai_ready_mock,
+        _channel_ready_mock,
+        send_message_mock,
+        _close_connections_mock,
+        _summary_mock,
+    ):
+        extract_mock.return_value = {
+            'discovery_source': 'реклама',
+            'discovery_source_detail': 'реклама в инстаграме',
+        }
+
+        inbound = LeadActivity.objects.create(
+            lead=self.lead,
+            organization=self.org,
+            activity_type=LeadActivity.TYPE_WHATSAPP_RECEIVED,
+            description='реклама',
+            metadata={'text': 'реклама'},
+        )
+        initialize_inbound_diagnostics(inbound, lead=self.lead, channel='whatsapp', message_text=inbound.description)
+
+        _delayed_whatsapp_ai_response(self.lead.id, inbound.id, self.lead.whatsapp_phone, 'wa-msg-123', inbound.description)
+
+        self.lead.refresh_from_db()
+        self.assertEqual(self.lead.discovery_source, 'ads')
+        self.assertEqual(self.lead.discovery_source_detail, 'реклама в инстаграме')
+
+    def test_should_run_extractor_if_discovery_source_missing(self):
+        self.lead.contact_person = 'Real Person'
+        self.lead.phone = '+996700111222'
+        self.lead.check_in_date = '2026-06-01'
+        self.lead.check_out_date = '2026-06-03'
+        self.lead.guest_count = 2
+        self.lead.room_type_preference = 'Comfort'
+        self.lead.meal_plan = 'breakfast'
+        self.lead.discovery_source = ''
+        self.lead.save()
+
+        has_guest_name = True
+        should_run = not all([
+            has_guest_name,
+            self.lead.phone,
+            self.lead.check_in_date,
+            self.lead.check_out_date,
+            self.lead.guest_count,
+            self.lead.room_type_preference,
+            self.lead.meal_plan,
+            self.lead.discovery_source,
+        ])
+        self.assertTrue(should_run)
+
+    def test_eligibility_during_ai_handoff(self):
+        from apps.leads.ai_diagnostics import evaluate_auto_reply_eligibility
+
+        self.lead.ai_paused = True
+        self.lead.ai_paused_by = 'AI Handoff'
+        self.lead.save()
+
+        config = AIConfig.get_config(self.org)
+
+        eligible, reason = evaluate_auto_reply_eligibility(
+            self.lead,
+            channel='telegram',
+            config=config,
+            ai_ready=True,
+            channel_ready=True,
+            destination='tg-handoff',
+        )
+        self.assertTrue(eligible)
+
+        self.lead.ai_paused_by = 'Manual Manager'
+        self.lead.save()
+
+        eligible, reason = evaluate_auto_reply_eligibility(
+            self.lead,
+            channel='telegram',
+            config=config,
+            ai_ready=True,
+            channel_ready=True,
+            destination='tg-handoff',
+        )
+        self.assertFalse(eligible)
+        self.assertEqual(reason, 'AI paused for this lead')
+
+
+
+

@@ -606,7 +606,7 @@ def _delayed_instagram_ai_response(
             # Final race-condition guard: re-read ai_paused from DB.
             # A manager could have sent from the native Instagram app during the pool window
             # or AI generation time, setting ai_paused=True after the initial check passed.
-            if not force_response and Lead.objects.filter(id=lead_id, ai_paused=True).exists():
+            if not force_response and Lead.objects.filter(id=lead_id, ai_paused=True).exclude(ai_paused_by='AI Handoff').exists():
                 logger.info(
                     f"Lead {lead_id}: AI response suppressed — ai_paused was set during generation "
                     f"(manager took over mid-flight)"
@@ -689,7 +689,7 @@ def _delayed_instagram_ai_response(
                 conversation_history_for_extract.append({"role": role, "content": msg_text})
 
             our_company_name = config.company_profile.split('\n')[0] if config.company_profile else None
-            extracted_data = ai_service.extract_lead_data(combined_text, conversation_history_for_extract, our_company_name)
+            extracted_data = ai_service.extract_lead_data(combined_text, conversation_history_for_extract, our_company_name, lead.organization)
             if extracted_data:
                 from apps.leads.services.stage_resolver import mark_name_confirmed_by_user
 
@@ -740,8 +740,19 @@ def _delayed_instagram_ai_response(
                             lead.meal_plan = extracted_data['meal_plan']
                             updated_fields.append('meal_plan')
 
+                if extracted_data.get('discovery_source'):
+                    from apps.leads.services.discovery_sources import normalize_discovery_source
+                    discovery_source = normalize_discovery_source(extracted_data['discovery_source'], lead.organization)
+                    if discovery_source and lead.discovery_source != discovery_source:
+                        lead.discovery_source = discovery_source
+                        updated_fields.append('discovery_source')
+
+                if extracted_data.get('discovery_source_detail') and lead.discovery_source_detail != extracted_data['discovery_source_detail']:
+                    lead.discovery_source_detail = str(extracted_data['discovery_source_detail'])[:255]
+                    updated_fields.append('discovery_source_detail')
+
                 if updated_fields:
-                    lead.save(update_fields=updated_fields)
+                    lead.save(update_fields=list(dict.fromkeys(updated_fields)))
                     logger.info(f"Auto-extracted and updated fields for lead {lead.id}: {updated_fields}")
 
     except Exception as e:
