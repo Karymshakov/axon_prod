@@ -1516,7 +1516,7 @@
     "channel": "telegram",
     "recipient_id": "870257222",
     "manager_name": "Zamir",
-    "notification_template": "📋 New Request\nReason: {reason}\n\n👤 Guest: {guest_name}\n📞 Phone: {guest_phone}\nInstagram: {instagram_handle}\nTelegram: {telegram_handle}\n💬 Channel: {platform}\n\n🗓 Booking Details:\n  Check-in: {checkin_date}\n  Check-out: {checkout_date}\n  Nights: {nights}\n  Guests: {guest_count}\n  Room: {room_description}\n  Meal plan: {meal_plan}\n  Total: {total_price}\n\n📝 Notes: {notes}",
+    "notification_template": "📋 Новая заявка\nПричина: {reason}\n\n👤 Гость: {guest_name}\n📞 Телефон: {guest_phone}\nInstagram: {instagram_handle}\nTelegram: {telegram_handle}\n💬 Источник: {platform}\n\n🗓 Детали бронирования:\n  Заезд: {checkin_date}\n  Выезд: {checkout_date}\n  Ночей: {nights}\n  Гостей: {guest_count}\n  Номер: {room_description}\n  Питание: {meal_plan}\n  Итого: {total_price}\n\n📝 Примечание: {notes}",
     "updated_at": "2026-03-16T09:39:47.097Z"
   }
 }

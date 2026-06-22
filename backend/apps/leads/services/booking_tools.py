@@ -652,15 +652,83 @@ def execute_transfer_to_manager(args: dict, lead=None) -> dict:
             or args.get('guest_phone', '')
         )
 
+    # Resolve domain for CRM link
+    _domain = os.environ.get('APP_DOMAIN') or os.environ.get('API_DOMAIN', '')
+    _domain = _domain.strip().rstrip('/')
+    if _domain and not _domain.startswith('http'):
+        _domain = f'https://{_domain}'
+    if not _domain:
+        _domain = 'https://axon-kinetic.com'
+
+    # Build direct messenger and CRM links
+    platform_lower = (platform or '').lower()
+    crm_link = ''
+    if lead:
+        crm_link = f"{_domain}/communications?leadId=%22{lead.id}%22&channel={platform_lower}"
+
+    telegram_link = ''
+    telegram_handle_val = ''
+    if lead and lead.telegram_username:
+        telegram_handle_val = f"@{lead.telegram_username}"
+        telegram_link = f"https://t.me/{lead.telegram_username}"
+    elif lead and lead.telegram_chat_id:
+        telegram_handle_val = f"ID: {lead.telegram_chat_id}"
+        telegram_link = f"tg://user?id={lead.telegram_chat_id}"
+
+    instagram_link = ''
+    instagram_handle_val = ''
+    if lead and lead.instagram_username:
+        instagram_handle_val = f"@{lead.instagram_username}"
+        instagram_link = f"https://instagram.com/{lead.instagram_username}"
+
+    whatsapp_link = ''
+    if lead and lead.whatsapp_phone:
+        clean_phone = re.sub(r'\D', '', lead.whatsapp_phone)
+        whatsapp_link = f"https://wa.me/{clean_phone}"
+    elif lead and lead.phone:
+        clean_phone = re.sub(r'\D', '', lead.phone)
+        whatsapp_link = f"https://wa.me/{clean_phone}"
+
+    # Construct platform display name with links
+    platform_name = platform.capitalize() if platform else ''
+    links_list = []
+    if platform_lower == 'telegram' and telegram_link:
+        links_list.append(f"Чат: {telegram_link}")
+    elif platform_lower == 'instagram' and instagram_link:
+        links_list.append(f"Чат: {instagram_link}")
+    elif platform_lower == 'whatsapp' and whatsapp_link:
+        links_list.append(f"Чат: {whatsapp_link}")
+        
+    if crm_link:
+        links_list.append(f"CRM: {crm_link}")
+        
+    if links_list:
+        platform_display = f"{platform_name} ({' | '.join(links_list)})"
+    else:
+        platform_display = platform_name
+
+    # Construct clickable handles/phones
+    telegram_display = telegram_handle_val
+    if telegram_handle_val and telegram_link:
+        telegram_display = f"{telegram_handle_val} ({telegram_link})"
+
+    instagram_display = instagram_handle_val
+    if instagram_handle_val and instagram_link:
+        instagram_display = f"{instagram_handle_val} ({instagram_link})"
+
+    phone_display = guest_phone or ''
+    if guest_phone and whatsapp_link:
+        phone_display = f"{guest_phone} ({whatsapp_link})"
+
     org = _org_from_lead(lead)
     business_name = getattr(org, 'name', '') or 'Hotel'
     template_vars = {
         'business_name': business_name,
         'reason': reason_label,
         'guest_name': guest_name or '',
-        'guest_phone': guest_phone or '',
+        'guest_phone': phone_display,
         'guest_email': guest_email or '',
-        'platform': platform or '',
+        'platform': platform_display,
         'checkin_date': checkin or '',
         'checkout_date': checkout or '',
         'nights': str(nights) if nights else '',
@@ -677,8 +745,12 @@ def execute_transfer_to_manager(args: dict, lead=None) -> dict:
             or ''
         ),
         'contact_id': contact_id,
-        'telegram_handle': (f'@{lead.telegram_username}' if lead and lead.telegram_username else ''),
-        'instagram_handle': (f'@{lead.instagram_username}' if lead and lead.instagram_username else ''),
+        'telegram_handle': telegram_display,
+        'instagram_handle': instagram_display,
+        'crm_link': crm_link,
+        'telegram_link': telegram_link,
+        'instagram_link': instagram_link,
+        'whatsapp_link': whatsapp_link,
     }
 
     if cfg.notification_template:

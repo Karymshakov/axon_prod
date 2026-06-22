@@ -875,6 +875,11 @@ function LeadsPage() {
           onClose={handleCloseSidebar}
           onEdit={handleEditFromSidebar}
           onOpenFull={(lead) => navigate({ to: '/leads/$leadId', params: { leadId: String(lead.id) } })}
+          onMergeSuccess={() => {
+            handleCloseSidebar()
+            queryClient.invalidateQueries({ queryKey: ['leads'] })
+            queryClient.invalidateQueries({ queryKey: ['lead-stats'] })
+          }}
         />
       </div>
 

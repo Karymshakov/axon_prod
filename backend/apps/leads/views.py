@@ -335,6 +335,100 @@ class LeadViewSet(OrganizationQuerysetMixin, viewsets.ModelViewSet):
             'reset_summary': reset_summary,
         })
 
+    @action(detail=True, methods=['post'], url_path='merge')
+    def merge(self, request, pk=None):
+        """Merge this lead (source) into another lead (target)."""
+        source_lead = self.get_object()
+        target_lead_id = request.data.get('target_lead_id')
+        if not target_lead_id:
+            return Response(
+                {'error': 'target_lead_id is required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            # Query from self.get_queryset() to ensure org permission checks apply to target
+            target_lead = self.get_queryset().get(pk=target_lead_id)
+        except Lead.DoesNotExist:
+            return Response(
+                {'error': 'Target lead not found or inaccessible'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        if source_lead.pk == target_lead.pk:
+            return Response(
+                {'error': 'Cannot merge a lead into itself'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        with transaction.atomic():
+            # Consolidate fields
+            fields_to_update = []
+            fields_list = [
+                'contact_person', 'job_title', 'email', 'secondary_email',
+                'phone', 'mobile_phone', 'office_phone', 'website', 'linkedin_url',
+                'address', 'city', 'state_province', 'postal_code', 'country', 'timezone',
+                'telegram_user_id', 'telegram_username', 'telegram_chat_id',
+                'instagram_user_id', 'instagram_username', 'whatsapp_phone',
+                'preferred_contact_method', 'preferred_contact_time', 'language',
+                'check_in_date', 'check_out_date', 'guest_count',
+                'room_type_preference', 'meal_plan', 'problem_description', 'next_steps'
+            ]
+            for field in fields_list:
+                source_val = getattr(source_lead, field)
+                target_val = getattr(target_lead, field)
+                if (source_val is not None and source_val != '') and (target_val is None or target_val == ''):
+                    setattr(target_lead, field, source_val)
+                    fields_to_update.append(field)
+
+            if fields_to_update:
+                target_lead.save(update_fields=fields_to_update)
+
+            # Re-link LeadFlowState if target has none but source has one
+            source_flow_state = LeadFlowState.objects.filter(lead=source_lead).first()
+            target_flow_state = LeadFlowState.objects.filter(lead=target_lead).first()
+            if source_flow_state and not target_flow_state:
+                source_flow_state.lead = target_lead
+                source_flow_state.save()
+
+            # Re-link Customer if target has none but source has one
+            source_customer = Customer.objects.filter(lead=source_lead).first()
+            target_customer = Customer.objects.filter(lead=target_lead).first()
+            if source_customer and not target_customer:
+                source_customer.lead = target_lead
+                source_customer.save()
+
+            # Re-link related objects
+            LeadActivity.objects.filter(lead=source_lead).update(lead=target_lead)
+            LeadNote.objects.filter(lead=source_lead).update(lead=target_lead)
+            Task.objects.filter(lead=source_lead).update(lead=target_lead)
+            LeadGoal.objects.filter(lead=source_lead).update(lead=target_lead)
+
+            # Create audit activity on target lead
+            user_name = request.user.name or request.user.email if request.user.is_authenticated else 'Unknown'
+            LeadActivity.objects.create(
+                lead=target_lead,
+                organization=target_lead.organization,
+                activity_type=LeadActivity.TYPE_LEAD_UPDATED,
+                description=f'🔄 Merged lead "{source_lead.contact_person or f"Lead #{source_lead.id}"}" (ID: {source_lead.id}) into this lead by {user_name}',
+                metadata={
+                    'action': 'merge_lead',
+                    'user': user_name,
+                    'source_lead_id': source_lead.id,
+                    'source_lead_name': source_lead.contact_person,
+                }
+            )
+
+            # Delete source lead
+            source_lead.delete()
+
+        return Response({
+            'status': 'success',
+            'message': 'Leads merged successfully',
+            'target_lead_id': target_lead.id
+        })
+
+
     @action(detail=True, methods=['post'], url_path='generate-copilot-suggestion')
     def generate_copilot_suggestion(self, request, pk=None):
         """Generate a suggested response from the AI agent without sending it."""

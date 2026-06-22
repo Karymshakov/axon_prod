@@ -412,6 +412,10 @@ export function convertLeadToCustomer(id: number) {
   return api.post<Customer>(`/leads/${id}/convert_to_customer/`, {})
 }
 
+export function mergeLead(sourceId: number, targetLeadId: number) {
+  return api.post<{ status: string; message: string; target_lead_id: number }>(`/leads/${sourceId}/merge/`, { target_lead_id: targetLeadId })
+}
+
 export function sendTelegramMessage(id: number, message: string) {
   return api.post<{ message: string; data: unknown }>(`/leads/${id}/send_telegram/`, { message })
 }

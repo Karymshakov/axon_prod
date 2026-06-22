@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { Lead, fetchLeadNotes, fetchPipelineStages, fetchSegments, getContactChannelLabel, getLeadStatusLabel, resolveLeadContactChannel } from '@/lib/api'
 import { useQuery } from '@tanstack/react-query'
 import { LeadSourceBadge } from '@/components/lead-source-badge'
@@ -10,7 +11,8 @@ import {
 } from '@/components/ui/sheet'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { FileText, Pencil, CalendarDays, Users, BedDouble, Utensils } from 'lucide-react'
+import { FileText, Pencil, CalendarDays, Users, BedDouble, Utensils, GitMerge } from 'lucide-react'
+import { MergeLeadDialog } from './communications/merge-lead-dialog'
 
 interface LeadDetailsSidebarProps {
   lead: Lead | null
@@ -18,6 +20,7 @@ interface LeadDetailsSidebarProps {
   onClose: () => void
   onEdit: (lead: Lead) => void
   onOpenFull?: (lead: Lead) => void
+  onMergeSuccess?: (targetLeadId: number) => void
 }
 
 const STATUS_COLORS: Record<string, 'default' | 'secondary' | 'destructive' | 'outline'> = {
@@ -39,7 +42,8 @@ const getLeadDescription = (lead: Lead) => {
   return candidates.find((value) => value?.trim())?.trim() || ''
 }
 
-export function LeadDetailsSidebar({ lead, open, onClose, onEdit, onOpenFull }: LeadDetailsSidebarProps) {
+export function LeadDetailsSidebar({ lead, open, onClose, onEdit, onOpenFull, onMergeSuccess }: LeadDetailsSidebarProps) {
+  const [mergeDialogOpen, setMergeDialogOpen] = useState(false)
   const discoverySourceOptions = useLeadDiscoverySources()
   const { data: notes = [] } = useQuery({
     queryKey: ['lead-notes', lead?.id],
@@ -301,6 +305,19 @@ export function LeadDetailsSidebar({ lead, open, onClose, onEdit, onOpenFull }: 
             </div>
           ) : null}
 
+          {/* Кнопка объединения лидов */}
+          <div className="pt-2 border-t">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setMergeDialogOpen(true)}
+              className="w-full gap-1.5 h-9 text-xs text-amber-600 dark:text-amber-400 border-amber-200 dark:border-amber-900/60 hover:bg-amber-50 hover:text-amber-700 dark:hover:bg-amber-950/20"
+            >
+              <GitMerge className="h-3.5 w-3.5" />
+              Объединить с другим гостем
+            </Button>
+          </div>
+
           {/* Временны́е метки */}
           <div className="space-y-2 pt-4 border-t">
             <div className="text-xs text-muted-foreground space-y-1">
@@ -309,6 +326,15 @@ export function LeadDetailsSidebar({ lead, open, onClose, onEdit, onOpenFull }: 
             </div>
           </div>
         </div>
+
+        {lead && (
+          <MergeLeadDialog
+            open={mergeDialogOpen}
+            onOpenChange={setMergeDialogOpen}
+            sourceLead={lead}
+            onSuccess={onMergeSuccess}
+          />
+        )}
       </SheetContent>
     </Sheet>
   )

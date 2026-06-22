@@ -1872,7 +1872,23 @@ function CommunicationsPage() {
                   onClose={() => setShowRightSidebar(false)}
                   showResetAiMemory={showResetAiMemory}
                   isResettingAiMemory={isResettingAiMemory}
-                  onResetAiMemory={() => setResetTarget({ lead: selectedLead, channel: activeChannel })}
+                  onResetAiMemory={() => setResetTarget({ lead: selectedLead, channel: activeChannel })}
+                  onMergeSuccess={(targetLeadId) => {
+                    queryClient.invalidateQueries({ queryKey: ['leads'] })
+                    queryClient.invalidateQueries({ queryKey: ['lead-stats'] })
+                    const targetLead = leads.find((l) => l.id === targetLeadId)
+                    if (targetLead) {
+                      handleSelectLead(targetLead)
+                      navigate({
+                        search: { leadId: String(targetLeadId) } as any,
+                      })
+                    } else {
+                      setSelectedLead(null)
+                      navigate({
+                        search: {} as any,
+                      })
+                    }
+                  }}
                 />
               </div>
             </div>

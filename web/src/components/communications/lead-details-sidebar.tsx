@@ -7,7 +7,8 @@ import {
   UtensilsIcon, 
   SaveIcon, 
   ClipboardIcon, 
-  XIcon
+  XIcon,
+  GitMerge
 } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
@@ -25,6 +26,7 @@ import { toast } from 'sonner'
 import { useQueryClient } from '@tanstack/react-query'
 import { LeadSourceBadge } from '@/components/lead-source-badge'
 import { useLeadDiscoverySources } from '@/hooks/use-lead-discovery-sources'
+import { MergeLeadDialog } from './merge-lead-dialog'
 
 interface LeadDetailsSidebarProps {
   lead: Lead
@@ -32,15 +34,21 @@ interface LeadDetailsSidebarProps {
   showResetAiMemory?: boolean
   onResetAiMemory?: () => void
   isResettingAiMemory?: boolean
+  onMergeSuccess?: (targetLeadId: number) => void
 }
 
 export function LeadDetailsSidebar({
   lead,
   onClose,
+  showResetAiMemory,
+  onResetAiMemory,
+  isResettingAiMemory,
+  onMergeSuccess,
 }: LeadDetailsSidebarProps) {
   const queryClient = useQueryClient()
   const discoverySourceOptions = useLeadDiscoverySources()
   const [isSaving, setIsSaving] = useState(false)
+  const [mergeDialogOpen, setMergeDialogOpen] = useState(false)
 
   // Local editable state fields
   const [contactPerson, setContactPerson] = useState('')
@@ -269,14 +277,30 @@ export function LeadDetailsSidebar({
             </div>
 
             {/* Save Button */}
-            <div className="pt-1">
+            <div className="pt-1 flex flex-col gap-2">
               <Button type="submit" disabled={isSaving} className="w-full gap-1.5 h-9 text-xs">
                 <SaveIcon className="h-3.5 w-3.5" />
                 {isSaving ? 'Сохранение...' : 'Сохранить изменения'}
               </Button>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setMergeDialogOpen(true)}
+                className="w-full gap-1.5 h-9 text-xs text-amber-600 dark:text-amber-400 border-amber-200 dark:border-amber-900/60 hover:bg-amber-50 hover:text-amber-700 dark:hover:bg-amber-950/20"
+              >
+                <GitMerge className="h-3.5 w-3.5" />
+                Объединить с другим гостем
+              </Button>
             </div>
         </form>
       </ScrollArea>
+
+      <MergeLeadDialog
+        open={mergeDialogOpen}
+        onOpenChange={setMergeDialogOpen}
+        sourceLead={lead}
+        onSuccess={onMergeSuccess}
+      />
     </div>
   )
 }
