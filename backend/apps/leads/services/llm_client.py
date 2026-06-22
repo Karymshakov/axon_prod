@@ -5,7 +5,7 @@ import logging
 import re
 from difflib import SequenceMatcher
 from datetime import datetime, date
-from typing import NamedTuple
+from typing import NamedTuple, Any
 from zoneinfo import ZoneInfo
 from openai import OpenAI
 
