@@ -1045,10 +1045,13 @@ def execute_transfer_to_manager(args: dict, lead=None) -> dict:
         if lead is not None:
             try:
                 from django.utils import timezone
-                lead.ai_paused = True
-                lead.ai_paused_at = timezone.now()
-                lead.ai_paused_by = 'AI Handoff'
-                update_fields = ['ai_paused', 'ai_paused_at', 'ai_paused_by']
+                update_fields = []
+                
+                if reason != 'booking_complete':
+                    lead.ai_paused = True
+                    lead.ai_paused_at = timezone.now()
+                    lead.ai_paused_by = 'AI Handoff'
+                    update_fields.extend(['ai_paused', 'ai_paused_at', 'ai_paused_by'])
                 
                 # Update CRM fields on lead for booking_complete
                 if reason == 'booking_complete':
@@ -1070,7 +1073,9 @@ def execute_transfer_to_manager(args: dict, lead=None) -> dict:
                     ctx['last_booking_transfer_notified_at'] = datetime.now(tz=ZoneInfo('UTC')).isoformat()
                     lead.agent_context = ctx
                     update_fields.append('agent_context')
-                lead.save(update_fields=update_fields)
+                
+                if update_fields:
+                    lead.save(update_fields=update_fields)
             except Exception as save_err:
                 logger.warning(
                     "Could not update lead status for handoff for lead=%s: %s",

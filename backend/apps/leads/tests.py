@@ -4354,6 +4354,40 @@ class DialogueFlowFixTests(TestCase):
         self.assertEqual(self.lead.ai_paused_by, 'AI Handoff')
         self.assertIsNotNone(self.lead.ai_paused_at)
 
+    @patch('apps.flows.models.ManagerTransferConfig')
+    @patch('apps.leads.telegram_service.TelegramService')
+    def test_manager_handoff_booking_complete_does_not_pause_ai(self, mock_telegram_service, mock_transfer_config_class):
+        from apps.leads.services.booking_tools import execute_transfer_to_manager
+
+        # Setup mock config
+        mock_cfg = Mock()
+        mock_cfg.recipient_id = '99999'
+        mock_cfg.channel = 'telegram'
+        mock_cfg.manager_name = 'Manager'
+        mock_cfg.notification_template = ''
+        mock_transfer_config_class.get_config.return_value = mock_cfg
+
+        # Mock telegram message sending
+        mock_svc = Mock()
+        mock_svc.send_message = AsyncMock(return_value=Mock(message_id=123))
+        mock_telegram_service.return_value = mock_svc
+
+        # Initially lead is not paused
+        self.assertFalse(self.lead.ai_paused)
+
+        args = {
+            'reason': 'booking_complete',
+            'notes': 'test booking complete',
+            'guest_name': 'Test Guest',
+            'total_price': 9500,
+        }
+        res = execute_transfer_to_manager(args, lead=self.lead)
+
+        self.assertEqual(res['status'], 'success')
+        self.lead.refresh_from_db()
+        # Lead should NOT be paused for booking_complete
+        self.assertFalse(self.lead.ai_paused)
+
     def test_past_date_validation(self):
         from apps.leads.services.booking_tools import _is_past_date
         
