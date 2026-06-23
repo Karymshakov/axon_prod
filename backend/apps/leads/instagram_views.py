@@ -382,7 +382,7 @@ def _delayed_instagram_ai_response(
         current_activity = LeadActivity.objects.get(id=activity_id)
 
         # Respect manual takeover — manager paused AI via native Instagram app
-        if lead.ai_paused and not force_response:
+        if lead.ai_paused and lead.ai_paused_by != 'AI Handoff' and not force_response:
             logger.info(f"Lead {lead_id}: AI response skipped (ai_paused=True — manager in control)")
             return
 
@@ -754,6 +754,11 @@ def _delayed_instagram_ai_response(
                 if updated_fields:
                     lead.save(update_fields=list(dict.fromkeys(updated_fields)))
                     logger.info(f"Auto-extracted and updated fields for lead {lead.id}: {updated_fields}")
+
+        # Mark handoff as completed so subsequent messages from the guest are ignored.
+        if Lead.objects.filter(id=lead_id, ai_paused=True, ai_paused_by='AI Handoff').exists():
+            Lead.objects.filter(id=lead_id).update(ai_paused_by='AI Handoff Completed')
+            logger.info(f"Lead {lead_id}: AI Handoff marked as Completed")
 
     except Exception as e:
         logger.error(f"Error in background Instagram AI response for lead {lead_id}: {e}", exc_info=True)

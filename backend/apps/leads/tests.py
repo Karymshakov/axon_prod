@@ -4916,7 +4916,8 @@ class DiscoverySourceExtractionTests(TestCase):
             channel_ready=True,
             destination='tg-handoff',
         )
-        self.assertTrue(eligible)
+        self.assertFalse(eligible)
+        self.assertEqual(reason, 'AI paused for this lead')
 
         self.lead.ai_paused_by = 'Manual Manager'
         self.lead.save()

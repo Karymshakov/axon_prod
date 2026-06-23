@@ -230,7 +230,7 @@ def evaluate_auto_reply_eligibility(
     destination: str,
     allow_final_stage: bool = False,
 ) -> tuple[bool, str]:
-    if lead.ai_paused and lead.ai_paused_by != 'AI Handoff':
+    if lead.ai_paused:
         return False, 'AI paused for this lead'
 
     if is_channel_ai_globally_paused(channel, config=config, lead=lead):

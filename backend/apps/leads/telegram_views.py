@@ -718,6 +718,11 @@ def _delayed_ai_response(lead_id: int, activity_id: int, chat_id: str, text: str
                     lead.save(update_fields=list(dict.fromkeys(updated_fields)))
                     logger.info(f"Auto-extracted and updated fields for lead {lead.id}: {updated_fields}")
 
+        # Mark handoff as completed so subsequent messages from the guest are ignored.
+        if Lead.objects.filter(id=lead_id, ai_paused=True, ai_paused_by='AI Handoff').exists():
+            Lead.objects.filter(id=lead_id).update(ai_paused_by='AI Handoff Completed')
+            logger.info(f"Lead {lead_id}: AI Handoff marked as Completed")
+
     except Exception as e:
         try:
             add_diagnostic_step(
