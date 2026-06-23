@@ -690,6 +690,146 @@ def _build_telegram_manager_notification_html(template_vars: dict, *, cfg, platf
         lines.extend(['', '<b>Actions:</b> ' + ' · '.join(unique_links)])
 
     return '\n'.join(lines)
+
+
+def _adjust_tree_group(parsed_lines: list, indices: list):
+    if not indices:
+        return
+    for idx in indices[:-1]:
+        line = parsed_lines[idx]['rendered']
+        # Replace the first occurrence of ├ or └ with ├
+        parsed_lines[idx]['rendered'] = re.sub(r'([├└])', '├', line, count=1)
+    # The last one gets └
+    last_idx = indices[-1]
+    line = parsed_lines[last_idx]['rendered']
+    parsed_lines[last_idx]['rendered'] = re.sub(r'([├└])', '└', line, count=1)
+
+
+def _render_custom_template(template: str, template_vars: dict) -> str:
+    # 1. Parse lines
+    lines = template.splitlines()
+    parsed_lines = []
+    
+    # Regex to find placeholders like {guest_name}
+    placeholder_pattern = re.compile(r'\{([a-zA-Z0-9_]+)\}')
+    
+    for line in lines:
+        stripped = line.strip()
+        placeholders = placeholder_pattern.findall(line)
+        is_tree = bool(re.search(r'^\s*[├└│─]', line))
+        is_blank = not stripped
+        # Header is a line ending with ':' and having no placeholders
+        is_header = stripped.endswith(':') and not placeholders
+        
+        parsed_lines.append({
+            'original': line,
+            'placeholders': placeholders,
+            'is_tree': is_tree,
+            'is_blank': is_blank,
+            'is_header': is_header,
+            'status': 'pending',
+            'rendered': line,
+        })
+        
+    # 2. First pass: evaluate placeholders and mark status
+    class _SafeDict(dict):
+        def __missing__(self, key):
+            return ''
+            
+    safe_vars = _SafeDict(template_vars)
+    
+    for item in parsed_lines:
+        if item['is_blank']:
+            item['status'] = 'blank'
+            item['rendered'] = ''
+        elif item['placeholders']:
+            # Replace placeholders
+            try:
+                rendered_line = item['original'].format_map(safe_vars)
+            except Exception:
+                rendered_line = item['original']
+            # Check if all placeholders evaluated to empty/blank values
+            all_empty = True
+            for ph in item['placeholders']:
+                val = safe_vars[ph]
+                if val and str(val).strip():
+                    all_empty = False
+                    break
+            if all_empty:
+                item['status'] = 'discarded'
+            else:
+                item['status'] = 'kept'
+                item['rendered'] = rendered_line
+        else:
+            if item['is_header']:
+                item['status'] = 'header'
+            else:
+                item['status'] = 'kept'
+                
+    # 3. Second pass: resolve headers based on subsequent non-blank lines
+    # A header is discarded if there are no kept lines before the next header or end of document.
+    for i, item in enumerate(parsed_lines):
+        if item['status'] == 'header':
+            has_kept_children = False
+            for j in range(i + 1, len(parsed_lines)):
+                next_item = parsed_lines[j]
+                if next_item['status'] == 'header':
+                    break
+                if next_item['status'] == 'kept':
+                    has_kept_children = True
+                    break
+            if not has_kept_children:
+                item['status'] = 'discarded'
+            else:
+                item['status'] = 'kept'
+                
+    # 4. Third pass: adjust tree prefixes for kept tree lines
+    # We find contiguous groups of kept tree lines.
+    in_tree_group = False
+    tree_group_indices = []
+    
+    for i, item in enumerate(parsed_lines):
+        if item['status'] == 'kept' and item['is_tree']:
+            if not in_tree_group:
+                in_tree_group = True
+                tree_group_indices = [i]
+            else:
+                tree_group_indices.append(i)
+        else:
+            if in_tree_group:
+                # Process the completed tree group
+                _adjust_tree_group(parsed_lines, tree_group_indices)
+                in_tree_group = False
+                tree_group_indices = []
+                
+    if in_tree_group:
+        _adjust_tree_group(parsed_lines, tree_group_indices)
+        
+    # 5. Assemble final output
+    final_lines = []
+    for item in parsed_lines:
+        if item['status'] == 'kept':
+            final_lines.append(item['rendered'])
+        elif item['status'] == 'blank':
+            final_lines.append('')
+            
+    # Collapse multiple consecutive blank lines and strip ends
+    result_lines = []
+    for line in final_lines:
+        if not line.strip():
+            if result_lines and result_lines[-1] != '':
+                result_lines.append('')
+        else:
+            result_lines.append(line)
+            
+    while result_lines and not result_lines[0].strip():
+        result_lines.pop(0)
+    while result_lines and not result_lines[-1].strip():
+        result_lines.pop()
+        
+    return '\n'.join(result_lines)
+
+
 def execute_transfer_to_manager(args: dict, lead=None) -> dict:
     """Send a structured manager notification via Telegram or WhatsApp."""
     try:
@@ -856,9 +996,9 @@ def execute_transfer_to_manager(args: dict, lead=None) -> dict:
         
     if links_list:
         if is_html:
-            platform_display = f"{_escape_html(platform_name)} ({' | '.join(links_list)})"
+            platform_display = f"{_escape_html(platform_name)} · {' · '.join(links_list)}"
         else:
-            platform_display = f"{platform_name} ({' | '.join(links_list)})"
+            platform_display = f"{platform_name} · {' · '.join(links_list)}"
     else:
         platform_display = maybe_escape(platform_name)
 
@@ -912,113 +1052,118 @@ def execute_transfer_to_manager(args: dict, lead=None) -> dict:
         'whatsapp_link': maybe_escape(whatsapp_link),
     }
 
+    def _format_tree_lines(items: list[tuple[str, str]]) -> list[str]:
+        non_empty = [item for item in items if item[1] and str(item[1]).strip()]
+        if not non_empty:
+            return []
+        formatted = []
+        for i, (label, val) in enumerate(non_empty):
+            prefix = '  └─ ' if i == len(non_empty) - 1 else '  ├─ '
+            formatted.append(f"{prefix}{label}: {val}")
+        return formatted
+
     if cfg.notification_template:
-        class _SafeDict(dict):
-            def __missing__(self, key):
-                return ''
         template = _escape_html(cfg.notification_template) if is_html else cfg.notification_template
-        message_text = template.format_map(_SafeDict(template_vars))
+        message_text = _render_custom_template(template, template_vars)
     else:
         if is_html:
             lines = [
                 f'🔔 <b>Новая заявка — {template_vars["business_name"]}</b>',
-                f'───────────────────',
+                f'━━━━━━━━━━━━━━━━━━━━',
                 f'📌 <b>Причина:</b> {template_vars["reason"]}',
                 '',
+                f'👤 <b>Информация о госте:</b>',
             ]
-
-            if template_vars['guest_name']:
-                lines.append(f'👤 <b>Гость:</b> {template_vars["guest_name"]}')
-            if template_vars['guest_phone']:
-                lines.append(f'📞 <b>Телефон:</b> {template_vars["guest_phone"]}')
-            if template_vars['guest_email']:
-                lines.append(f'📧 <b>Email:</b> {template_vars["guest_email"]}')
-            if template_vars['platform']:
-                lines.append(f'💬 <b>Источник:</b> {template_vars["platform"]}')
-            if template_vars['discovery_source']:
-                lines.append(f'📣 <b>Откуда узнал:</b> {template_vars["discovery_source"]}')
+            guest_items = [
+                ('Имя', template_vars['guest_name']),
+                ('Телефон', template_vars['guest_phone']),
+                ('Email', template_vars['guest_email']),
+                ('Источник', template_vars['platform']),
+                ('Откуда узнал', template_vars['discovery_source']),
+            ]
             if contact_id:
-                if platform_lower == 'telegram':
-                    lines.append(f'🔗 <b>Telegram ID:</b> {template_vars["contact_id"]}')
-                else:
-                    lines.append(f'📱 <b>Телефон:</b> {template_vars["contact_id"]}')
+                label = 'Telegram ID' if platform_lower == 'telegram' else 'Телефон ID'
+                guest_items.append((label, template_vars['contact_id']))
+                
+            lines.extend(_format_tree_lines(guest_items))
 
-            booking_lines = []
+            booking_items = []
             if checkin:
-                booking_lines.append(f'  ├─ Заезд: {template_vars["checkin_date"]}')
+                booking_items.append(('Заезд', template_vars['checkin_date']))
             if checkout:
-                booking_lines.append(f'  ├─ Выезд: {template_vars["checkout_date"]}')
+                booking_items.append(('Выезд', template_vars['checkout_date']))
             if nights:
-                booking_lines.append(f'  ├─ Ночей: {template_vars["nights"]}')
+                booking_items.append(('Ночей', template_vars['nights']))
             if template_vars['guest_count']:
-                booking_lines.append(f'  ├─ Гостей: {template_vars["guest_count"]}')
+                booking_items.append(('Гостей', template_vars['guest_count']))
             if template_vars['room_description']:
-                booking_lines.append(f'  ├─ Номер: {template_vars["room_description"]}')
+                booking_items.append(('Номер', template_vars['room_description']))
             if template_vars['meal_plan']:
-                booking_lines.append(f'  ├─ Питание: {template_vars["meal_plan"]}')
+                booking_items.append(('Питание', template_vars['meal_plan']))
             if template_vars['price_per_night']:
-                booking_lines.append(f'  ├─ Цена/ночь: {template_vars["price_per_night"]} сом')
+                booking_items.append(('Цена/ночь', f"{template_vars['price_per_night']} сом"))
             if template_vars['total_price']:
-                booking_lines.append(f'  └─ Итого: {template_vars["total_price"]} сом')
+                booking_items.append(('Итого', f"<b>{template_vars['total_price']} сом</b>"))
 
-            if booking_lines:
+            formatted_booking = _format_tree_lines(booking_items)
+            if formatted_booking:
                 lines.append('')
                 lines.append('🗓 <b>Детали проживания:</b>')
-                lines.extend(booking_lines)
+                lines.extend(formatted_booking)
 
             if template_vars['notes']:
                 lines.append('')
-                lines.append(f'📝 <b>Примечание:</b> {template_vars["notes"]}')
+                lines.append('📝 <b>Примечание:</b>')
+                lines.append(f'<i>{template_vars["notes"]}</i>')
         else:
             lines = [
-                f'🔔 Новая заявка — {business_name}',
-                f'───────────────────',
-                f'📌 Причина: {reason_label}',
+                f'🔔 *Новая заявка — {business_name}*',
+                f'━━━━━━━━━━━━━━━━━━━━',
+                f'📌 *Причина:* {reason_label}',
                 '',
+                f'👤 *Информация о госте:*',
             ]
-
-            if template_vars['guest_name']:
-                lines.append(f'👤 Гость: {template_vars["guest_name"]}')
-            if template_vars['guest_phone']:
-                lines.append(f'📞 Телефон: {template_vars["guest_phone"]}')
-            if template_vars['guest_email']:
-                lines.append(f'📧 Email: {template_vars["guest_email"]}')
-            if template_vars['platform']:
-                lines.append(f'💬 Источник: {template_vars["platform"]}')
-            if template_vars['discovery_source']:
-                lines.append(f'📣 Откуда узнал: {template_vars["discovery_source"]}')
+            guest_items = [
+                ('Имя', template_vars['guest_name']),
+                ('Телефон', template_vars['guest_phone']),
+                ('Email', template_vars['guest_email']),
+                ('Источник', template_vars['platform']),
+                ('Откуда узнал', template_vars['discovery_source']),
+            ]
             if contact_id:
-                if platform_lower == 'telegram':
-                    lines.append(f'🔗 Telegram ID: {contact_id}')
-                else:
-                    lines.append(f'📱 Телефон: {contact_id}')
+                label = 'Telegram ID' if platform_lower == 'telegram' else 'Телефон ID'
+                guest_items.append((label, contact_id))
+                
+            lines.extend(_format_tree_lines(guest_items))
 
-            booking_lines = []
+            booking_items = []
             if checkin:
-                booking_lines.append(f'  ├─ Заезд: {checkin}')
+                booking_items.append(('Заезд', checkin))
             if checkout:
-                booking_lines.append(f'  ├─ Выезд: {checkout}')
+                booking_items.append(('Выезд', checkout))
             if nights:
-                booking_lines.append(f'  ├─ Ночей: {nights}')
+                booking_items.append(('Ночей', str(nights)))
             if template_vars['guest_count']:
-                booking_lines.append(f'  ├─ Гостей: {template_vars["guest_count"]}')
+                booking_items.append(('Гостей', template_vars['guest_count']))
             if template_vars['room_description']:
-                booking_lines.append(f'  ├─ Номер: {template_vars["room_description"]}')
+                booking_items.append(('Номер', template_vars['room_description']))
             if template_vars['meal_plan']:
-                booking_lines.append(f'  ├─ Питание: {template_vars["meal_plan"]}')
+                booking_items.append(('Питание', template_vars['meal_plan']))
             if template_vars['price_per_night']:
-                booking_lines.append(f'  ├─ Цена/ночь: {template_vars["price_per_night"]} сом')
+                booking_items.append(('Цена/ночь', f"{template_vars['price_per_night']} сом"))
             if template_vars['total_price']:
-                booking_lines.append(f'  └─ Итого: {template_vars["total_price"]} сом')
+                booking_items.append(('Итого', f"*{template_vars['total_price']} сом*"))
 
-            if booking_lines:
+            formatted_booking = _format_tree_lines(booking_items)
+            if formatted_booking:
                 lines.append('')
-                lines.append('🗓 Детали проживания:')
-                lines.extend(booking_lines)
+                lines.append('🗓 *Детали проживания:*')
+                lines.extend(formatted_booking)
 
             if template_vars['notes']:
                 lines.append('')
-                lines.append(f'📝 Примечание: {template_vars["notes"]}')
+                lines.append('📝 *Примечание:*')
+                lines.append(f'_{template_vars["notes"]}_')
 
         message_text = '\n'.join(lines)
     manager_name = cfg.manager_name or 'менеджер'

@@ -1337,7 +1337,7 @@ function TransferPanel() {
               type="button"
               onClick={() => {
                 setNotificationTemplate(
-                  '📋 Новый запрос\nПричина: {reason}\n\n👤 Гость: {guest_name}\n📞 Телефон: {guest_phone}\n🔗 Контакт: {contact_id}\n💬 Канал: {platform}\n\n🗓 Детали бронирования:\n  Заезд: {checkin_date}\n  Выезд: {checkout_date}\n  Ночей: {nights}\n  Гостей: {guest_count}\n  Номер: {room_description}\n  Питание: {meal_plan}\n  Итого: {total_price}\n\n📝 Примечания: {notes}'
+                  '🔔 Новый запрос — {business_name}\n📌 Причина: {reason}\n\n👤 Информация о госте:\n  ├─ Имя: {guest_name}\n  ├─ Телефон: {guest_phone}\n  ├─ Telegram: {telegram_handle}\n  ├─ Instagram: {instagram_handle}\n  ├─ Канал связи: {platform}\n  └─ ID контакта: {contact_id}\n\n🗓 Детали проживания:\n  ├─ Заезд: {checkin_date}\n  ├─ Выезд: {checkout_date}\n  ├─ Ночей: {nights}\n  ├─ Гостей: {guest_count}\n  ├─ Номер: {room_description}\n  ├─ Питание: {meal_plan}\n  └─ Итого: {total_price} сом\n\n📝 Примечание: {notes}'
                 )
                 setDirty(true)
               }}
