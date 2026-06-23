@@ -356,6 +356,7 @@ def execute_get_room_images(args: dict, lead=None) -> dict:
 
         channel = 'unknown'
         sent = False
+        sent_mids = []
         if lead is not None:
             source = (lead.source or '').lower()
             chat_id = getattr(lead, 'telegram_chat_id', None)
@@ -415,6 +416,9 @@ def execute_get_room_images(args: dict, lead=None) -> dict:
                             result = _ig_svc.send_image_url(lead.instagram_user_id, abs_url)
                             if result:
                                 _any_sent = True
+                                mid = result.get('message_id')
+                                if mid:
+                                    sent_mids.append(mid)
                     sent = _any_sent
                 except Exception as e:
                     logger.error(f"get_room_images: Instagram send failed for cat={cat}: {e}", exc_info=True)
@@ -436,17 +440,25 @@ def execute_get_room_images(args: dict, lead=None) -> dict:
                     )
                 label = ROOM_CATEGORY_LABELS.get(cat, cat)
                 try:
-                    LeadActivity.objects.create(
-                        lead=lead,
-                        organization=lead.organization,
-                        activity_type=_activity_type,
-                        description=f"AI sent {len(photos_to_send)} photo(s) of {label} rooms",
-                        metadata={
+                    activity_kwargs = {
+                        'lead': lead,
+                        'organization': lead.organization,
+                        'activity_type': _activity_type,
+                        'description': f"AI sent {len(photos_to_send)} photo(s) of {label} rooms",
+                        'metadata': {
                             'is_ai_generated': True,
                             'room_category': cat,
                             'photos_sent': len(photos_to_send),
-                        },
-                    )
+                        }
+                    }
+                    if channel == 'instagram':
+                        activity_kwargs['echo_origin'] = LeadActivity.ECHO_ORIGIN_CRM
+                        activity_kwargs['metadata']['echo_origin'] = LeadActivity.ECHO_ORIGIN_CRM
+                        if sent_mids:
+                            activity_kwargs['metadata']['message_id'] = sent_mids[-1]
+                            activity_kwargs['metadata']['all_message_ids'] = sent_mids
+                    
+                    LeadActivity.objects.create(**activity_kwargs)
                 except Exception as e:
                     logger.error(f"get_room_images: activity log failed: {e}")
 
@@ -816,125 +828,197 @@ def execute_transfer_to_manager(args: dict, lead=None) -> dict:
         clean_phone = re.sub(r'\D', '', lead.phone)
         whatsapp_link = f"https://wa.me/{clean_phone}"
 
-    # Construct platform display name with links
+    # Construct platform display name and clickable handles/phones
+    is_html = (cfg.channel == 'telegram')
+
+    def maybe_escape(val) -> str:
+        s = str(val or '')
+        return _escape_html(s) if is_html else s
+
+    def format_link(label: str, url: str) -> str:
+        if not url:
+            return maybe_escape(label)
+        if is_html:
+            return f'<a href="{url}">{_escape_html(label)}</a>'
+        return f"{label} ({url})"
+
     platform_name = platform.capitalize() if platform else ''
     links_list = []
     if platform_lower == 'telegram' and telegram_link:
-        links_list.append(f"Чат: {telegram_link}")
+        links_list.append(format_link('Чат', telegram_link))
     elif platform_lower == 'instagram' and instagram_link:
-        links_list.append(f"Чат: {instagram_link}")
+        links_list.append(format_link('Чат', instagram_link))
     elif platform_lower == 'whatsapp' and whatsapp_link:
-        links_list.append(f"Чат: {whatsapp_link}")
+        links_list.append(format_link('Чат', whatsapp_link))
         
     if crm_link:
-        links_list.append(f"CRM: {crm_link}")
+        links_list.append(format_link('CRM', crm_link))
         
     if links_list:
-        platform_display = f"{platform_name} ({' | '.join(links_list)})"
+        if is_html:
+            platform_display = f"{_escape_html(platform_name)} ({' | '.join(links_list)})"
+        else:
+            platform_display = f"{platform_name} ({' | '.join(links_list)})"
     else:
-        platform_display = platform_name
+        platform_display = maybe_escape(platform_name)
 
-    # Construct clickable handles/phones
-    telegram_display = telegram_handle_val
-    if telegram_handle_val and telegram_link:
-        telegram_display = f"{telegram_handle_val} ({telegram_link})"
+    if is_html:
+        telegram_display = format_link(telegram_handle_val, telegram_link) if telegram_handle_val else ''
+        instagram_display = format_link(instagram_handle_val, instagram_link) if instagram_handle_val else ''
+        phone_display = format_link(guest_phone, whatsapp_link) if guest_phone else ''
+    else:
+        telegram_display = telegram_handle_val
+        if telegram_handle_val and telegram_link:
+            telegram_display = f"{telegram_handle_val} ({telegram_link})"
 
-    instagram_display = instagram_handle_val
-    if instagram_handle_val and instagram_link:
-        instagram_display = f"{instagram_handle_val} ({instagram_link})"
+        instagram_display = instagram_handle_val
+        if instagram_handle_val and instagram_link:
+            instagram_display = f"{instagram_handle_val} ({instagram_link})"
 
-    phone_display = guest_phone or ''
-    if guest_phone and whatsapp_link:
-        phone_display = f"{guest_phone} ({whatsapp_link})"
+        phone_display = guest_phone or ''
+        if guest_phone and whatsapp_link:
+            phone_display = f"{guest_phone} ({whatsapp_link})"
 
     org = _org_from_lead(lead)
     business_name = getattr(org, 'name', '') or 'Hotel'
     template_vars = {
-        'business_name': business_name,
-        'reason': reason_label,
-        'guest_name': guest_name or '',
+        'business_name': maybe_escape(business_name),
+        'reason': maybe_escape(reason_label),
+        'guest_name': maybe_escape(guest_name),
         'guest_phone': phone_display,
-        'guest_email': guest_email or '',
+        'guest_email': maybe_escape(guest_email),
         'platform': platform_display,
-        'checkin_date': checkin or '',
-        'checkout_date': checkout or '',
-        'nights': str(nights) if nights else '',
-        'guest_count': str(args.get('guest_count', '')) if args.get('guest_count') else '',
-        'room_description': args.get('room_description', '') or '',
-        'meal_plan': args.get('meal_plan', '') or '',
-        'price_per_night': str(args.get('price_per_night', '')) if args.get('price_per_night') is not None else '',
-        'total_price': str(args.get('total_price', '')) if args.get('total_price') is not None else '',
-        'notes': notes,
-        'discovery_source': discovery_source_display,
-        'discovery_source_detail': (
+        'checkin_date': maybe_escape(checkin),
+        'checkout_date': maybe_escape(checkout),
+        'nights': maybe_escape(nights),
+        'guest_count': maybe_escape(args.get('guest_count')),
+        'room_description': maybe_escape(args.get('room_description')),
+        'meal_plan': maybe_escape(args.get('meal_plan')),
+        'price_per_night': maybe_escape(args.get('price_per_night')),
+        'total_price': maybe_escape(args.get('total_price')),
+        'notes': maybe_escape(notes),
+        'discovery_source': maybe_escape(discovery_source_display),
+        'discovery_source_detail': maybe_escape(
             args.get('discovery_source_detail')
             or getattr(lead, 'discovery_source_detail', '')
             or ''
         ),
-        'contact_id': contact_id,
+        'contact_id': maybe_escape(contact_id),
         'telegram_handle': telegram_display,
         'instagram_handle': instagram_display,
-        'crm_link': crm_link,
-        'telegram_link': telegram_link,
-        'instagram_link': instagram_link,
-        'whatsapp_link': whatsapp_link,
+        'crm_link': maybe_escape(crm_link),
+        'telegram_link': maybe_escape(telegram_link),
+        'instagram_link': maybe_escape(instagram_link),
+        'whatsapp_link': maybe_escape(whatsapp_link),
     }
 
     if cfg.notification_template:
         class _SafeDict(dict):
             def __missing__(self, key):
                 return ''
-        message_text = cfg.notification_template.format_map(_SafeDict(template_vars))
+        template = _escape_html(cfg.notification_template) if is_html else cfg.notification_template
+        message_text = template.format_map(_SafeDict(template_vars))
     else:
-        lines = [
-            f'🔔 Новая заявка — {business_name}',
-            f'───────────────────',
-            f'📌 Причина: {reason_label}',
-            '',
-        ]
+        if is_html:
+            lines = [
+                f'🔔 <b>Новая заявка — {template_vars["business_name"]}</b>',
+                f'───────────────────',
+                f'📌 <b>Причина:</b> {template_vars["reason"]}',
+                '',
+            ]
 
-        if template_vars['guest_name']:
-            lines.append(f'👤 Гость: {template_vars["guest_name"]}')
-        if template_vars['guest_phone']:
-            lines.append(f'📞 Телефон: {template_vars["guest_phone"]}')
-        if template_vars['guest_email']:
-            lines.append(f'📧 Email: {template_vars["guest_email"]}')
-        if template_vars['platform']:
-            lines.append(f'💬 Источник: {template_vars["platform"]}')
-        if template_vars['discovery_source']:
-            lines.append(f'📣 Откуда узнал: {template_vars["discovery_source"]}')
-        if contact_id:
-            if cfg.channel == ManagerTransferConfig.CHANNEL_TELEGRAM:
-                lines.append(f'🔗 Telegram ID: {contact_id}')
-            else:
-                lines.append(f'📱 Телефон: {contact_id}')
+            if template_vars['guest_name']:
+                lines.append(f'👤 <b>Гость:</b> {template_vars["guest_name"]}')
+            if template_vars['guest_phone']:
+                lines.append(f'📞 <b>Телефон:</b> {template_vars["guest_phone"]}')
+            if template_vars['guest_email']:
+                lines.append(f'📧 <b>Email:</b> {template_vars["guest_email"]}')
+            if template_vars['platform']:
+                lines.append(f'💬 <b>Источник:</b> {template_vars["platform"]}')
+            if template_vars['discovery_source']:
+                lines.append(f'📣 <b>Откуда узнал:</b> {template_vars["discovery_source"]}')
+            if contact_id:
+                if platform_lower == 'telegram':
+                    lines.append(f'🔗 <b>Telegram ID:</b> {template_vars["contact_id"]}')
+                else:
+                    lines.append(f'📱 <b>Телефон:</b> {template_vars["contact_id"]}')
 
-        booking_lines = []
-        if checkin:
-            booking_lines.append(f'  ├─ Заезд: {checkin}')
-        if checkout:
-            booking_lines.append(f'  ├─ Выезд: {checkout}')
-        if nights:
-            booking_lines.append(f'  ├─ Ночей: {nights}')
-        if template_vars['guest_count']:
-            booking_lines.append(f'  ├─ Гостей: {template_vars["guest_count"]}')
-        if template_vars['room_description']:
-            booking_lines.append(f'  ├─ Номер: {template_vars["room_description"]}')
-        if template_vars['meal_plan']:
-            booking_lines.append(f'  ├─ Питание: {template_vars["meal_plan"]}')
-        if template_vars['price_per_night']:
-            booking_lines.append(f'  ├─ Цена/ночь: {template_vars["price_per_night"]} сом')
-        if template_vars['total_price']:
-            booking_lines.append(f'  └─ Итого: {template_vars["total_price"]} сом')
+            booking_lines = []
+            if checkin:
+                booking_lines.append(f'  ├─ Заезд: {template_vars["checkin_date"]}')
+            if checkout:
+                booking_lines.append(f'  ├─ Выезд: {template_vars["checkout_date"]}')
+            if nights:
+                booking_lines.append(f'  ├─ Ночей: {template_vars["nights"]}')
+            if template_vars['guest_count']:
+                booking_lines.append(f'  ├─ Гостей: {template_vars["guest_count"]}')
+            if template_vars['room_description']:
+                booking_lines.append(f'  ├─ Номер: {template_vars["room_description"]}')
+            if template_vars['meal_plan']:
+                booking_lines.append(f'  ├─ Питание: {template_vars["meal_plan"]}')
+            if template_vars['price_per_night']:
+                booking_lines.append(f'  ├─ Цена/ночь: {template_vars["price_per_night"]} сом')
+            if template_vars['total_price']:
+                booking_lines.append(f'  └─ Итого: {template_vars["total_price"]} сом')
 
-        if booking_lines:
-            lines.append('')
-            lines.append('🗓 Детали проживания:')
-            lines.extend(booking_lines)
+            if booking_lines:
+                lines.append('')
+                lines.append('🗓 <b>Детали проживания:</b>')
+                lines.extend(booking_lines)
 
-        if template_vars['notes']:
-            lines.append('')
-            lines.append(f'📝 Примечание: {template_vars["notes"]}')
+            if template_vars['notes']:
+                lines.append('')
+                lines.append(f'📝 <b>Примечание:</b> {template_vars["notes"]}')
+        else:
+            lines = [
+                f'🔔 Новая заявка — {business_name}',
+                f'───────────────────',
+                f'📌 Причина: {reason_label}',
+                '',
+            ]
+
+            if template_vars['guest_name']:
+                lines.append(f'👤 Гость: {template_vars["guest_name"]}')
+            if template_vars['guest_phone']:
+                lines.append(f'📞 Телефон: {template_vars["guest_phone"]}')
+            if template_vars['guest_email']:
+                lines.append(f'📧 Email: {template_vars["guest_email"]}')
+            if template_vars['platform']:
+                lines.append(f'💬 Источник: {template_vars["platform"]}')
+            if template_vars['discovery_source']:
+                lines.append(f'📣 Откуда узнал: {template_vars["discovery_source"]}')
+            if contact_id:
+                if platform_lower == 'telegram':
+                    lines.append(f'🔗 Telegram ID: {contact_id}')
+                else:
+                    lines.append(f'📱 Телефон: {contact_id}')
+
+            booking_lines = []
+            if checkin:
+                booking_lines.append(f'  ├─ Заезд: {checkin}')
+            if checkout:
+                booking_lines.append(f'  ├─ Выезд: {checkout}')
+            if nights:
+                booking_lines.append(f'  ├─ Ночей: {nights}')
+            if template_vars['guest_count']:
+                booking_lines.append(f'  ├─ Гостей: {template_vars["guest_count"]}')
+            if template_vars['room_description']:
+                booking_lines.append(f'  ├─ Номер: {template_vars["room_description"]}')
+            if template_vars['meal_plan']:
+                booking_lines.append(f'  ├─ Питание: {template_vars["meal_plan"]}')
+            if template_vars['price_per_night']:
+                booking_lines.append(f'  ├─ Цена/ночь: {template_vars["price_per_night"]} сом')
+            if template_vars['total_price']:
+                booking_lines.append(f'  └─ Итого: {template_vars["total_price"]} сом')
+
+            if booking_lines:
+                lines.append('')
+                lines.append('🗓 Детали проживания:')
+                lines.extend(booking_lines)
+
+            if template_vars['notes']:
+                lines.append('')
+                lines.append(f'📝 Примечание: {template_vars["notes"]}')
 
         message_text = '\n'.join(lines)
     manager_name = cfg.manager_name or 'менеджер'
@@ -944,7 +1028,7 @@ def execute_transfer_to_manager(args: dict, lead=None) -> dict:
             from apps.leads.telegram_service import TelegramService
             from asgiref.sync import async_to_sync
             svc = TelegramService()
-            result = async_to_sync(svc.send_message)(cfg.recipient_id, message_text)
+            result = async_to_sync(svc.send_message)(cfg.recipient_id, message_text, parse_mode='HTML')
             if result is None:
                 raise RuntimeError('Telegram send returned None')
             logger.info(f"Telegram transfer result: message_id={getattr(result, 'message_id', result)}")
