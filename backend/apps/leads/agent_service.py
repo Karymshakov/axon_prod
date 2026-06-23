@@ -58,6 +58,22 @@ _PROMISE_KEYWORDS = [
 ]
 
 
+
+_MANAGER_HANDOFF_RESPONSE_RE = re.compile(
+    '|'.join([
+        r'\bmanager\b.{0,80}\b(?:contact|reach|call|write|message|touch)\b',
+        r'\bpassed\b.{0,80}\bmanager\b',
+        r'\btransfer(?:red)?\b.{0,80}\bmanager\b',
+        r'\u043c\u0435\u043d\u0435\u0434\u0436\u0435\u0440.{0,80}\u0441\u0432\u044f\u0436',
+        r'\u043c\u0435\u043d\u0435\u0434\u0436\u0435\u0440.{0,80}\u043d\u0430\u043f\u0438\u0448',
+        r'\u043c\u0435\u043d\u0435\u0434\u0436\u0435\u0440.{0,80}\u043f\u043e\u0437\u0432\u043e\u043d',
+        r'\u043f\u0435\u0440\u0435\u0434\u0430[^\n]{0,80}\u043c\u0435\u043d\u0435\u0434\u0436',
+        r'\u043f\u0435\u0440\u0435\u0434\u0430[^\n]{0,80}\u0432\u0430\u0441[^\n]{0,80}\u043c\u0435\u043d\u0435\u0434\u0436',
+    ]),
+    re.IGNORECASE | re.DOTALL,
+)
+
+
 class AgentService:
     """Autonomous AI agent for proactive lead outreach with enhanced capabilities."""
 
@@ -601,6 +617,14 @@ Return ONLY the message text, nothing else."""
             lead = Lead.objects.select_related('organization').get(id=lead_id)
             config = AIConfig.get_config(org=lead.organization)
 
+            if lead.ai_paused:
+                Lead.objects.filter(id=lead_id).update(next_follow_up_at=None, next_follow_up_hint='')
+                logger.info(
+                    f"Skipping follow-up scheduling for lead {lead_id}: AI is paused "
+                    f"(paused_by={lead.ai_paused_by or 'unknown'})"
+                )
+                return
+
             if sent_activity_id:
                 sent_activity = LeadActivity.objects.filter(id=sent_activity_id, lead=lead).only('id', 'created_at').first()
                 if not sent_activity:
@@ -820,6 +844,35 @@ Return ONLY the message text, nothing else."""
         """
         config = AIConfig.get_config(org=lead.organization)
         if not config.proactive_outreach_enabled:
+            return
+
+        try:
+            lead.refresh_from_db(fields=['ai_paused', 'ai_paused_by', 'next_follow_up_at', 'next_follow_up_hint'])
+        except Exception:
+            pass
+
+        if lead.ai_paused:
+            Lead.objects.filter(id=lead.id).update(next_follow_up_at=None, next_follow_up_hint='')
+            logger.info(
+                f"Lead {lead.id}: follow-up scheduling skipped because AI is paused "
+                f"(paused_by={lead.ai_paused_by or 'unknown'})"
+            )
+            return
+
+        sent_text = ''
+        if sent_activity_id:
+            try:
+                sent_activity = LeadActivity.objects.filter(id=sent_activity_id, lead=lead).only('metadata', 'description').first()
+                if sent_activity:
+                    sent_text = (sent_activity.metadata or {}).get('text') or sent_activity.description or ''
+            except Exception as exc:
+                logger.warning(f"Lead {lead.id}: could not inspect sent activity {sent_activity_id}: {exc}")
+
+        if sent_text and _MANAGER_HANDOFF_RESPONSE_RE.search(sent_text):
+            Lead.objects.filter(id=lead.id).update(next_follow_up_at=None, next_follow_up_hint='')
+            logger.info(
+                f"Lead {lead.id}: follow-up scheduling skipped after manager handoff response"
+            )
             return
 
         if self._has_promise_keywords(combined_text):

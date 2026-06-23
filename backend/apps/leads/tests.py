@@ -1219,6 +1219,57 @@ class PreciseScheduledFollowupTests(TestCase):
         diff = self.lead.next_follow_up_at - timezone.now()
         self.assertTrue(abs(diff.total_seconds() - 600) < 5)
 
+    def test_idle_followup_not_scheduled_when_lead_is_paused_by_handoff(self):
+        from apps.leads.agent_service import agent_service
+        from django.utils import timezone
+
+        self.lead.ai_paused = True
+        self.lead.ai_paused_by = 'AI Handoff'
+        self.lead.next_follow_up_at = timezone.now() - timezone.timedelta(minutes=1)
+        self.lead.next_follow_up_hint = 'stale follow-up'
+        self.lead.save(update_fields=['ai_paused', 'ai_paused_by', 'next_follow_up_at', 'next_follow_up_hint'])
+
+        sent_activity = LeadActivity.objects.create(
+            lead=self.lead,
+            organization=self.org,
+            activity_type=LeadActivity.TYPE_TELEGRAM_SENT,
+            description='AI auto-response: manager will contact you',
+            metadata={'text': 'Manager will contact you shortly.'},
+        )
+
+        agent_service.schedule_idle_or_promise_followup(
+            self.lead,
+            'booking details',
+            [{'role': 'assistant', 'content': 'Manager will contact you shortly.'}],
+            sent_activity.id,
+        )
+
+        self.lead.refresh_from_db()
+        self.assertIsNone(self.lead.next_follow_up_at)
+        self.assertEqual(self.lead.next_follow_up_hint, '')
+
+    def test_idle_followup_not_scheduled_after_manager_handoff_text(self):
+        from apps.leads.agent_service import agent_service
+
+        sent_activity = LeadActivity.objects.create(
+            lead=self.lead,
+            organization=self.org,
+            activity_type=LeadActivity.TYPE_TELEGRAM_SENT,
+            description='AI auto-response: manager handoff',
+            metadata={'text': 'Daniyar, all set. Our manager will contact you shortly to confirm the deposit.'},
+        )
+
+        agent_service.schedule_idle_or_promise_followup(
+            self.lead,
+            'booking details',
+            [{'role': 'assistant', 'content': 'Our manager will contact you shortly.'}],
+            sent_activity.id,
+        )
+
+        self.lead.refresh_from_db()
+        self.assertIsNone(self.lead.next_follow_up_at)
+        self.assertEqual(self.lead.next_follow_up_hint, '')
+
     @patch('django.utils.timezone.now')
     @patch('django.db.close_old_connections')
     @patch('apps.leads.agent_service.ai_service.client')
@@ -4848,5 +4899,64 @@ class DiscoverySourceExtractionTests(TestCase):
         self.assertEqual(reason, 'AI paused for this lead')
 
 
+class LeadMergeAutomationStateTests(TestCase):
+    def setUp(self):
+        user_model = get_user_model()
+        self.owner = user_model.objects.create_user(
+            email='merge-automation@example.com',
+            password='password123',
+            name='Merge Manager',
+            role='admin',
+        )
+        self.org = Organization.objects.create(name='Merge Org', slug='merge-org', owner=self.owner)
+        from apps.organizations.models import OrganizationMember
+        OrganizationMember.objects.create(organization=self.org, user=self.owner, role='admin')
+        self.owner.current_organization = self.org
+        self.owner.save(update_fields=['current_organization'])
+        self.factory = APIRequestFactory()
 
+    def test_merge_preserves_handoff_pause_and_clears_scheduled_followup(self):
+        from apps.leads.views import LeadViewSet
+        from django.utils import timezone
 
+        target = Lead.objects.create(
+            organization=self.org,
+            contact_person='Target Lead',
+            instagram_user_id='ig-merge-target',
+            next_follow_up_at=timezone.now() - timezone.timedelta(minutes=5),
+            next_follow_up_hint='10-minute idle follow-up',
+            agent_context={
+                'pending_promise': {'deadline': timezone.now().isoformat()},
+                'scheduled_followup_request': {'kind': 'assistant_request'},
+                'followup_claim': {'id': 'old-claim'},
+                'booking_step': 'handoff',
+            },
+        )
+        source = Lead.objects.create(
+            organization=self.org,
+            contact_person='Source Lead',
+            instagram_user_id='ig-merge-source',
+            ai_paused=True,
+            ai_paused_at=timezone.now(),
+            ai_paused_by='AI Handoff',
+        )
+
+        request = self.factory.post(
+            f'/api/leads/{source.pk}/merge/',
+            {'target_lead_id': target.pk},
+            format='json',
+        )
+        force_authenticate(request, user=self.owner)
+        response = LeadViewSet.as_view({'post': 'merge'})(request, pk=source.pk)
+
+        self.assertEqual(response.status_code, 200)
+        target.refresh_from_db()
+        self.assertTrue(target.ai_paused)
+        self.assertEqual(target.ai_paused_by, 'AI Handoff')
+        self.assertIsNone(target.next_follow_up_at)
+        self.assertEqual(target.next_follow_up_hint, '')
+        self.assertNotIn('pending_promise', target.agent_context)
+        self.assertNotIn('scheduled_followup_request', target.agent_context)
+        self.assertNotIn('followup_claim', target.agent_context)
+        self.assertEqual(target.agent_context.get('booking_step'), 'handoff')
+        self.assertFalse(Lead.objects.filter(pk=source.pk).exists())

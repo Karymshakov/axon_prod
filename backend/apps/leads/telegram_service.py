@@ -56,7 +56,7 @@ class TelegramService:
         # Fall back to environment variable
         return self.bot is not None
 
-    async def send_message(self, chat_id: str, text: str) -> Optional[dict]:
+    async def send_message(self, chat_id: str, text: str, parse_mode: str | None = None) -> Optional[dict]:
         """
         Send a message to a Telegram chat.
 
@@ -80,7 +80,7 @@ class TelegramService:
             message = await bot.send_message(
                 chat_id=chat_id,
                 text=text,
-                parse_mode=None  # Plain text for now
+                parse_mode=parse_mode
             )
 
             return {

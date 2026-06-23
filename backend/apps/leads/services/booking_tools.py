@@ -3,6 +3,7 @@ import json
 import logging
 import os
 from datetime import datetime, date, timedelta
+from html import escape
 from zoneinfo import ZoneInfo
 from django.conf import settings
 
@@ -551,6 +552,132 @@ def _note_is_discovery_source(notes: str, discovery_display: str) -> bool:
     return bool(source_tokens and any(token in text for token in source_tokens))
 
 
+def _escape_html(value) -> str:
+    return escape(str(value or ''), quote=True)
+
+
+def _html_link(label: str, url: str) -> str:
+    label = _escape_html(label)
+    url = _escape_html(url)
+    return f'<a href="{url}">{label}</a>' if url else label
+
+
+def _normalize_whatsapp_phone(phone: str) -> str:
+    digits = re.sub(r'\D', '', phone or '')
+    if not digits:
+        return ''
+    if digits.startswith('00'):
+        digits = digits[2:]
+    if digits.startswith('0') and len(digits) == 10:
+        return f'996{digits[1:]}'
+    if len(digits) == 9:
+        return f'996{digits}'
+    return digits
+
+
+def _format_money(value) -> str:
+    if value in (None, ''):
+        return ''
+    try:
+        amount = float(value)
+        if amount.is_integer():
+            return f'{int(amount):,}'.replace(',', ' ')
+        return f'{amount:,.2f}'.replace(',', ' ')
+    except (TypeError, ValueError):
+        return str(value)
+
+
+def _build_telegram_manager_notification_html(template_vars: dict, *, cfg, platform_lower: str) -> str:
+    reason = template_vars.get('reason') or 'New request'
+    business_name = template_vars.get('business_name') or 'Hotel'
+    guest_name = template_vars.get('guest_name') or 'Guest'
+    guest_phone = template_vars.get('guest_phone_raw') or ''
+    guest_email = template_vars.get('guest_email') or ''
+    notes = template_vars.get('notes') or ''
+
+    contact_links = []
+    if template_vars.get('whatsapp_link'):
+        contact_links.append(_html_link('WhatsApp', template_vars['whatsapp_link']))
+    if template_vars.get('instagram_link'):
+        label = template_vars.get('instagram_handle_raw') or 'Instagram'
+        contact_links.append(_html_link(label, template_vars['instagram_link']))
+    if template_vars.get('telegram_link'):
+        label = template_vars.get('telegram_handle_raw') or 'Telegram'
+        contact_links.append(_html_link(label, template_vars['telegram_link']))
+    if template_vars.get('crm_link'):
+        contact_links.append(_html_link('CRM', template_vars['crm_link']))
+
+    channel_label = {
+        'telegram': 'Telegram',
+        'instagram': 'Instagram',
+        'whatsapp': 'WhatsApp',
+    }.get(platform_lower, template_vars.get('platform_name') or '')
+
+    lines = [
+        f'<b>New booking request</b> · {_escape_html(business_name)}',
+        f'<b>Reason:</b> {_escape_html(reason)}',
+        '',
+        f'<b>Guest</b>',
+        f'Name: {_escape_html(guest_name)}',
+    ]
+
+    if guest_phone:
+        phone_line = f'Phone: {_escape_html(guest_phone)}'
+        if template_vars.get('whatsapp_link'):
+            phone_line += f' · {_html_link("WhatsApp", template_vars["whatsapp_link"])}'
+        lines.append(phone_line)
+    if guest_email:
+        lines.append(f'Email: {_escape_html(guest_email)}')
+    if channel_label:
+        channel_line = f'Channel: {_escape_html(channel_label)}'
+        primary_link = ''
+        if platform_lower == 'instagram':
+            primary_link = template_vars.get('instagram_link') or ''
+        elif platform_lower == 'telegram':
+            primary_link = template_vars.get('telegram_link') or ''
+        elif platform_lower == 'whatsapp':
+            primary_link = template_vars.get('whatsapp_link') or ''
+        actions = []
+        if primary_link:
+            actions.append(_html_link('Open chat', primary_link))
+        if template_vars.get('crm_link'):
+            actions.append(_html_link('CRM', template_vars['crm_link']))
+        if actions:
+            channel_line += ' · ' + ' · '.join(actions)
+        lines.append(channel_line)
+    if template_vars.get('discovery_source'):
+        lines.append(f'Heard from: {_escape_html(template_vars["discovery_source"])}')
+
+    booking_lines = []
+    if template_vars.get('checkin_date') or template_vars.get('checkout_date'):
+        booking_lines.append(
+            f'Dates: {_escape_html(template_vars.get("checkin_date"))} -> {_escape_html(template_vars.get("checkout_date"))}'
+        )
+    if template_vars.get('nights'):
+        booking_lines.append(f'Nights: {_escape_html(template_vars["nights"])}')
+    if template_vars.get('guest_count'):
+        booking_lines.append(f'Guests: {_escape_html(template_vars["guest_count"])}')
+    if template_vars.get('room_description'):
+        booking_lines.append(f'Room: {_escape_html(template_vars["room_description"])}')
+    if template_vars.get('meal_plan'):
+        booking_lines.append(f'Meal plan: {_escape_html(template_vars["meal_plan"])}')
+    if template_vars.get('price_per_night'):
+        booking_lines.append(f'Per night: {_escape_html(_format_money(template_vars["price_per_night"]))} KGS')
+    if template_vars.get('total_price'):
+        booking_lines.append(f'<b>Total: {_escape_html(_format_money(template_vars["total_price"]))} KGS</b>')
+
+    if booking_lines:
+        lines.extend(['', '<b>Booking</b>'])
+        lines.extend(booking_lines)
+
+    if notes:
+        lines.extend(['', f'<b>Notes</b>\n{_escape_html(notes)}'])
+
+    if contact_links:
+        unique_links = list(dict.fromkeys(contact_links))
+        lines.extend(['', '<b>Actions:</b> ' + ' · '.join(unique_links)])
+
+    return '\n'.join(lines)
 def execute_transfer_to_manager(args: dict, lead=None) -> dict:
     """Send a structured manager notification via Telegram or WhatsApp."""
     try:

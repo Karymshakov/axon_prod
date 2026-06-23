@@ -384,6 +384,30 @@ class LeadViewSet(OrganizationQuerysetMixin, viewsets.ModelViewSet):
             if fields_to_update:
                 target_lead.save(update_fields=fields_to_update)
 
+            # Merge AI pause/schedule state conservatively: handoff wins, stale follow-ups do not.
+            automation_update_fields = []
+            if source_lead.ai_paused and not target_lead.ai_paused:
+                target_lead.ai_paused = True
+                target_lead.ai_paused_at = source_lead.ai_paused_at or timezone.now()
+                target_lead.ai_paused_by = source_lead.ai_paused_by or 'Merged lead'
+                automation_update_fields.extend(['ai_paused', 'ai_paused_at', 'ai_paused_by'])
+
+            merged_context = dict(target_lead.agent_context or {})
+            for stale_key in ('pending_promise', 'scheduled_followup_request', 'followup_claim'):
+                if stale_key in merged_context:
+                    merged_context.pop(stale_key, None)
+            if merged_context != (target_lead.agent_context or {}):
+                target_lead.agent_context = merged_context
+                automation_update_fields.append('agent_context')
+
+            if target_lead.next_follow_up_at or target_lead.next_follow_up_hint:
+                target_lead.next_follow_up_at = None
+                target_lead.next_follow_up_hint = ''
+                automation_update_fields.extend(['next_follow_up_at', 'next_follow_up_hint'])
+
+            if automation_update_fields:
+                target_lead.save(update_fields=list(dict.fromkeys(automation_update_fields)))
+
             # Re-link LeadFlowState if target has none but source has one
             source_flow_state = LeadFlowState.objects.filter(lead=source_lead).first()
             target_flow_state = LeadFlowState.objects.filter(lead=target_lead).first()
