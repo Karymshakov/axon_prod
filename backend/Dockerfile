@@ -32,5 +32,6 @@ USER appuser
 # Expose port
 EXPOSE 8000
 
-# Auto-populate media volume if empty, then start Gunicorn
-CMD ["sh", "-c", "mkdir -p /app/media/hotel_media && cp -rn /app/initial_media/. /app/media/ && gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers 3"]
+# Keep the database schema aligned with the deployed code, auto-populate the
+# media volume if empty, then start Gunicorn.
+CMD ["sh", "-c", "python manage.py migrate --noinput && mkdir -p /app/media/hotel_media && cp -rn /app/initial_media/. /app/media/ && exec gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers 3"]

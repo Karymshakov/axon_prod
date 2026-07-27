@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import base64
+import json
 import logging
+import mimetypes
 import os
 from urllib.parse import parse_qs, unquote, urlparse
 
@@ -35,6 +38,16 @@ KNOWN_ROOM_CATEGORIES = {
     HotelMediaItem.ROOM_CATEGORY_STANDARD_TWIN,
     HotelMediaItem.ROOM_CATEGORY_COMFORT,
     HotelMediaItem.ROOM_CATEGORY_FAMILY,
+}
+VISION_CATEGORIES = {
+    HotelMediaItem.CATEGORY_ROOMS,
+    HotelMediaItem.CATEGORY_CAFETERIA,
+    HotelMediaItem.CATEGORY_POOL,
+    HotelMediaItem.CATEGORY_SPA,
+    HotelMediaItem.CATEGORY_CONFERENCE,
+    HotelMediaItem.CATEGORY_EXTERIOR,
+    HotelMediaItem.CATEGORY_LOBBY,
+    HotelMediaItem.CATEGORY_OTHER,
 }
 
 INSTAGRAM_ID_KEYS = {
@@ -599,6 +612,83 @@ def find_best_fingerprint_context(image_path: str, *, organization=None) -> dict
     return context
 
 
+def analyze_image_semantically(image_path: str) -> dict | None:
+    """Use a constrained multimodal prompt for broad context after hash matching fails.
+
+    Vision may identify a pool or generic room, but it is never allowed to
+    certify an exact room category. Exact identification remains fingerprint-
+    or platform-ID-based.
+    """
+    try:
+        if not os.path.exists(image_path) or os.path.getsize(image_path) > 10 * 1024 * 1024:
+            return None
+        from apps.leads.ai_service import ai_service
+
+        if not ai_service.is_configured():
+            return None
+        mime_type = mimetypes.guess_type(image_path)[0] or 'image/jpeg'
+        with open(image_path, 'rb') as image_file:
+            encoded = base64.b64encode(image_file.read()).decode('ascii')
+        prompt = (
+            'Analyze the meaning of this guest-supplied hotel or Instagram screenshot. '
+            'Return JSON only with: category, description_ru, visible_text, confidence. '
+            'category must be one of rooms, cafeteria, pool, spa, conference, exterior, lobby, other. '
+            'Describe only what is visibly supported. Treat Instagram UI as framing, not as the hotel scene. '
+            'Never infer an exact hotel room category from visual similarity, furniture, colors or layout. '
+            'If it is a room, use category=rooms but do not name Comfort, Family, Twin or Queen. '
+            'confidence must be 0..1.'
+        )
+        kwargs = {
+            'model': ai_service._model,
+            'messages': [
+                {'role': 'system', 'content': prompt},
+                {
+                    'role': 'user',
+                    'content': [
+                        {'type': 'text', 'text': 'Определи общий контекст изображения.'},
+                        {
+                            'type': 'image_url',
+                            'image_url': {'url': f'data:{mime_type};base64,{encoded}'},
+                        },
+                    ],
+                },
+            ],
+            'temperature': 0,
+            'max_tokens': 350,
+            'timeout': 30,
+        }
+        if getattr(ai_service, 'provider', None) != 'gemini':
+            kwargs['response_format'] = {'type': 'json_object'}
+        response = ai_service.client.chat.completions.create(**kwargs)
+        raw = (response.choices[0].message.content or '').strip()
+        if raw.startswith('```'):
+            raw = raw.split('\n', 1)[-1].rsplit('```', 1)[0].strip()
+        parsed = json.loads(raw)
+        category = str(parsed.get('category') or '').strip().lower()
+        confidence = float(parsed.get('confidence') or 0)
+        if category not in VISION_CATEGORIES or confidence < 0.72:
+            return None
+        description = str(parsed.get('description_ru') or '').strip()[:500]
+        visible_text = str(parsed.get('visible_text') or '').strip()[:500]
+        return {
+            'source': 'ai_vision',
+            'match_method': 'multimodal_prompt',
+            'confidence': round(confidence, 3),
+            'needs_clarification': category == HotelMediaItem.CATEGORY_ROOMS,
+            'exact_room_category_verified': False,
+            'title': description,
+            'description': description,
+            'visible_text': visible_text,
+            'category': category,
+            'room_category': '',
+            'playbook_keys': [],
+            'reply_guidance': '',
+        }
+    except Exception as exc:
+        logger.warning('Semantic image analysis failed for %s: %s', image_path, exc)
+        return None
+
+
 def build_agent_media_summary(context: dict, original_text: str = '') -> str:
     topic = context.get('category') or 'unknown'
     room_category = context.get('room_category') or ''
@@ -691,6 +781,8 @@ def resolve_activity_media_context(activity, *, save: bool = True) -> dict | Non
         image_path = _file_url_to_path(str(metadata.get('file_url') or ''))
         if image_path:
             context = find_best_fingerprint_context(image_path, organization=organization)
+            if context is None:
+                context = analyze_image_semantically(image_path)
 
     if context is None:
         return None

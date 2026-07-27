@@ -24,6 +24,88 @@ def _is_past_date(date_str: str) -> bool:
         return False
 
 
+def _pricing_signature(group: dict | None) -> tuple:
+    if not group:
+        return ()
+    signature = []
+    for combo in group.get('combinations') or []:
+        prices = tuple(sorted(
+            (str(key), str(value))
+            for key, value in (combo.get('prices') or {}).items()
+        ))
+        signature.append((
+            tuple(str(room) for room in (combo.get('rooms') or [])),
+            str(combo.get('type') or ''),
+            bool(combo.get('available')),
+            prices,
+        ))
+    return tuple(sorted(signature, key=repr))
+
+
+def _validated_pricing_group(
+    generate_room_combinations,
+    *,
+    guest_count: int,
+    checkin_date: str,
+    checkout_date: str,
+    org,
+) -> tuple[list, dict | None, int | None, dict | None]:
+    """Require one consistent, configured tariff for every night of the stay."""
+    try:
+        checkin = date.fromisoformat(checkin_date)
+        checkout = date.fromisoformat(checkout_date)
+    except (TypeError, ValueError):
+        return [], None, None, {
+            'error': 'invalid_dates',
+            'message': 'Даты должны быть переданы в формате YYYY-MM-DD.',
+        }
+
+    total_nights = (checkout - checkin).days
+    if total_nights <= 0:
+        return [], None, None, {
+            'error': 'invalid_stay_dates',
+            'message': 'Дата выезда должна быть позже даты заезда.',
+        }
+    if total_nights > 60:
+        return [], None, total_nights, {
+            'error': 'pricing_unavailable',
+            'message': 'Для проживания дольше 60 ночей стоимость должен подтвердить менеджер.',
+        }
+
+    first_groups = []
+    first_group = None
+    first_signature = None
+    for offset in range(total_nights):
+        night = checkin + timedelta(days=offset)
+        groups = generate_room_combinations(target_date=night.isoformat(), org=org)
+        group = next((item for item in groups if item['guest_count'] == guest_count), None)
+        if not group or not any(
+            combo.get('available') for combo in group.get('combinations', [])
+        ):
+            return [], None, total_nights, {
+                'error': 'pricing_unavailable',
+                'message': (
+                    f'Нет подтверждённого тарифа на ночь {night.isoformat()}. '
+                    'Не называйте цену из другой даты.'
+                ),
+            }
+        signature = _pricing_signature(group)
+        if first_signature is None:
+            first_groups = groups
+            first_group = group
+            first_signature = signature
+        elif signature != first_signature:
+            return [], None, total_nights, {
+                'error': 'pricing_unavailable',
+                'message': (
+                    'Во время выбранного проживания меняется тариф. '
+                    'Итоговую стоимость должен подтвердить менеджер.'
+                ),
+            }
+
+    return first_groups, first_group, total_nights, None
+
+
 _TOOL_PARAMS = {
     'get_room_options': {
         "type": "object",
@@ -34,14 +116,14 @@ _TOOL_PARAMS = {
             },
             "checkin_date": {
                 "type": "string",
-                "description": "Check-in date in YYYY-MM-DD format. CRITICAL: Always use the current year (2026) if the guest does not specify a year (e.g. '27 мая' is 2026-05-27, NOT 2024-05-27).",
+                "description": "Check-in date in YYYY-MM-DD format. Use the current date/year from the system context when the guest does not specify a year; never assume a hard-coded or stale year.",
             },
             "checkout_date": {
                 "type": "string",
-                "description": "Check-out date in YYYY-MM-DD format. CRITICAL: Always use the current year (2026) if the guest does not specify a year.",
+                "description": "Check-out date in YYYY-MM-DD format. Use the current date/year from the system context when the guest does not specify a year; never assume a hard-coded or stale year.",
             },
         },
-        "required": ["guest_count"],
+        "required": ["guest_count", "checkin_date", "checkout_date"],
     },
     'get_room_images': {
         "type": "object",
@@ -70,16 +152,31 @@ _TOOL_PARAMS = {
                 "type": "integer",
                 "description": "Number of adult guests. Do not count children under 6.",
             },
+            "children_ages": {
+                "type": "array",
+                "items": {"type": "number", "minimum": 0, "maximum": 17},
+                "description": (
+                    "Ages of children in years. Use a decimal for an infant under one year "
+                    "(for example, 2 months = 0.17)."
+                ),
+            },
+            "single_room_required": {
+                "type": "boolean",
+                "description": (
+                    "True when the family explicitly says they must stay together in one room. "
+                    "Never offer a multi-room combination when this is true."
+                ),
+            },
             "checkin_date": {
                 "type": "string",
-                "description": "Check-in date in YYYY-MM-DD format. CRITICAL: Always use the current year (2026) if the guest does not specify a year.",
+                "description": "Check-in date in YYYY-MM-DD format. Use the current date/year from the system context when the guest does not specify a year; never assume a hard-coded or stale year.",
             },
             "checkout_date": {
                 "type": "string",
-                "description": "Check-out date in YYYY-MM-DD format. CRITICAL: Always use the current year (2026) if the guest does not specify a year.",
+                "description": "Check-out date in YYYY-MM-DD format. Use the current date/year from the system context when the guest does not specify a year; never assume a hard-coded or stale year.",
             },
         },
-        "required": ["guest_count"],
+        "required": ["guest_count", "checkin_date", "checkout_date"],
     },
     'get_meal_plan_pricing': {
         "type": "object",
@@ -1310,16 +1407,14 @@ def execute_pricing_tool(tool_name: str, args: dict, lead=None):
                     'max_self_service_guest_count': max_self_service_guest_count,
                 }
 
-            total_nights = None
-            if checkin_date and checkout_date:
-                try:
-                    ci = date.fromisoformat(checkin_date)
-                    co = date.fromisoformat(checkout_date)
-                    delta = (co - ci).days
-                    if delta > 0:
-                        total_nights = delta
-                except (ValueError, TypeError):
-                    pass
+            if not checkin_date or not checkout_date:
+                return {
+                    'error': 'dates_required',
+                    'message': (
+                        'Для проверки тарифа нужны обе точные даты: заезд и выезд. '
+                        'Не называйте цену до получения обеих дат.'
+                    ),
+                }
 
             notes_map = {}
             try:
@@ -1328,10 +1423,22 @@ def execute_pricing_tool(tool_name: str, args: dict, lead=None):
             except Exception:
                 pass
 
-            all_groups = generate_room_combinations(target_date=checkin_date)
-            group = next((g for g in all_groups if g['guest_count'] == guest_count), None)
-            if not group:
-                return {'guest_count': guest_count, 'combinations': []}
+            org = _org_from_lead(lead)
+            all_groups, group, total_nights, stay_error = _validated_pricing_group(
+                generate_room_combinations,
+                guest_count=guest_count,
+                checkin_date=checkin_date,
+                checkout_date=checkout_date,
+                org=org,
+            )
+            if stay_error:
+                return {
+                    **stay_error,
+                    'guest_count': guest_count,
+                    'checkin_date': checkin_date,
+                    'checkout_date': checkout_date,
+                    'combinations': [],
+                }
 
             _MEAL_LABELS = {
                 'with_breakfast': 'С завтраком',
@@ -1433,6 +1540,19 @@ def execute_pricing_tool(tool_name: str, args: dict, lead=None):
                 f"[get_room_options] returning {len(combinations)} standard combinations to AI"
             )
 
+            if not combinations:
+                return {
+                    'error': 'pricing_unavailable',
+                    'guest_count': guest_count,
+                    'checkin_date': checkin_date,
+                    'checkout_date': checkout_date,
+                    'combinations': [],
+                    'message': (
+                        'Актуальный тариф для выбранной даты не загружен. '
+                        'Не называйте цену из памяти и не придумывайте доступность.'
+                    ),
+                }
+
             response = {
                 'guest_count': guest_count,
                 'combinations': combinations,
@@ -1470,6 +1590,13 @@ def execute_pricing_tool(tool_name: str, args: dict, lead=None):
             guest_count = args.get('guest_count', 1)
             checkin_date = args.get('checkin_date')
             checkout_date = args.get('checkout_date')
+            children_ages = [
+                float(age)
+                for age in (args.get('children_ages') or [])
+                if isinstance(age, (int, float)) or str(age).replace('.', '', 1).isdigit()
+            ]
+            single_room_required = bool(args.get('single_room_required'))
+            has_infant = any(age < 1 for age in children_ages)
 
             if checkin_date and _is_past_date(checkin_date):
                 today_str = datetime.now(ZoneInfo('Asia/Bishkek')).date().isoformat()
@@ -1487,16 +1614,14 @@ def execute_pricing_tool(tool_name: str, args: dict, lead=None):
                     'max_self_service_guest_count': max_self_service_guest_count,
                 }
 
-            total_nights = None
-            if checkin_date and checkout_date:
-                try:
-                    ci = date.fromisoformat(checkin_date)
-                    co = date.fromisoformat(checkout_date)
-                    delta = (co - ci).days
-                    if delta > 0:
-                        total_nights = delta
-                except (ValueError, TypeError):
-                    pass
+            if not checkin_date or not checkout_date:
+                return {
+                    'error': 'dates_required',
+                    'message': (
+                        'Для проверки семейного размещения нужны обе точные даты: '
+                        'заезд и выезд. Не называйте цену до получения обеих дат.'
+                    ),
+                }
 
             notes_map = {}
             try:
@@ -1505,10 +1630,22 @@ def execute_pricing_tool(tool_name: str, args: dict, lead=None):
             except Exception:
                 pass
 
-            all_groups = generate_room_combinations(target_date=checkin_date)
-            group = next((g for g in all_groups if g['guest_count'] == guest_count), None)
-            if not group:
-                return {'guest_count': guest_count, 'combinations': [], '_note': 'No family room options found for this guest count.'}
+            org = _org_from_lead(lead)
+            all_groups, group, total_nights, stay_error = _validated_pricing_group(
+                generate_room_combinations,
+                guest_count=guest_count,
+                checkin_date=checkin_date,
+                checkout_date=checkout_date,
+                org=org,
+            )
+            if stay_error:
+                return {
+                    **stay_error,
+                    'guest_count': guest_count,
+                    'checkin_date': checkin_date,
+                    'checkout_date': checkout_date,
+                    'combinations': [],
+                }
 
             _MEAL_LABELS = {
                 'with_breakfast': 'С завтраком',
@@ -1520,7 +1657,17 @@ def execute_pricing_tool(tool_name: str, args: dict, lead=None):
             for combo in group['combinations']:
                 if not combo['available']:
                     continue
-                if combo['type'] != 'Семейный':
+                if single_room_required and combo['room_count'] > 1:
+                    continue
+                room_names = ' '.join(combo.get('rooms') or []).lower()
+                is_family_combo = combo['type'] == 'Семейный'
+                if has_infant:
+                    # An infant does not need a separate family/two-room layout.
+                    # Prefer compact one-room options and never upsell
+                    # a family category merely because a baby was mentioned.
+                    if combo['room_count'] != 1 or is_family_combo:
+                        continue
+                elif not is_family_combo:
                     continue
                 prices = combo.get('prices') or {}
                 standard_pn = prices.get('standard')
@@ -1567,11 +1714,42 @@ def execute_pricing_tool(tool_name: str, args: dict, lead=None):
                     entry['room_type_keys'] = combo['rooms']
                 combinations.append(entry)
 
+            if has_infant:
+                combinations.sort(
+                    key=lambda option: (
+                        0 if 'комфорт' in option['description'].lower() else 1,
+                        option.get('standard_price_per_night') or float('inf'),
+                    )
+                )
+                combinations = combinations[:2]
+
             if not combinations:
+                has_any_pricing = any(
+                    combo.get('available')
+                    for candidate_group in all_groups
+                    for combo in candidate_group.get('combinations', [])
+                )
+                if not has_any_pricing:
+                    return {
+                        'error': 'pricing_unavailable',
+                        'guest_count': guest_count,
+                        'checkin_date': checkin_date,
+                        'checkout_date': checkout_date,
+                        'combinations': [],
+                        'message': (
+                            'Актуальный тариф для выбранной даты не загружен. '
+                            'Не называйте цену из памяти.'
+                        ),
+                    }
                 return {
+                    'error': 'no_suitable_single_room' if single_room_required else 'no_family_option',
                     'guest_count': guest_count,
                     'combinations': [],
-                    '_note': 'No family rooms available for this guest count. Use get_room_options for standard rooms.',
+                    '_note': (
+                        'No suitable one-room family option is configured. Do not offer multiple rooms.'
+                        if single_room_required
+                        else 'No family rooms available for this guest count. Use get_room_options for standard rooms.'
+                    ),
                 }
 
             response = {
@@ -1597,6 +1775,8 @@ def execute_pricing_tool(tool_name: str, args: dict, lead=None):
                 response['checkout_date'] = checkout_date
             if total_nights:
                 response['total_nights'] = total_nights
+            response['children_ages'] = children_ages
+            response['single_room_required'] = single_room_required
             logger.info(
                 f"[get_family_room] returning {len(combinations)} family combinations to AI"
             )
@@ -1623,6 +1803,7 @@ def ensure_transfer_guest_message(response_text: str | None, args: dict, lead=No
         for phrase in (
             'менеджер свяжется', 'менеджер с вами свяжется', 'свяжется с вами',
             'передала менеджеру', 'передал менеджеру', 'передала ваш запрос',
+            'передала запрос менеджеру', 'передал запрос менеджеру',
             'our manager will', 'manager will contact', 'will be in touch',
             'менеджер байланышат',
         )
@@ -2050,6 +2231,39 @@ def _parse_dates_from_text(text: str, today: date) -> list[date]:
                 matches.append((m.start(), today + timedelta(days=1)))
     for m in re.finditer(r'\bсегодня\b', text):
         matches.append((m.start(), today))
+
+    # Weekdays in natural phrases such as "с завтра до понедельника".
+    # Always resolve to the next occurrence. If a previous date in the same
+    # phrase is equal to or later than it, move the weekday to the next week so
+    # check-out remains after check-in.
+    weekday_patterns = {
+        0: r'понедельник(?:а|у|ом|е)?',
+        1: r'вторник(?:а|у|ом|е)?',
+        2: r'сред(?:а|ы|у|ой|е)',
+        3: r'четверг(?:а|у|ом|е)?',
+        4: r'пятниц(?:а|ы|у|ей|е)',
+        5: r'суббот(?:а|ы|у|ой|е)',
+        6: r'воскресень(?:е|я|ю|ем)|воскресени(?:е|я|ю|ем)',
+    }
+    weekday_regex = re.compile(
+        r'\b(?:до|по|в|на)?\s*('
+        + '|'.join(f'(?P<wd{weekday}>{pattern})' for weekday, pattern in weekday_patterns.items())
+        + r')\b'
+    )
+    for m in weekday_regex.finditer(text):
+        target_weekday = next(
+            weekday for weekday in weekday_patterns if m.group(f'wd{weekday}') is not None
+        )
+        days_ahead = (target_weekday - today.weekday()) % 7
+        if days_ahead == 0:
+            days_ahead = 7
+        dt = today + timedelta(days=days_ahead)
+        preceding_dates = [matched_date for pos, matched_date in matches if pos < m.start()]
+        if preceding_dates:
+            previous_date = preceding_dates[-1]
+            while dt <= previous_date:
+                dt += timedelta(days=7)
+        matches.append((m.start(), dt))
         
     # 2. Absolute dates like "2 июня" or "2июня"
     for m in re.finditer(r'(\d{1,2})\s*(янв|фев|мар|апр|май|мая|июн|июл|авг|сен|окт|ноя|дек)[а-я]*', text):
@@ -2145,13 +2359,14 @@ def _known_booking_data_from_state(lead, lead_data: dict | None = None) -> dict:
                     data.setdefault(key, value)
     return data
 
+
 def _infer_relative_booking_dates(
     message: str,
     conversation_history: list | None = None,
     today: date | None = None,
 ) -> tuple[str | None, str | None]:
     if today is None:
-        today = date.today()
+        today = datetime.now(ZoneInfo('Asia/Bishkek')).date()
         
     dates = _parse_dates_from_text(message, today)
     
@@ -2214,7 +2429,7 @@ def normalize_booking_tool_args(
         return tool_args
         
     if tool_name in ('get_room_options', 'get_family_room'):
-        today = date.today()
+        today = datetime.now(ZoneInfo('Asia/Bishkek')).date()
         known_checkin = lead_data.get('check_in_date') or tool_args.get('checkin_date')
         known_checkout = lead_data.get('check_out_date') or tool_args.get('checkout_date')
         nights = _extract_nights_from_text(message)
@@ -2262,5 +2477,5 @@ def normalize_booking_tool_args(
                 tool_args['checkin_date'] = explicit_dates[0].isoformat()
                 if nights:
                     tool_args['checkout_date'] = (explicit_dates[0] + timedelta(days=nights)).isoformat()
-                
+
     return tool_args

@@ -73,15 +73,44 @@ def _is_our_company(name: str, company_profile: str) -> bool:
     return name.lower().strip() in plain
 
 
-def _split_into_messages(text: str) -> list:
-    """
-    Split a multi-paragraph AI response into individual chat messages by double newlines.
-    This preserves newlines and formatting (lists, bullets) inside each paragraph.
-    """
-    if not text:
+def _split_into_messages(text: str, max_length: int = 950) -> list:
+    """Keep a normal reply in one DM and split only when the channel limit requires it."""
+    cleaned = (text or '').strip()
+    if not cleaned:
         return []
-    parts = re.split(r'\n{2,}', text)
-    return [p.strip() for p in parts if p.strip()]
+    if len(cleaned) <= max_length:
+        return [cleaned]
+
+    chunks: list[str] = []
+    current = ''
+    for paragraph in re.split(r'\n{2,}', cleaned):
+        paragraph = paragraph.strip()
+        if not paragraph:
+            continue
+        candidates = [paragraph]
+        if len(paragraph) > max_length:
+            candidates = re.split(r'(?<=[.!?])\s+', paragraph)
+        for candidate in candidates:
+            candidate = candidate.strip()
+            while len(candidate) > max_length:
+                split_at = candidate.rfind(' ', 0, max_length + 1)
+                if split_at < max_length // 2:
+                    split_at = max_length
+                piece, candidate = candidate[:split_at].strip(), candidate[split_at:].strip()
+                if current:
+                    chunks.append(current)
+                    current = ''
+                if piece:
+                    chunks.append(piece)
+            proposed = f'{current}\n\n{candidate}'.strip() if current else candidate
+            if len(proposed) <= max_length:
+                current = proposed
+            else:
+                chunks.append(current)
+                current = candidate
+    if current:
+        chunks.append(current)
+    return chunks
 
 
 _INSTAGRAM_SOCIAL_ATTACHMENT_TYPES = {
@@ -613,6 +642,23 @@ def _delayed_instagram_ai_response(
                 )
                 return
 
+            # A newer guest message may arrive while the model is generating.
+            # The newer webhook owns the combined reply; sending this result would
+            # answer stale context and is the main source of repeated questions.
+            if not force_response and pending_messages:
+                latest_received_now = LeadActivity.objects.filter(
+                    lead=lead,
+                    activity_type=LeadActivity.TYPE_INSTAGRAM_RECEIVED,
+                ).order_by('-created_at', '-id').first()
+                if latest_received_now and latest_received_now.id not in pending_ids:
+                    logger.info(
+                        "Lead %s: stale-generation guard — Instagram message #%s arrived "
+                        "after the pending batch; suppressing the older response",
+                        lead_id,
+                        latest_received_now.id,
+                    )
+                    return
+
             # Concurrent-send guard: if another thread already responded while we were
             # generating (e.g., response_delay=0 or very short window lets two threads
             # race past the latest_received check), abort to avoid duplicate responses.
@@ -631,7 +677,7 @@ def _delayed_instagram_ai_response(
                     )
                     return
 
-            # Send each sentence as a separate message with a typing burst between
+            # Keep short, structured replies together. Split only for channel limits.
             message_parts = _split_into_messages(ai_response)
             last_activity_id = None
             for i, part in enumerate(message_parts):

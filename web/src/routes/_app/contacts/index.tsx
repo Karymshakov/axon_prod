@@ -16,9 +16,9 @@ import {
   CONTACT_CHANNEL_OPTIONS,
   fetchLeads,
   fetchPipelineStages,
-  getContactChannelLabel,
+  getLeadContactChannelsLabel,
   getLeadStatusLabel,
-  resolveLeadContactChannel,
+  resolveLeadContactChannels,
   type Lead,
 } from '@/lib/api'
 import { useLeadDiscoverySources } from '@/hooks/use-lead-discovery-sources'
@@ -162,9 +162,14 @@ function ContactCard({
               {stageName}
             </Badge>
           ) : null}
-          {resolveLeadContactChannel(lead) ? (
+          {resolveLeadContactChannels(lead).length > 0 ? (
             <Badge variant="outline" className="text-xs px-2 py-0 h-5 font-normal">
-              {getContactChannelLabel(resolveLeadContactChannel(lead))}
+              {getLeadContactChannelsLabel(lead)}
+            </Badge>
+          ) : null}
+          {resolveLeadContactChannels(lead).length > 1 ? (
+            <Badge variant="secondary" className="text-[10px] px-2 py-0 h-5 font-normal">
+              Объединённый
             </Badge>
           ) : null}
           {lead.discovery_source ? (
@@ -212,7 +217,6 @@ function ContactsPage() {
   const queryParams = useMemo(() => {
     const p: Record<string, string> = {}
     if (statusFilter && statusFilter !== 'all') p.status = statusFilter
-    if (channelFilter && channelFilter !== 'all') p.contact_channel = channelFilter
     if (discoveryFilter && discoveryFilter !== 'all') p.discovery_source = discoveryFilter
     if (search) p.search = search
     return p
@@ -239,7 +243,7 @@ function ContactsPage() {
   const displayedLeads = useMemo(() => {
     return leads.filter((lead) => {
       if (channelFilter && channelFilter !== 'all') {
-        if (resolveLeadContactChannel(lead) !== channelFilter) return false
+        if (!resolveLeadContactChannels(lead).includes(channelFilter as never)) return false
       }
       if (discoveryFilter && discoveryFilter !== 'all') {
         if ((lead.discovery_source || '') !== discoveryFilter) return false

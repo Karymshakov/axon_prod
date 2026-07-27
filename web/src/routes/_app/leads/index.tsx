@@ -13,6 +13,7 @@ import {
   getLeadStatusLabel,
   getContactChannelLabel,
   resolveLeadContactChannel,
+  resolveLeadContactChannels,
   type Lead,
 } from '@/lib/api'
 import { useLeadDiscoverySources } from '@/hooks/use-lead-discovery-sources'
@@ -259,7 +260,6 @@ function LeadsPage() {
   const fetchParams = useMemo(() => {
     const params: Record<string, string> = {}
     if (searchQuery) params.search = searchQuery
-    if (channelFilter && channelFilter !== 'all') params.contact_channel = channelFilter
     if (discoveryFilter && discoveryFilter !== 'all') params.discovery_source = discoveryFilter
     return params
   }, [searchQuery, channelFilter, discoveryFilter])
@@ -282,8 +282,7 @@ function LeadsPage() {
   const displayedLeads = useMemo(() => {
     return leads.filter((lead) => {
       if (channelFilter && channelFilter !== 'all') {
-        const actualChannel = resolveLeadContactChannel(lead)
-        if (actualChannel !== channelFilter) return false
+        if (!resolveLeadContactChannels(lead).includes(channelFilter as never)) return false
       }
       if (statusFilter && statusFilter !== 'all') {
         if ((lead.status || '') !== statusFilter) return false
@@ -453,13 +452,12 @@ function LeadsPage() {
     discoverySourceOptions.find((option) => option.value === source)?.label
 
   const renderChannelBadge = (lead: Lead) => {
-    const channel = resolveLeadContactChannel(lead)
-    if (!channel) {
+    const channels = resolveLeadContactChannels(lead)
+    if (channels.length === 0) {
       return <span className="text-xs text-muted-foreground">—</span>
     }
 
-    const label = getContactChannelLabel(channel)
-    const config = {
+    const configs = {
       instagram: {
         icon: <InstagramIcon className="h-3 w-3" />,
         className: 'bg-pink-50 text-pink-700 ring-pink-200 dark:bg-pink-950/25 dark:text-pink-400 dark:ring-pink-900/40',
@@ -476,22 +474,32 @@ function LeadsPage() {
         icon: null,
         className: 'bg-slate-50 text-slate-700 ring-slate-200 dark:bg-slate-950/25 dark:text-slate-400 dark:ring-slate-900/40',
       },
-    }[channel]
+    }
 
     return (
-      <button
-        type="button"
-        onClick={(event) => {
-          event.stopPropagation()
-          openLeadChat(lead)
-        }}
-        className={`inline-flex max-w-full items-center gap-1.5 whitespace-nowrap rounded-full px-2 py-0.5 text-[10px] font-medium ring-1 ring-inset transition hover:shadow-sm ${config.className}`}
-        title={`Открыть чат: ${label}`}
-        aria-label={`Открыть чат: ${label}`}
-      >
-        {config.icon}
-        <span className="truncate">{label}</span>
-      </button>
+      <div className="flex flex-wrap gap-1">
+        {channels.map((channel) => {
+          const label = getContactChannelLabel(channel)
+          const config = configs[channel as keyof typeof configs]
+          if (!config) return null
+          return (
+            <button
+              key={channel}
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation()
+                openLeadChat(lead)
+              }}
+              className={`inline-flex max-w-full items-center gap-1.5 whitespace-nowrap rounded-full px-2 py-0.5 text-[10px] font-medium ring-1 ring-inset transition hover:shadow-sm ${config.className}`}
+              title={`Открыть чат: ${label}`}
+              aria-label={`Открыть чат: ${label}`}
+            >
+              {config.icon}
+              <span className="truncate">{label}</span>
+            </button>
+          )
+        })}
+      </div>
     )
   }
 
