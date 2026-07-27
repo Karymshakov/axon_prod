@@ -1538,13 +1538,13 @@ function CommunicationsPage() {
                                 from_bot?: boolean
                               }
                               return (
-                                <div className={`mb-1.5 text-xs border-l-2 pl-2 py-0.5 rounded-r bg-black/5 dark:bg-white/5 truncate max-w-full ${
+                                <div className={`mb-1.5 text-xs border-l-2 pl-2 py-0.5 rounded-r bg-black/5 dark:bg-white/5 max-w-full ${
                                   isSent ? 'border-white/40' : 'border-sky-500/60'
                                 }`}>
                                   <div className="font-semibold text-[11px] opacity-80 truncate">
                                     {reply.from_bot ? 'Бот' : (reply.sender_name || 'Гость')}
                                   </div>
-                                  <div className="opacity-75 truncate text-[12px] mt-0.5">
+                                  <div className="opacity-75 break-words line-clamp-2 text-[12px] mt-0.5">
                                     {reply.text}
                                   </div>
                                 </div>
