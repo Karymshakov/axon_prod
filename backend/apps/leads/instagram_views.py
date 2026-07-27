@@ -118,6 +118,7 @@ _INSTAGRAM_SOCIAL_ATTACHMENT_TYPES = {
     'ig_post': 'post',
     'ig_reel': 'reel',
     'ig_story': 'story',
+    'story_mention': 'story',
 }
 _INSTAGRAM_CONTEXT_ID_KEYS = {
     'media_id',
@@ -236,6 +237,8 @@ def _extract_instagram_content_context(event: dict, message: dict, attachments: 
 
         context.setdefault('content_type', content_type)
         context.setdefault('attachment_type', attachment_type)
+        if attachment_type == 'story_mention':
+            context['event_type'] = 'story_mention'
 
         id_values = _collect_nested_key_values(
             {'attachment': attachment, 'payload': payload},
@@ -290,6 +293,232 @@ def _extract_instagram_content_context(event: dict, message: dict, attachments: 
     return context
 
 
+def _instagram_event_type(message: dict, context: dict) -> str:
+    if context.get('event_type') == 'story_mention':
+        return 'story_mention'
+    attachment_types = {
+        str(item.get('type') or '').strip()
+        for item in (message.get('attachments') or [])
+        if isinstance(item, dict)
+    }
+    if 'story_mention' in attachment_types:
+        return 'story_mention'
+    if isinstance(message.get('reply_to'), dict) and message['reply_to'].get('story'):
+        return 'story_reply'
+    if context.get('content_type') in {'post', 'reel'}:
+        return 'content_reply'
+    return 'direct_message'
+
+
+def _lead_language(lead, message_text: str = '') -> str:
+    from apps.hotel_info.services.automation_templates import normalize_language
+
+    configured = normalize_language(getattr(lead, 'language', ''), default='')
+    if configured:
+        return configured
+    text = (message_text or '').lower()
+    if any(char in text for char in 'ңөү'):
+        return 'ky'
+    if re.search(r'[а-яё]', text):
+        return 'ru'
+    if re.search(r'[a-z]', text):
+        return 'en'
+    return 'ru'
+
+
+def _send_logged_instagram_message(lead, recipient_id: str, text: str, *, event_key: str) -> LeadActivity | None:
+    if not text:
+        return None
+    result = instagram_service.send_message(recipient_id, text, org=lead.organization)
+    if not result:
+        return None
+    message_id = result.get('message_id')
+    return LeadActivity.objects.create(
+        lead=lead,
+        organization=lead.organization,
+        activity_type=LeadActivity.TYPE_INSTAGRAM_SENT,
+        description=f'Instagram automation ({event_key}): {text[:100]}',
+        echo_origin=LeadActivity.ECHO_ORIGIN_CRM,
+        metadata={
+            'message_id': message_id,
+            'all_message_ids': [message_id] if message_id else [],
+            'text': text,
+            'automation_event': event_key,
+            'is_ai_generated': False,
+            'echo_origin': LeadActivity.ECHO_ORIGIN_CRM,
+        },
+    )
+
+
+def _normalize_campaign_trigger(value: str) -> str:
+    return ' '.join(str(value or '').casefold().split())
+
+
+def _instagram_entry_changes(entry: dict) -> list[dict]:
+    """Normalize both webhook shapes used by Meta for field changes."""
+    changes = [
+        change
+        for change in (entry.get('changes') or [])
+        if isinstance(change, dict)
+    ]
+    if entry.get('field'):
+        direct_change = {
+            'field': entry.get('field'),
+            'value': entry.get('value'),
+        }
+        if direct_change not in changes:
+            changes.append(direct_change)
+    return changes
+
+
+def _instagram_connection_for_entry(entry_account_id: str | None) -> InstagramConnection | None:
+    """Resolve a webhook to its workspace instead of using the first connection."""
+    account_id = str(entry_account_id or '').strip()
+    connections = InstagramConnection.objects.exclude(access_token='').select_related('organization')
+    if account_id:
+        exact = connections.filter(
+            models.Q(instagram_business_account_id=account_id)
+            | models.Q(instagram_user_id=account_id)
+        ).first()
+        if exact:
+            return exact
+
+    unbound = list(
+        connections.filter(instagram_business_account_id='')
+        .order_by('id')[:2]
+    )
+    if account_id and len(unbound) == 1:
+        connection = unbound[0]
+        InstagramConnection.objects.filter(pk=connection.pk).update(
+            instagram_business_account_id=account_id,
+        )
+        connection.instagram_business_account_id = account_id
+        logger.info('Stored Instagram Business Account ID: %s', account_id)
+        return connection
+
+    logger.warning(
+        'Instagram webhook account %s could not be mapped to one workspace',
+        account_id or '<missing>',
+    )
+    return None
+
+
+def _process_instagram_comment_change(change: dict, organization_id: int) -> None:
+    """Handle one comment webhook without creating a CRM lead."""
+    from django.db import close_old_connections
+
+    close_old_connections()
+    try:
+        if change.get('field') not in {'comments', 'live_comments'}:
+            return
+        value = change.get('value') if isinstance(change.get('value'), dict) else {}
+        comment_id = str(value.get('id') or value.get('comment_id') or '').strip()
+        media = value.get('media') if isinstance(value.get('media'), dict) else {}
+        media_id = str(media.get('id') or value.get('media_id') or '').strip()
+        sender = value.get('from') if isinstance(value.get('from'), dict) else {}
+        sender_id = str(sender.get('id') or '').strip()
+        comment_text = str(value.get('text') or '').strip()
+        if not comment_id or not media_id:
+            return
+
+        from apps.hotel_media.models import SocialAutomationDelivery, SocialContentItem
+
+        now = timezone.now()
+        item = (
+            SocialContentItem.objects.filter(
+                organization_id=organization_id,
+                platform=SocialContentItem.PLATFORM_INSTAGRAM,
+                automation_enabled=True,
+                is_active=True,
+                status=SocialContentItem.STATUS_ACTIVE,
+            )
+            .filter(models.Q(external_id=media_id) | models.Q(parent_external_id=media_id))
+            .order_by('-posted_at', '-id')
+            .first()
+        )
+        if not item:
+            return
+        if item.automation_starts_at and item.automation_starts_at > now:
+            return
+        if item.automation_ends_at and item.automation_ends_at <= now:
+            return
+
+        normalized_comment = _normalize_campaign_trigger(comment_text)
+        if item.automation_trigger == SocialContentItem.AUTOMATION_COMMENT_EXACT:
+            allowed = {
+                _normalize_campaign_trigger(value)
+                for value in (item.automation_trigger_values or [])
+                if _normalize_campaign_trigger(value)
+            }
+            if normalized_comment not in allowed:
+                return
+        elif item.automation_trigger != SocialContentItem.AUTOMATION_COMMENT_ANY:
+            return
+
+        from apps.hotel_info.services.automation_templates import detect_message_language
+
+        language = detect_message_language(comment_text)
+        reply_text = {
+            'ky': item.automation_reply_ky,
+            'en': item.automation_reply_en,
+            'ru': item.automation_reply_ru,
+        }.get(language) or item.automation_reply_ru or item.automation_reply_ky or item.automation_reply_en
+        reply_text = (reply_text or '').strip()
+        if not reply_text:
+            return
+
+        delivery, created = SocialAutomationDelivery.objects.get_or_create(
+            organization_id=organization_id,
+            external_event_id=comment_id,
+            defaults={
+                'social_content_item': item,
+                'recipient_id': sender_id,
+                'trigger_text': comment_text,
+                'reply_text': reply_text,
+            },
+        )
+        if not created:
+            retry_claimed = SocialAutomationDelivery.objects.filter(
+                id=delivery.id,
+                status=SocialAutomationDelivery.STATUS_FAILED,
+            ).update(
+                status=SocialAutomationDelivery.STATUS_PENDING,
+                error='',
+                reply_text=reply_text,
+                trigger_text=comment_text,
+            )
+            if not retry_claimed:
+                logger.info('Instagram campaign comment %s already handled', comment_id)
+                return
+            delivery.refresh_from_db()
+
+        result = instagram_service.send_private_reply_to_comment(
+            comment_id,
+            reply_text,
+            org=item.organization,
+        )
+        if result:
+            delivery.status = SocialAutomationDelivery.STATUS_SENT
+            delivery.response_message_id = str(result.get('message_id') or '')
+            delivery.recipient_id = str(result.get('recipient_id') or sender_id)
+            delivery.save(update_fields=[
+                'status', 'response_message_id', 'recipient_id', 'updated_at',
+            ])
+            logger.info(
+                'Sent Instagram campaign private reply for content=%s comment=%s',
+                item.id,
+                comment_id,
+            )
+        else:
+            delivery.status = SocialAutomationDelivery.STATUS_FAILED
+            delivery.error = 'Meta API did not confirm private reply delivery'
+            delivery.save(update_fields=['status', 'error', 'updated_at'])
+    except Exception as exc:
+        logger.error('Instagram comment automation failed: %s', exc, exc_info=True)
+    finally:
+        close_old_connections()
+
+
 def _handle_echo_event(mid: str, echo_text: str, guest_user_id: str, org_id: int = None) -> None:
     """
     Process an Instagram echo event in a background thread.
@@ -310,7 +539,6 @@ def _handle_echo_event(mid: str, echo_text: str, guest_user_id: str, org_id: int
     are stored in 'all_message_ids'.
     """
     from django.db import close_old_connections
-    from datetime import date as _date
     from django.db.models import Q
     close_old_connections()
 
@@ -354,7 +582,12 @@ def _handle_echo_event(mid: str, echo_text: str, guest_user_id: str, org_id: int
                             'sent_via': 'native_app',
                         },
                     )
-                    Lead.objects.filter(id=echo_lead.id).update(last_contacted=_date.today())
+                    from datetime import datetime as _datetime
+                    from zoneinfo import ZoneInfo as _ZoneInfo
+
+                    Lead.objects.filter(id=echo_lead.id).update(
+                        last_contacted=_datetime.now(_ZoneInfo('Asia/Bishkek')).date()
+                    )
 
                 if has_crm_sent and not echo_lead.ai_paused:
                     Lead.objects.filter(id=echo_lead.id).update(ai_paused=True)
@@ -425,7 +658,7 @@ def _delayed_instagram_ai_response(
         # time and the token is usually valid by now.
         if not lead.instagram_username and sender_id:
             from .models import InstagramConnection
-            conn = InstagramConnection.get_config()
+            conn = InstagramConnection.get_config(lead.organization)
             if conn and conn.access_token:
                 try:
                     u_resp = requests.get(
@@ -448,23 +681,18 @@ def _delayed_instagram_ai_response(
                 except Exception as _ue:
                     logger.warning(f"Lead {lead_id}: background username fetch failed: {_ue}")
 
-        # Process incoming message: status progression, objection handling, goal tracking.
-        # Only runs when auto-response is enabled — matches original silent-mode behaviour.
-        if config.ai_auto_response:
-            agent_service.process_incoming_message(lead, text, channel='instagram')
-
         # Classification and response both require AI to be configured.
         if not ai_service.is_configured():
             return
 
         will_respond = force_response or (
-            config.ai_auto_response and instagram_service.is_configured()
+            config.ai_auto_response and instagram_service.is_configured(lead.organization)
         )
 
         def _send_typing():
             """Fire-and-forget typing indicator. Never raises."""
             try:
-                instagram_service.send_typing_indicator(sender_id)
+                instagram_service.send_typing_indicator(sender_id, org=lead.organization)
             except Exception:
                 pass
 
@@ -530,29 +758,139 @@ def _delayed_instagram_ai_response(
         # Exclude pending (pooled) messages from history — already in combined_text.
         pending_ids = {m.id for m in pending_messages}
 
-        # Classify intent to gate AI responses.
-        # Only freeze the tier when it is already booking_intent — this protects against
-        # mid-conversation short replies ("Да", "Первый") downgrading an active booking lead.
-        # If the current tier is non-booking (or unset), re-classify with combined_text so
-        # a lead whose first message was a greeting can still get a response once they ask
-        # about booking.
+        # Semantic gate runs before sales status/goals/tasks. Social courtesy and FAQ
+        # conversations remain visible in Communications but never enter the CRM funnel.
         if not force_response:
-            if lead.instagram_intent_tier == Lead.INTENT_TIER_BOOKING:
-                tier = lead.instagram_intent_tier
-                logger.info(f"Lead {lead.id}: using existing booking tier (no re-classification)")
+            if lead.is_sales_lead and lead.instagram_intent_tier == Lead.INTENT_TIER_BOOKING:
+                conversation_kind = 'sales'
             else:
-                tier = ai_service.classify_instagram_intent(combined_text)
-                Lead.objects.filter(id=lead_id).update(instagram_intent_tier=tier)
-                lead.refresh_from_db()
-                logger.info(f"Lead {lead.id}: classified Instagram intent as '{tier}'")
+                recent_context_rows = list(
+                    LeadActivity.objects.filter(
+                        lead=lead,
+                        activity_type__in=[
+                            LeadActivity.TYPE_INSTAGRAM_RECEIVED,
+                            LeadActivity.TYPE_INSTAGRAM_SENT,
+                        ],
+                    )
+                    .exclude(id__in=pending_ids)
+                    .order_by('-created_at')[:8]
+                )
+                recent_context_rows.reverse()
+                conversation_context = '\n'.join(
+                    (
+                        'Guest: ' if row.activity_type == LeadActivity.TYPE_INSTAGRAM_RECEIVED
+                        else 'Hotel: '
+                    )
+                    + (
+                        activity_text_for_ai(row.metadata)
+                        if row.metadata and activity_text_for_ai(row.metadata)
+                        else row.description
+                    )
+                    for row in recent_context_rows
+                )
+                conversation_kind = ai_service.classify_social_conversation(
+                    combined_text,
+                    conversation_context=conversation_context,
+                )
+                if conversation_kind not in {'sales', 'faq', 'courtesy', 'service'}:
+                    # Classification outages must not silently demote a known sales
+                    # dialogue or promote an existing social-only interaction.
+                    conversation_kind = (
+                        'sales'
+                        if lead.is_sales_lead
+                        else lead.conversation_kind
+                    )
 
-            # Only respond to booking-intent messages.
-            if tier != Lead.INTENT_TIER_BOOKING:
-                # We no longer return early to allow responding to greetings and soft interest
-                logger.info(f"Lead {lead.id}: proceeding with AI response despite tier={tier}")
+            if conversation_kind == 'sales':
+                Lead.objects.filter(id=lead_id).update(
+                    is_sales_lead=True,
+                    conversation_kind=Lead.CONVERSATION_SALES,
+                    followup_allowed=True,
+                    instagram_intent_tier=Lead.INTENT_TIER_BOOKING,
+                )
+                lead.refresh_from_db()
+                logger.info('Conversation %s promoted to the sales funnel', lead.id)
+            else:
+                kind_map = {
+                    'faq': Lead.CONVERSATION_FAQ,
+                    'service': Lead.CONVERSATION_SERVICE,
+                    'courtesy': Lead.CONVERSATION_COURTESY,
+                }
+                tier_map = {
+                    'faq': Lead.INTENT_TIER_SOFT,
+                    'service': Lead.INTENT_TIER_SOFT,
+                    'courtesy': Lead.INTENT_TIER_NOT_RELEVANT,
+                }
+                Lead.objects.filter(id=lead_id).update(
+                    is_sales_lead=False,
+                    conversation_kind=kind_map.get(conversation_kind, Lead.CONVERSATION_COURTESY),
+                    followup_allowed=False,
+                    instagram_intent_tier=tier_map.get(conversation_kind, Lead.INTENT_TIER_NOT_RELEVANT),
+                    next_follow_up_at=None,
+                    next_follow_up_hint='',
+                )
+                lead.refresh_from_db()
+                if not will_respond:
+                    return
+
+                language = _lead_language(lead, combined_text)
+                event_key = ''
+                if conversation_kind == 'service':
+                    from apps.leads.services.booking_tools import execute_transfer_to_manager
+
+                    transfer_result = execute_transfer_to_manager(
+                        {
+                            'reason': 'escalation',
+                            'notes': combined_text[:1000],
+                            'platform': 'instagram',
+                        },
+                        lead=lead,
+                    )
+                    if transfer_result.get('status') == 'success':
+                        event_key = 'manager_handoff'
+                elif (
+                    conversation_kind == 'courtesy'
+                    and lead.origin_event_type == 'story_mention'
+                ):
+                    event_key = 'story_courtesy_close'
+
+                response_text = ''
+                if event_key:
+                    from apps.hotel_info.services.automation_templates import get_automation_message
+
+                    response_text = get_automation_message(
+                        event_key,
+                        organization=lead.organization,
+                        channel='instagram',
+                        language=language,
+                    )
+                if not response_text:
+                    response_text = ai_service.generate_non_sales_reply(
+                        combined_text,
+                        organization=lead.organization,
+                        language=language,
+                    )
+                    event_key = event_key or f'non_sales_{conversation_kind}'
+                if response_text:
+                    _send_logged_instagram_message(
+                        lead,
+                        sender_id,
+                        response_text,
+                        event_key=event_key,
+                    )
+                logger.info(
+                    'Lead %s handled as non-sales %s; no sales workflow or follow-up',
+                    lead.id,
+                    conversation_kind,
+                )
+                return
 
         if not will_respond:
             return
+
+        # Sales state progression is intentionally after the semantic gate.
+        if config.ai_auto_response:
+            agent_service.process_incoming_message(lead, combined_text, channel='instagram')
 
         # Full activity history (all types, no cap) for complete context.
         from .ai_service import build_activity_history
@@ -609,6 +947,10 @@ def _delayed_instagram_ai_response(
             'check_in_date': str(lead.check_in_date) if lead.check_in_date else None,
             'check_out_date': str(lead.check_out_date) if lead.check_out_date else None,
             'guest_count': lead.guest_count,
+            'adult_count': lead.adult_count,
+            'children_ages': lead.children_ages,
+            'infant_count': lead.infant_count,
+            'one_room_required': lead.one_room_required,
             'room_type_preference': lead.room_type_preference,
             'meal_plan': lead.meal_plan,
             'discovery_source': lead.discovery_source,
@@ -683,7 +1025,7 @@ def _delayed_instagram_ai_response(
             for i, part in enumerate(message_parts):
                 if i > 0:
                     _send_typing()
-                result = instagram_service.send_message(sender_id, part)
+                result = instagram_service.send_message(sender_id, part, org=lead.organization)
                 if result:
                     part_mid = result.get('message_id')
                     if part_mid:
@@ -800,6 +1142,15 @@ def _delayed_instagram_ai_response(
                 if updated_fields:
                     lead.save(update_fields=list(dict.fromkeys(updated_fields)))
                     logger.info(f"Auto-extracted and updated fields for lead {lead.id}: {updated_fields}")
+                from apps.leads.services.guest_structure import apply_extracted_guest_structure
+
+                structured_fields = apply_extracted_guest_structure(lead, extracted_data)
+                if structured_fields:
+                    logger.info(
+                        'Updated structured guest composition for lead %s: %s',
+                        lead.id,
+                        structured_fields,
+                    )
 
         # Mark handoff as completed so subsequent messages from the guest are ignored.
         if Lead.objects.filter(id=lead_id, ai_paused=True, ai_paused_by='AI Handoff').exists():
@@ -844,8 +1195,7 @@ def instagram_webhook(request):
         # Guard: verify there is an active Instagram connection before processing anything.
         # If the account has been disconnected, we must not create leads, activities, or
         # trigger the AI — even though Meta keeps sending webhooks until unsubscribed.
-        active_conn = InstagramConnection.get_config()
-        if not active_conn or not active_conn.access_token:
+        if not InstagramConnection.objects.exclude(access_token='').exists():
             logger.warning(
                 "Instagram webhook received but no active connection — discarding payload silently"
             )
@@ -853,23 +1203,18 @@ def instagram_webhook(request):
 
         for entry in entries:
             entry_account_id = entry.get('id')
+            active_conn = _instagram_connection_for_entry(entry_account_id)
+            if not active_conn:
+                continue
 
-            # entry.id is the Instagram Business Account ID — a different namespace from
-            # instagram_user_id (app-scoped /me ID). Learn and store it on first sight so
-            # we can detect genuine account mismatches on future reconnections.
-            if entry_account_id:
-                if not active_conn.instagram_business_account_id:
-                    InstagramConnection.objects.filter(pk=active_conn.pk).update(
-                        instagram_business_account_id=entry_account_id
-                    )
-                    active_conn.instagram_business_account_id = entry_account_id
-                    logger.info(f"Stored Instagram Business Account ID: {entry_account_id}")
-                elif entry_account_id != active_conn.instagram_business_account_id:
-                    logger.warning(
-                        f"Instagram webhook entry account {entry_account_id} does not match "
-                        f"stored business account {active_conn.instagram_business_account_id} — discarding"
-                    )
-                    continue
+            organization = getattr(active_conn, 'organization', None)
+            if organization:
+                for change in _instagram_entry_changes(entry):
+                    threading.Thread(
+                        target=_process_instagram_comment_change,
+                        args=(change, organization.id),
+                        daemon=True,
+                    ).start()
 
             messaging_events = entry.get('messaging', [])
             for event in messaging_events:
@@ -911,6 +1256,8 @@ def instagram_webhook(request):
                 # The AI receives only text/captions, never the media file.
                 attachments = message.get('attachments', [])
                 instagram_content_context = _extract_instagram_content_context(event, message, attachments)
+                instagram_event_type = _instagram_event_type(message, instagram_content_context)
+                is_story_mention_event = instagram_event_type == 'story_mention'
                 if instagram_content_context:
                     logger.info(
                         "Extracted Instagram content context: type=%s attachment=%s ids=%s urls=%s",
@@ -977,7 +1324,7 @@ def instagram_webhook(request):
                         continue
 
                 # Fetch sender's username once — reused for echo detection and lead creation
-                conn = InstagramConnection.get_config()
+                conn = active_conn
                 sender_username = None
                 if conn and conn.access_token:
                     try:
@@ -1025,6 +1372,14 @@ def instagram_webhook(request):
                         source='Instagram',
                         status=Lead.STATUS_NEW,
                         organization=_ig_org,
+                        is_sales_lead=not is_story_mention_event,
+                        conversation_kind=(
+                            Lead.CONVERSATION_COURTESY
+                            if is_story_mention_event
+                            else Lead.CONVERSATION_SALES
+                        ),
+                        origin_event_type=instagram_event_type,
+                        followup_allowed=not is_story_mention_event,
                         custom_fields={},
                     )
 
@@ -1036,6 +1391,23 @@ def instagram_webhook(request):
                         description=f'Lead auto-created from Instagram contact: {sender_id}{username_info}',
                     )
                     logger.info(f"Auto-created lead {lead.id} from Instagram user: {sender_id}{username_info}")
+
+                has_booking_context = bool(
+                    lead.instagram_intent_tier == Lead.INTENT_TIER_BOOKING
+                    or lead.check_in_date
+                    or lead.check_out_date
+                    or lead.guest_count
+                )
+                if is_story_mention_event and not has_booking_context:
+                    Lead.objects.filter(id=lead.id).update(
+                        is_sales_lead=False,
+                        conversation_kind=Lead.CONVERSATION_COURTESY,
+                        origin_event_type='story_mention',
+                        followup_allowed=False,
+                        next_follow_up_at=None,
+                        next_follow_up_hint='',
+                    )
+                    lead.refresh_from_db()
 
                 # Deduplicate by message ID — Meta uses at-least-once delivery and may
                 # send the same webhook event twice. Processing a duplicate triggers a
@@ -1055,6 +1427,7 @@ def instagram_webhook(request):
                     'text': message_text,
                     'message_id': mid,
                     'sender_id': sender_id,
+                    'instagram_event_type': instagram_event_type,
                 }
                 if instagram_content_context:
                     activity_metadata['instagram_context'] = instagram_content_context
@@ -1091,9 +1464,35 @@ def instagram_webhook(request):
                 )
 
                 # Stamp last_contacted so the CRM reflects when the guest last wrote
-                Lead.objects.filter(id=lead.id).update(last_contacted=date.today())
+                from datetime import datetime
+                from zoneinfo import ZoneInfo
+
+                Lead.objects.filter(id=lead.id).update(
+                    last_contacted=datetime.now(ZoneInfo('Asia/Bishkek')).date()
+                )
 
                 logger.info(f"Received Instagram message from lead {lead.id}: {message_text[:50]}")
+
+                if is_story_mention_event:
+                    from apps.hotel_info.services.automation_templates import get_automation_message
+
+                    acknowledgement = get_automation_message(
+                        'story_mention_ack',
+                        organization=lead.organization,
+                        channel='instagram',
+                        language=_lead_language(lead, message_text),
+                    )
+                    if acknowledgement:
+                        _send_logged_instagram_message(
+                            lead,
+                            sender_id,
+                            acknowledgement,
+                            event_key='story_mention_ack',
+                        )
+                    logger.info(
+                        'Lead %s: story mention acknowledged without sales workflow',
+                        lead.id,
+                    )
 
                 if instagram_content_context:
                     try:
@@ -1208,7 +1607,12 @@ def instagram_webhook(request):
                 # Spawn background thread when AI is configured — classification runs
                 # regardless of auto_response; the thread decides whether to reply.
                 config = AIConfig.get_config(org=lead.organization)
-                if ai_service.is_configured() and (not is_media_only or media_context or unresolved_media_prompt):
+                if is_story_mention_event:
+                    logger.info(
+                        'Lead %s: skipping AI task for story mention event',
+                        lead.id,
+                    )
+                elif ai_service.is_configured() and (not is_media_only or media_context or unresolved_media_prompt):
                     _delayed_instagram_ai_response.delay(
                         lead.id, current_activity.id, sender_id, ai_input_text
                     )

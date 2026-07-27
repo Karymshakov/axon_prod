@@ -2,8 +2,9 @@ import os
 import base64
 import logging
 
+from django.db.models import Q
 from rest_framework import viewsets, status
-from rest_framework.decorators import action, api_view
+from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.response import Response
 from rest_framework.permissions import SAFE_METHODS, BasePermission
 from apps.organizations.permissions import IsOrganizationMember, IsOrganizationAdmin
@@ -28,14 +29,23 @@ The result will be used directly by an AI assistant to answer customer questions
 from .models import (
     HotelProfile, HotelProfileLink, HotelPolicy, HotelFAQ, HandoverContact,
     Playbook, RoomPricing, RoomCombinationNote, ReplyTemplateCategory, ReplyTemplate,
+    AutomationMessageTemplate, BookingRules,
 )
 from .serializers import (
     HotelProfileSerializer, HotelProfileLinkSerializer,
     HotelPolicySerializer, HotelFAQSerializer, HandoverContactSerializer,
     PlaybookSerializer, RoomPricingSerializer, RoomCombinationNoteSerializer,
     ReplyTemplateCategorySerializer, ReplyTemplateSerializer,
+    AutomationMessageTemplateSerializer, BookingRulesSerializer,
 )
 from apps.organizations.mixins import OrganizationQuerysetMixin
+
+
+class IsAdminOrReadOnlyMember(BasePermission):
+    def has_permission(self, request, view):
+        if request.method in SAFE_METHODS:
+            return IsOrganizationMember().has_permission(request, view)
+        return IsOrganizationAdmin().has_permission(request, view)
 
 
 def _get_org(request):
@@ -60,6 +70,7 @@ def reply_template_categories_shim(request):
 
 
 @api_view(['GET', 'PATCH'])
+@permission_classes([IsAdminOrReadOnlyMember])
 def hotel_profile(request):
     """Retrieve or partially update the org-scoped HotelProfile."""
     org = _get_org(request)
@@ -75,6 +86,7 @@ def hotel_profile(request):
 class HotelProfileLinkViewSet(OrganizationQuerysetMixin, viewsets.ModelViewSet):
     queryset = HotelProfileLink.objects.all()
     serializer_class = HotelProfileLinkSerializer
+    permission_classes = [IsAdminOrReadOnlyMember]
 
     def get_queryset(self):
         user = self.request.user
@@ -93,6 +105,7 @@ class HotelProfileLinkViewSet(OrganizationQuerysetMixin, viewsets.ModelViewSet):
 class HotelPolicyViewSet(OrganizationQuerysetMixin, viewsets.ModelViewSet):
     queryset = HotelPolicy.objects.all()
     serializer_class = HotelPolicySerializer
+    permission_classes = [IsAdminOrReadOnlyMember]
 
     def perform_create(self, serializer):
         user = self.request.user
@@ -104,6 +117,7 @@ class HotelPolicyViewSet(OrganizationQuerysetMixin, viewsets.ModelViewSet):
 class HotelFAQViewSet(OrganizationQuerysetMixin, viewsets.ModelViewSet):
     queryset = HotelFAQ.objects.all()
     serializer_class = HotelFAQSerializer
+    permission_classes = [IsAdminOrReadOnlyMember]
 
     def perform_create(self, serializer):
         user = self.request.user
@@ -115,6 +129,7 @@ class HotelFAQViewSet(OrganizationQuerysetMixin, viewsets.ModelViewSet):
 class HandoverContactViewSet(OrganizationQuerysetMixin, viewsets.ModelViewSet):
     queryset = HandoverContact.objects.all()
     serializer_class = HandoverContactSerializer
+    permission_classes = [IsAdminOrReadOnlyMember]
 
     def perform_create(self, serializer):
         user = self.request.user
@@ -126,6 +141,7 @@ class HandoverContactViewSet(OrganizationQuerysetMixin, viewsets.ModelViewSet):
 class PlaybookViewSet(OrganizationQuerysetMixin, viewsets.ModelViewSet):
     queryset = Playbook.objects.all()
     serializer_class = PlaybookSerializer
+    permission_classes = [IsAdminOrReadOnlyMember]
 
     def perform_create(self, serializer):
         user = self.request.user
@@ -484,44 +500,32 @@ def prompt_preview(request):
             pt_lines = [
                 "[PRICING TABLE]",
                 "All prices in KGS per night. Each tier is the TOTAL per-room price (room + meals included).",
-                "guest_type: 'any' = standard/comfort rooms (suggest first); 'family' = family rooms (suggest only when kids confirmed).",
+                "Family inventory is request-only and is excluded from automated pricing.",
             ]
             for r in pricing_rows:
                 tiers = ", ".join(f"{k}={v}" for k, v in (r.get('prices_per_night_kgs') or {}).items())
                 valid = f" | valid {r['valid_from']}–{r['valid_to']}" if r.get('valid_from') and r.get('valid_to') else ""
                 days = f" | days: {', '.join(r['weekdays'])}" if r.get('weekdays') else ""
-                gtype = f" [guest_type={r.get('guest_type', 'any')}]"
-                pt_lines.append(f"  {r['room_type']} (max {r['max_guests']} guests){gtype}{valid}{days}: {tiers}")
+                pt_lines.append(f"  {r['room_type']} (max {r['max_guests']} guests){valid}{days}: {tiers}")
             sections.append("\n".join(pt_lines))
         else:
             sections.append("[PRICING TABLE]\n(no pricing data)")
     except Exception:
         sections.append("[PRICING TABLE]\n(error loading)")
 
-    # ─── [FAMILY ROOM POLICY] ─────────────────────────────────────────
+    # ─── [BOOKING RULES] ──────────────────────────────────────────────
+    rules = BookingRules.objects.filter(organization=_preview_org).first()
+    child_free_max_age = getattr(rules, 'child_free_max_age', 6)
+    child_free_without_bed = getattr(rules, 'child_free_requires_no_bed', True)
     sections.append(
-        "[FAMILY ROOM POLICY]\n"
-        "ROOM SUGGESTION PRIORITY:\n"
-        "1. Always suggest rooms tagged guest_type='any' first (Standard → Comfort order).\n"
-        "2. Rooms tagged guest_type='family' are the 3rd alternative at earliest — NEVER suggest them as the 1st or 2nd option.\n"
-        "3. Family rooms are ONLY suggested when:\n"
-        "   a) Guest explicitly mentions children / kids / ребёнок / дети / балдар (or similar in any language), OR\n"
-        "   b) Context strongly implies a family with children, OR\n"
-        "   c) No 'any' rooms can accommodate the group size at all.\n"
-        "\n"
-        "KID DETECTION:\n"
-        "- Infer from context: if the guest mentions kids or children → treat as family context.\n"
-        "- Ask if unclear: if guest count is 3–4+ people and no mention of children → ask 'Will there be children staying with you?' BEFORE suggesting a family room.\n"
-        "- Never ask if the guest has already clearly indicated adult-only or business travel.\n"
-        "\n"
-        "CHILD POLICY:\n"
-        "- One child under 6 is FREE and does NOT count toward guest count.\n"
-        "- Two or more children under 6 → recommend a family room.\n"
-        "\n"
-        "TOOL RESPONSE NOTE:\n"
-        "- The get_room_options tool returns combinations with type='Семейный' for family rooms.\n"
-        "- Present Семейный options only after confirming kids are present.\n"
-        "- Never show Основной / Альтернатива / Семейный labels to the guest — these are internal."
+        "[BOOKING RULES]\n"
+        f"- Children aged {child_free_max_age} or younger stay free"
+        f"{' without a separate bed' if child_free_without_bed else ''}.\n"
+        "- Keep total party size, adult count, and every child's age as separate facts.\n"
+        "- An infant who does not need a separate bed must not force an extra room.\n"
+        "- Family inventory is request-only. Never offer or confirm a Family room automatically.\n"
+        "- Use get_room_options for verified Standard/Comfort inventory and prices.\n"
+        "- Never expose internal combination labels to the guest."
     )
 
     # ─── Runtime placeholders ─────────────────────────────────────────
@@ -542,6 +546,14 @@ def prompt_preview(request):
 class RoomPricingViewSet(OrganizationQuerysetMixin, viewsets.ModelViewSet):
     queryset = RoomPricing.objects.all()
     serializer_class = RoomPricingSerializer
+    permission_classes = [IsAdminOrReadOnlyMember]
+
+    def get_queryset(self):
+        return (
+            super().get_queryset()
+            .exclude(guest_type='family')
+            .exclude(kategoria_nomera__icontains='семейн')
+        )
 
     @action(detail=False, methods=['post'], url_path='upload-excel')
     def upload_excel(self, request):
@@ -775,6 +787,10 @@ def room_combinations(request):
                 combo['type'] = stored['type']
             combo['is_custom'] = False
             combo['id'] = None
+        gc_entry['combinations'] = [
+            combo for combo in gc_entry['combinations']
+            if combo.get('type') != 'Семейный'
+        ]
 
     # Append custom combinations with live-calculated prices
     # Note: RoomCombinationNote has no organization field — notes are shared globally
@@ -783,6 +799,8 @@ def room_combinations(request):
         lookup = _build_room_lookup()
         custom_by_gc: dict = {}
         for c in custom_qs:
+            if c.combination_type == 'Семейный':
+                continue
             prices_data = calculate_combination_prices(c.rooms or [], room_lookup=lookup)
             custom_by_gc.setdefault(c.guest_count, []).append({
                 'id': c.id,
@@ -826,6 +844,7 @@ def room_combination_room_types(request):
 
 
 @api_view(['POST'])
+@permission_classes([IsOrganizationAdmin])
 def create_custom_combination(request):
     """Create a custom room combination for a guest count group."""
     from .pricing_utils import COMBINATIONS_MAP, calculate_combination_prices, _build_room_lookup
@@ -841,8 +860,11 @@ def create_custom_combination(request):
         return Response({'error': 'guest_count must be an integer 1–10'}, status=status.HTTP_400_BAD_REQUEST)
     if not rooms or not isinstance(rooms, list):
         return Response({'error': 'rooms must be a non-empty list'}, status=status.HTTP_400_BAD_REQUEST)
-    if combination_type not in ('Основной', 'Альтернатива', 'Семейный'):
-        return Response({'error': 'combination_type must be Основной, Альтернатива, or Семейный'}, status=status.HTTP_400_BAD_REQUEST)
+    if combination_type not in ('Основной', 'Альтернатива'):
+        return Response(
+            {'error': 'Family combinations are request-only; use Основной or Альтернатива.'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
 
     # Assign next available combination_index for this guest_count
     auto_count = len(COMBINATIONS_MAP.get(guest_count, []))
@@ -886,6 +908,7 @@ def create_custom_combination(request):
 
 
 @api_view(['DELETE'])
+@permission_classes([IsOrganizationAdmin])
 def delete_custom_combination(request, pk):
     """Delete a custom combination by its primary key."""
     org = _get_org(request)
@@ -901,6 +924,7 @@ def delete_custom_combination(request, pk):
 
 
 @api_view(['DELETE'])
+@permission_classes([IsOrganizationAdmin])
 def hide_auto_combination(request, guest_count, combination_index):
     """Hide an auto-generated combination so it no longer appears in the API."""
     if not (1 <= guest_count <= 10):
@@ -918,6 +942,7 @@ def hide_auto_combination(request, guest_count, combination_index):
 
 
 @api_view(['PUT', 'PATCH'])
+@permission_classes([IsOrganizationAdmin])
 def room_combination_note(request, guest_count, combination_index):
     """Save or update a custom note or type for a combination row."""
     if not (1 <= guest_count <= 10):
@@ -926,8 +951,11 @@ def room_combination_note(request, guest_count, combination_index):
 
     if request.method == 'PATCH':
         combo_type = request.data.get('combination_type')
-        if combo_type not in ('Основной', 'Альтернатива', 'Семейный'):
-            return Response({'error': 'combination_type must be Основной, Альтернатива, or Семейный'}, status=status.HTTP_400_BAD_REQUEST)
+        if combo_type not in ('Основной', 'Альтернатива'):
+            return Response(
+                {'error': 'Family combinations are request-only; use Основной or Альтернатива.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         obj, _ = RoomCombinationNote.objects.update_or_create(
             organization=org,
@@ -963,13 +991,6 @@ def room_combination_note(request, guest_count, combination_index):
     return Response(RoomCombinationNoteSerializer(obj).data)
 
 
-class IsAdminOrReadOnlyMember(BasePermission):
-    def has_permission(self, request, view):
-        if request.method in SAFE_METHODS:
-            return IsOrganizationMember().has_permission(request, view)
-        return IsOrganizationAdmin().has_permission(request, view)
-
-
 class ReplyTemplateCategoryViewSet(OrganizationQuerysetMixin, viewsets.ModelViewSet):
     queryset = ReplyTemplateCategory.objects.all()
     serializer_class = ReplyTemplateCategorySerializer
@@ -980,4 +1001,43 @@ class ReplyTemplateViewSet(OrganizationQuerysetMixin, viewsets.ModelViewSet):
     queryset = ReplyTemplate.objects.all()
     serializer_class = ReplyTemplateSerializer
     permission_classes = [IsAdminOrReadOnlyMember]
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        channel = (self.request.query_params.get('channel') or '').strip().lower()
+        if channel:
+            queryset = queryset.filter(
+                Q(channel=channel)
+                | Q(channel='all')
+                | Q(channel='')
+            )
+        return queryset
+
+
+class AutomationMessageTemplateViewSet(OrganizationQuerysetMixin, viewsets.ModelViewSet):
+    queryset = AutomationMessageTemplate.objects.all()
+    serializer_class = AutomationMessageTemplateSerializer
+    permission_classes = [IsAdminOrReadOnlyMember]
+    filterset_fields = ['event_key', 'language', 'channel', 'is_active']
+
+    def get_queryset(self):
+        if getattr(self.request.user, 'is_superadmin', False):
+            return super().get_queryset()
+        org = self._get_organization()
+        from .services.automation_templates import ensure_default_automation_templates
+
+        ensure_default_automation_templates(org)
+        return super().get_queryset()
+
+
+@api_view(['GET', 'PATCH'])
+@permission_classes([IsAdminOrReadOnlyMember])
+def booking_rules(request):
+    org = _get_org(request)
+    rules, _ = BookingRules.objects.get_or_create(organization=org)
+    if request.method == 'PATCH':
+        serializer = BookingRulesSerializer(rules, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+    return Response(BookingRulesSerializer(rules).data)
 

@@ -543,6 +543,15 @@ class AIService:
                 response_text or '',
             ))
             pricing_unavailable = _pricing_audit.get('error') == 'pricing_unavailable'
+            from apps.hotel_info.services.automation_templates import (
+                detect_message_language,
+                get_automation_message,
+            )
+
+            response_language = detect_message_language(
+                message,
+                getattr(lead, 'language', '') if lead is not None else '',
+            )
 
             if pricing_unavailable and not _transfer_already_called:
                 _pricing_transfer_args = {
@@ -567,16 +576,18 @@ class AIService:
                 if _pricing_transfer_result.get('status') == 'success':
                     _transfer_already_called = True
                     _last_transfer_args = _pricing_transfer_args
-                    response_text = (
-                        'На выбранные даты актуальный тариф пока не загружен, '
-                        'поэтому я не буду называть цену наугад. '
-                        'Передала запрос менеджеру для подтверждения стоимости.'
+                    response_text = get_automation_message(
+                        'pricing_unavailable',
+                        organization=getattr(lead, 'organization', None),
+                        channel=(getattr(lead, 'source', '') or 'all').lower(),
+                        language=response_language,
                     )
                 else:
-                    response_text = (
-                        'На выбранные даты у меня нет подтверждённого тарифа, '
-                        'поэтому я не буду называть цену наугад. '
-                        'Пожалуйста, уточните стоимость у менеджера.'
+                    response_text = get_automation_message(
+                        'pricing_check_required',
+                        organization=getattr(lead, 'organization', None),
+                        channel=(getattr(lead, 'source', '') or 'all').lower(),
+                        language=response_language,
                     )
             elif (
                 room_price_claim
@@ -587,10 +598,11 @@ class AIService:
                     "[Pricing guard] Suppressed an unverified room-price claim: %r",
                     (response_text or '')[:240],
                 )
-                response_text = (
-                    'Сейчас мне не удалось подтвердить актуальную стоимость, '
-                    'поэтому я не буду называть цену наугад. '
-                    'Уточните даты заезда, выезда и число взрослых — я проверю тариф по системе.'
+                response_text = get_automation_message(
+                    'pricing_check_required',
+                    organization=getattr(lead, 'organization', None),
+                    channel=(getattr(lead, 'source', '') or 'all').lower(),
+                    language=response_language,
                 )
 
             if _needs_manager_transfer and not _transfer_already_called:
@@ -1214,10 +1226,11 @@ class AIService:
                 'Interpret the full conversation semantically, not by keyword matching. '
                 'Answer the latest guest message in one compact message, ask at most one missing fact, '
                 'and never repeat a question already answered. A language-switch request gets only a short acknowledgement. '
-                'Distinguish total people from chargeable adults: a child under 6 is excluded from pricing guest_count. '
-                'Pass child ages and single_room_required to get_family_room; when single_room_required is true, '
-                'never offer multiple or adjacent rooms. For two adults with a two-month-old infant, use guest_count=2, '
-                'children_ages=[0.17], single_room_required=true. '
+                'Keep total people, adults, and child ages separate. Pass guest_count as the total party size, '
+                'adult_count and children_ages to get_room_options; the deterministic pricing tool applies the '
+                'configured child policy. Family rooms are not available for automatic sale and must not be offered. '
+                'For two adults with a two-month-old infant, pass guest_count=3, adult_count=2, children_ages=[0.17]. '
+                'A baby staying without a separate bed must not cause an extra room recommendation. '
                 'State a price only when it comes from a successful current pricing tool result '
                 'or exactly matches the authoritative CURRENT ROOM OFFER DATA from this conversation. '
                 'When the guest asks for a photo, answer that request first and do not append meal prices '
@@ -1404,10 +1417,7 @@ class AIService:
                 )
             )
             if not _meal_already_shown and (_on_meal_plan_card or _room_selection_message):
-                _preferred_meal_tool = (
-                    'get_family_room' if any(k in _room_pref for k in ('сем', 'family'))
-                    else 'get_room_options'
-                )
+                _preferred_meal_tool = 'get_room_options'
                 _meal_tool_args = {'guest_count': _known_guest_count or 2}
                 if _known_checkin:
                     _meal_tool_args['checkin_date'] = _known_checkin
@@ -2353,6 +2363,100 @@ Example output:
             logger.error(f"Intent classification failed: {e}", exc_info=True)
             return 'booking_intent'
 
+    def classify_social_conversation(self, message: str, conversation_context: str = '') -> str:
+        """Semantic gate for social interactions before they enter the sales workflow."""
+        if not self.is_configured():
+            return 'unknown'
+
+        system_prompt = """You classify a hotel Instagram conversation by meaning, not keywords.
+Return exactly one label:
+- sales: the person wants or may want a future stay, availability, prices, dates, rooms, booking, meals for a stay, or asks a booking follow-up.
+- faq: a factual question about the hotel, facilities, location, rules, services, or content, without current booking intent.
+- courtesy: greeting, thanks, compliment, emoji, story mention acknowledgement, or polite small talk without a factual question.
+- service: complaint, problem during/after a stay, refund/cancellation issue, or explicit request for a human.
+
+Important:
+- A reply such as "это вам спасибо" after a story acknowledgement is courtesy, never sales.
+- A story mention alone is courtesy.
+- Do not invent intent. If there is no evidence of a stay or booking, do not choose sales.
+Return only: sales, faq, courtesy, or service."""
+        user_prompt = message[:700]
+        if conversation_context:
+            user_prompt = f'Context:\n{conversation_context[-1200:]}\n\nLatest message:\n{message[:700]}'
+        try:
+            max_tokens = 2048 if getattr(self, 'provider', None) == 'gemini' else 10
+            response = self.client.chat.completions.create(
+                model=self._model,
+                messages=[
+                    {'role': 'system', 'content': system_prompt},
+                    {'role': 'user', 'content': user_prompt},
+                ],
+                max_tokens=max_tokens,
+                temperature=0,
+                timeout=15,
+            )
+            result = (response.choices[0].message.content or '').strip().lower()
+            if result in {'sales', 'faq', 'courtesy', 'service'}:
+                return result
+            logger.warning('Unexpected social conversation classification: %r', result)
+        except Exception as exc:
+            logger.error('Social conversation classification failed: %s', exc, exc_info=True)
+        return 'unknown'
+
+    def generate_non_sales_reply(self, message: str, organization=None, language: str = 'ru') -> str | None:
+        """Answer a non-sales FAQ or greeting without steering it into booking."""
+        if not self.is_configured():
+            return None
+        try:
+            from apps.hotel_info.models import HotelFAQ, HotelPolicy, HotelProfile
+
+            profile = HotelProfile.objects.filter(organization=organization).first()
+            facts = []
+            if profile:
+                facts.append(
+                    '\n'.join(
+                        part for part in [
+                            f'Hotel: {profile.hotel_name}' if profile.hotel_name else '',
+                            f'Description: {profile.description}' if profile.description else '',
+                            f'Address: {profile.address}' if profile.address else '',
+                            f'Directions: {profile.directions}' if profile.directions else '',
+                        ] if part
+                    )
+                )
+            for faq in HotelFAQ.objects.filter(organization=organization).order_by('order')[:30]:
+                facts.append(f'Q: {faq.question}\nA: {faq.answer}')
+            for policy in HotelPolicy.objects.filter(organization=organization).order_by('order')[:30]:
+                facts.append(f'Policy: {policy.label}: {policy.value}. {policy.description}'.strip())
+            knowledge = '\n\n'.join(part for part in facts if part).strip()
+            system_prompt = f"""You are a concise hotel information assistant.
+Answer the latest message naturally in language "{language}".
+This is not yet a sales conversation:
+- do not ask dates, guest count, room choice, meals, phone, or booking questions;
+- do not create urgency and do not claim a manager was contacted;
+- answer only from the approved facts below;
+- if the facts do not contain the answer, say that the information is not confirmed and offer
+  to connect the guest with a manager; never claim that a transfer already happened;
+- for a greeting or thanks, respond warmly in one short sentence.
+
+APPROVED FACTS:
+{knowledge or '[No approved facts are configured]'}"""
+            max_tokens = 2048 if getattr(self, 'provider', None) == 'gemini' else 180
+            response = self.client.chat.completions.create(
+                model=self._model,
+                messages=[
+                    {'role': 'system', 'content': system_prompt},
+                    {'role': 'user', 'content': message[:1000]},
+                ],
+                max_tokens=max_tokens,
+                temperature=0.2,
+                timeout=20,
+            )
+            text = (response.choices[0].message.content or '').strip()
+            return text or None
+        except Exception as exc:
+            logger.error('Non-sales reply generation failed: %s', exc, exc_info=True)
+            return None
+
     def extract_lead_data(self, message: str, conversation_history: list = None, our_company_name: str = None, organization: Any = None) -> dict:
         if not self.is_configured():
             return {}
@@ -2384,7 +2488,11 @@ Extract the following information about the CUSTOMER from the conversation:
 - preferred_contact_time (the best time or day the customer mentions for a call or meeting, e.g. "Tomorrow at 4pm", "Weekday mornings")
 - check_in_date (the guest's intended check-in date in YYYY-MM-DD format; parse natural language relative to TODAY ({today_str}): "завтра"/"tomorrow"/"на завтра" = {tomorrow_str}; "сегодня"/"today" = {today_str}; "15 июля" = that date in the current year)
 - check_out_date (the guest's intended check-out date in YYYY-MM-DD format; same parsing rules as check_in_date; DURATION INFERENCE: if the guest states a duration like "только один день", "одну ночь", "один день", "two nights", "3 дня", "три ночи", etc., compute check_out_date = check_in_date + N days where N is the number of nights/days mentioned — e.g. "только один день"/"одну ночь" → check_out = check_in + 1 day, "два дня"/"две ночи" → check_out = check_in + 2 days; apply this ONLY when check_in_date is determinable from the conversation)
-- guest_count (number of guests as an integer, e.g. from "нас будет 3", "2 adults", "семья из 4", "4 человека")
+- guest_count (total people including adults and children)
+- adult_count (number of adults; infer it only when the conversation makes it clear)
+- children_ages (JSON array of each child's age in years; use a decimal for infants, e.g. 2 months = 0.17 and 1 week = 0.02)
+- infant_count (number of children under one year)
+- one_room_required (true only if the customer explicitly says everyone must stay in one room; false only if they explicitly accept separate rooms)
 - room_type_preference (preferred room type mentioned, e.g. "Deluxe Balcony", "семейный номер", "стандарт", "люкс")
 - meal_plan (meal plan preference — return ONLY one of these exact values: "none", "breakfast", "lunch", "dinner", "half_board_bl", "half_board_bd", "full_board"; map guest's words like "завтрак" → "breakfast", "завтрак и обед" → "half_board_bl", "завтрак и ужин" → "half_board_bd", "всё включено" → "full_board")
 - discovery_source (the channel or source how they found out about us, return ONLY one of the values specified below in the discovery source block, e.g. "friends", "ads", "instagram", etc. Match strictly by meaning as instructed)
@@ -2405,7 +2513,7 @@ IMPORTANT RULES:
    - Only include REAL data that the customer actually provided
 6. If the customer gives only day numbers/range without a month (for example "с 1 по 7") and no month is clear from nearby customer messages, OMIT check_in_date/check_out_date. Never assume January.
 
-Return JSON with keys: company_name, contact_person, phone, email, problem_description, preferred_contact_time, check_in_date, check_out_date, guest_count, room_type_preference, meal_plan, discovery_source, discovery_source_detail.
+Return JSON with keys: company_name, contact_person, phone, email, problem_description, preferred_contact_time, check_in_date, check_out_date, guest_count, adult_count, children_ages, infant_count, one_room_required, room_type_preference, meal_plan, discovery_source, discovery_source_detail.
 OMIT any field where no REAL customer-provided information is found. Empty or placeholder values are NOT acceptable.
 
 Example format:
@@ -2415,6 +2523,10 @@ Example format:
   "check_in_date": "2026-07-15",
   "check_out_date": "2026-07-20",
   "guest_count": 3,
+  "adult_count": 2,
+  "children_ages": [0.17],
+  "infant_count": 1,
+  "one_room_required": true,
   "room_type_preference": "стандарт с балконом",
   "meal_plan": "half_board_bd",
   "problem_description": "Хотим отдохнуть на Иссык-Куле всей семьёй",
@@ -2466,14 +2578,32 @@ Example format:
             allowed_keys = {
                 'company_name', 'contact_person', 'phone', 'email',
                 'problem_description', 'preferred_contact_time',
-                'check_in_date', 'check_out_date', 'guest_count',
+                'check_in_date', 'check_out_date', 'guest_count', 'adult_count',
+                'children_ages', 'infant_count', 'one_room_required',
                 'room_type_preference', 'meal_plan', 'discovery_source',
                 'discovery_source_detail',
             }
 
             filtered_data = {}
             for key, value in extracted_data.items():
-                if key in allowed_keys and value and str(value).strip().lower() not in placeholder_values:
+                if key not in allowed_keys:
+                    continue
+                if key == 'one_room_required' and isinstance(value, bool):
+                    filtered_data[key] = value
+                    continue
+                if key == 'children_ages' and isinstance(value, list):
+                    ages = []
+                    for age in value:
+                        try:
+                            numeric_age = float(age)
+                        except (TypeError, ValueError):
+                            continue
+                        if 0 <= numeric_age < 18:
+                            ages.append(round(numeric_age, 2))
+                    if ages:
+                        filtered_data[key] = ages
+                    continue
+                if value and str(value).strip().lower() not in placeholder_values:
                     filtered_data[key] = value
 
             logger.info(f"Extracted lead data: {filtered_data}")

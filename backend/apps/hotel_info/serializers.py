@@ -2,6 +2,7 @@ from rest_framework import serializers
 from .models import (
     HotelProfile, HotelProfileLink, HotelPolicy, HotelFAQ, HandoverContact,
     Playbook, RoomPricing, RoomCombinationNote, ReplyTemplateCategory, ReplyTemplate,
+    AutomationMessageTemplate, BookingRules,
 )
 
 
@@ -56,6 +57,13 @@ class RoomCombinationNoteSerializer(serializers.ModelSerializer):
 
 
 class RoomPricingSerializer(serializers.ModelSerializer):
+    def validate_guest_type(self, value):
+        if value == 'family':
+            raise serializers.ValidationError(
+                'Family inventory is request-only and cannot be sold automatically.'
+            )
+        return value
+
     class Meta:
         model = RoomPricing
         fields = [
@@ -90,4 +98,30 @@ class ReplyTemplateCategorySerializer(serializers.ModelSerializer):
         model = ReplyTemplateCategory
         fields = ['id', 'name', 'order', 'is_active', 'templates', 'created_at', 'updated_at']
         read_only_fields = ['id', 'templates', 'created_at', 'updated_at']
+
+
+class AutomationMessageTemplateSerializer(serializers.ModelSerializer):
+    event_label = serializers.CharField(source='get_event_key_display', read_only=True)
+    language_label = serializers.CharField(source='get_language_display', read_only=True)
+
+    class Meta:
+        model = AutomationMessageTemplate
+        fields = [
+            'id', 'event_key', 'event_label', 'language', 'language_label',
+            'channel', 'text', 'is_active', 'updated_at',
+        ]
+        read_only_fields = ['id', 'event_label', 'language_label', 'updated_at']
+
+
+class BookingRulesSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = BookingRules
+        fields = [
+            'child_free_max_age',
+            'child_free_requires_no_bed',
+            'family_rooms_self_service_enabled',
+            'followup_delay_minutes',
+            'updated_at',
+        ]
+        read_only_fields = ['family_rooms_self_service_enabled', 'updated_at']
 

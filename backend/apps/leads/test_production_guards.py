@@ -51,10 +51,10 @@ class ProductionConversationGuardTests(TestCase):
             ],
         }]
 
-        result = execute_pricing_tool('get_family_room', {
+        result = execute_pricing_tool('get_room_options', {
             'guest_count': 2,
             'children_ages': [0.17],
-            'single_room_required': True,
+            'one_room_required': True,
             'checkin_date': '2026-07-28',
             'checkout_date': '2026-07-31',
         })
@@ -92,10 +92,10 @@ class ProductionConversationGuardTests(TestCase):
         self.assertEqual(result['combinations'], [])
 
     def test_room_pricing_requires_both_exact_dates(self):
-        result = execute_pricing_tool('get_family_room', {
+        result = execute_pricing_tool('get_room_options', {
             'guest_count': 2,
             'children_ages': [0.02],
-            'single_room_required': True,
+            'one_room_required': True,
             'checkin_date': '2026-07-28',
         })
 

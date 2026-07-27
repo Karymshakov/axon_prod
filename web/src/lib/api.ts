@@ -274,6 +274,10 @@ export interface Lead {
   segment_display: string
   status: string
   source: string
+  is_sales_lead: boolean
+  conversation_kind: 'sales' | 'courtesy' | 'faq' | 'service'
+  origin_event_type: string
+  followup_allowed: boolean
   contact_channel: ContactChannel
   discovery_source: DiscoverySource
   discovery_source_detail: string
@@ -284,6 +288,10 @@ export interface Lead {
   check_in_date: string | null
   check_out_date: string | null
   guest_count: number | null
+  adult_count: number | null
+  children_ages: number[]
+  infant_count: number
+  one_room_required: boolean | null
   room_type_preference: string
   meal_plan: 'none' | 'breakfast' | 'lunch' | 'dinner' | 'half_board_bl' | 'half_board_bd' | 'full_board' | ''
   // Summary & Next Steps
@@ -386,6 +394,7 @@ export interface FetchLeadsParams {
   discovery_source?: string
   assigned_to?: string
   search?: string
+  include_non_sales?: boolean
 }
 
 export function fetchLeads(params?: FetchLeadsParams) {
@@ -397,6 +406,7 @@ export function fetchLeads(params?: FetchLeadsParams) {
   if (params?.discovery_source) qs.append('discovery_source', params.discovery_source)
   if (params?.assigned_to) qs.append('assigned_to', params.assigned_to)
   if (params?.search) qs.append('search', params.search)
+  if (params?.include_non_sales) qs.append('include_non_sales', 'true')
   const queryString = qs.toString()
   return api.get<Lead[]>(`/leads/${queryString ? `?${queryString}` : ''}`)
 }
@@ -891,6 +901,16 @@ export interface SocialContentItem {
   auto_tags: string[]
   reply_guidance: string
   manager_notes: string
+  automation_enabled: boolean
+  automation_trigger: 'none' | 'comment_any' | 'comment_exact'
+  automation_trigger_values: string[]
+  automation_reply_ru: string
+  automation_reply_ky: string
+  automation_reply_en: string
+  automation_starts_at: string | null
+  automation_ends_at: string | null
+  automation_promotes_to_lead: boolean
+  automation_followup_allowed: boolean
   media_url: string
   thumbnail_url: string
   permalink: string
@@ -917,6 +937,16 @@ export interface UpdateSocialContentData {
   auto_tags?: string[]
   reply_guidance?: string
   manager_notes?: string
+  automation_enabled?: boolean
+  automation_trigger?: 'none' | 'comment_any' | 'comment_exact'
+  automation_trigger_values?: string[]
+  automation_reply_ru?: string
+  automation_reply_ky?: string
+  automation_reply_en?: string
+  automation_starts_at?: string | null
+  automation_ends_at?: string | null
+  automation_promotes_to_lead?: boolean
+  automation_followup_allowed?: boolean
   media_url?: string
   thumbnail_url?: string
   permalink?: string
@@ -1705,6 +1735,54 @@ export function deleteReplyTemplate(id: number) {
   return api.delete(`/reply-templates/${id}/`)
 }
 
+export type AutomationMessageEvent =
+  | 'telegram_start'
+  | 'story_mention_ack'
+  | 'story_courtesy_close'
+  | 'pricing_unavailable'
+  | 'pricing_check_required'
+  | 'manager_handoff'
+  | 'media_unavailable'
+
+export interface AutomationMessageTemplate {
+  id: number
+  event_key: AutomationMessageEvent
+  event_label: string
+  language: 'ru' | 'ky' | 'en'
+  language_label: string
+  channel: ReplyTemplateChannel
+  text: string
+  is_active: boolean
+  updated_at: string
+}
+
+export interface BookingRules {
+  child_free_max_age: string
+  child_free_requires_no_bed: boolean
+  family_rooms_self_service_enabled: boolean
+  followup_delay_minutes: number
+  updated_at: string
+}
+
+export function fetchAutomationMessageTemplates() {
+  return api.get<AutomationMessageTemplate[]>('/automation-message-templates/')
+}
+
+export function updateAutomationMessageTemplate(
+  id: number,
+  data: Partial<Pick<AutomationMessageTemplate, 'text' | 'is_active'>>,
+) {
+  return api.patch<AutomationMessageTemplate>(`/automation-message-templates/${id}/`, data)
+}
+
+export function fetchBookingRules() {
+  return api.get<BookingRules>('/booking-rules/')
+}
+
+export function updateBookingRules(data: Partial<Omit<BookingRules, 'updated_at'>>) {
+  return api.patch<BookingRules>('/booking-rules/', data)
+}
+
 // Must use raw fetch — api.post() calls JSON.stringify which corrupts FormData
 export async function processPlaybookFile(id: number, file: File): Promise<{ content: string }> {
   const token = getAccessToken()
@@ -1976,7 +2054,7 @@ export interface RoomCombination {
   index: number
   rooms: string[]
   room_count: number
-  type: 'Основной' | 'Альтернатива' | 'Семейный'
+  type: 'Основной' | 'Альтернатива'
   available: boolean
   prices: RoomCombinationPrices | null
   note: string
@@ -2003,7 +2081,7 @@ export function fetchRoomCombinationRoomTypes() {
 export function createCustomCombination(data: {
   guest_count: number
   rooms: string[]
-  combination_type: 'Основной' | 'Альтернатива' | 'Семейный'
+  combination_type: 'Основной' | 'Альтернатива'
   note: string
 }) {
   return api.post<RoomCombination>('/room-combinations/custom/', data)
@@ -2028,7 +2106,7 @@ export function saveRoomCombinationNote(
 export function saveCombinationType(
   guestCount: number,
   combinationIndex: number,
-  combinationType: 'Основной' | 'Альтернатива' | 'Семейный',
+  combinationType: 'Основной' | 'Альтернатива',
 ) {
   return api.patch(`/room-combinations/notes/${guestCount}/${combinationIndex}/`, { combination_type: combinationType })
 }

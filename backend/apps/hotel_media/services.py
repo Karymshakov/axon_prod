@@ -557,11 +557,31 @@ def sync_instagram_social_content(*, organization=None) -> dict:
 
         active_story_ids = set()
         try:
-            for record in _instagram_records(
-                f'{base}/stories',
-                token=token,
-                params={'fields': fields, 'limit': 50},
-            ):
+            story_fields = ','.join([
+                'id',
+                'media_type',
+                'media_url',
+                'thumbnail_url',
+                'timestamp',
+            ])
+            try:
+                story_records = list(_instagram_records(
+                    f'{base}/stories',
+                    token=token,
+                    params={'fields': story_fields, 'limit': 50},
+                ))
+            except Exception:
+                # Some account/media combinations reject optional thumbnail data.
+                # Retry with the stable core fields instead of failing the whole sync.
+                story_records = list(_instagram_records(
+                    f'{base}/stories',
+                    token=token,
+                    params={
+                        'fields': 'id,media_type,media_url,timestamp',
+                        'limit': 50,
+                    },
+                ))
+            for record in story_records:
                 external_id = str(record.get('id') or '').strip()
                 if not external_id:
                     continue

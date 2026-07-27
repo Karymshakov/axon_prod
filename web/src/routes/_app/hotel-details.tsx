@@ -117,6 +117,12 @@ import {
   type ReplyTemplate,
   type ReplyTemplateCategory,
   type ReplyTemplateChannel,
+  fetchAutomationMessageTemplates,
+  updateAutomationMessageTemplate,
+  fetchBookingRules,
+  updateBookingRules,
+  type AutomationMessageTemplate,
+  type BookingRules,
   fetchRoomPricing,
   createRoomPricing,
   updateRoomPricing,
@@ -2048,7 +2054,7 @@ function AddCombinationDialog({
 }) {
   const [guestCount, setGuestCount] = useState('2')
   const [rooms, setRooms] = useState<string[]>([])
-  const [combinationType, setCombinationType] = useState<'Основной' | 'Альтернатива' | 'Семейный'>('Альтернатива')
+  const [combinationType, setCombinationType] = useState<'Основной' | 'Альтернатива'>('Альтернатива')
   const [note, setNote] = useState('')
   const [roomSelectKey, setRoomSelectKey] = useState(0)
   const [isPending, setIsPending] = useState(false)
@@ -2157,7 +2163,7 @@ function AddCombinationDialog({
             <label className="text-sm font-medium">Тип</label>
             <Select
               value={combinationType}
-              onValueChange={(v) => setCombinationType(v as 'Основной' | 'Альтернатива' | 'Семейный')}
+              onValueChange={(v) => setCombinationType(v as 'Основной' | 'Альтернатива')}
             >
               <SelectTrigger>
                 <SelectValue />
@@ -2165,7 +2171,6 @@ function AddCombinationDialog({
               <SelectContent>
                 <SelectItem value="Основной">Основной</SelectItem>
                 <SelectItem value="Альтернатива">Альтернатива</SelectItem>
-                <SelectItem value="Семейный">Семейный (только для гостей с детьми)</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -2208,7 +2213,7 @@ function RoomCombinationsSection() {
   async function handleTypeChange(
     guestCount: number,
     comboIndex: number,
-    newType: 'Основной' | 'Альтернатива' | 'Семейный',
+    newType: 'Основной' | 'Альтернатива',
   ) {
     if (!canEditPricing) return
     queryClient.setQueryData(
@@ -2226,7 +2231,7 @@ function RoomCombinationsSection() {
                 type:
                   combo.index === comboIndex
                     ? newType
-                    : newType === 'Основной' && combo.type !== 'Семейный'
+                    : newType === 'Основной'
                     ? 'Альтернатива'
                     : combo.type,
               })),
@@ -2380,7 +2385,7 @@ function RoomCombinationsSection() {
                             handleTypeChange(
                               group.guest_count,
                               combo.index,
-                              v as 'Основной' | 'Альтернатива' | 'Семейный',
+                              v as 'Основной' | 'Альтернатива',
                             )
                           }
                         >
@@ -2389,8 +2394,6 @@ function RoomCombinationsSection() {
                               'h-7 text-xs w-[140px] font-medium',
                               combo.type === 'Основной'
                                 ? 'text-blue-600 border-blue-200 bg-blue-50 hover:bg-blue-100'
-                                : combo.type === 'Семейный'
-                                ? 'text-violet-600 border-violet-200 bg-violet-50 hover:bg-violet-100'
                                 : 'text-muted-foreground',
                             )}
                           >
@@ -2399,7 +2402,6 @@ function RoomCombinationsSection() {
                           <SelectContent>
                             <SelectItem value="Основной" className="text-xs text-blue-600">Основной</SelectItem>
                             <SelectItem value="Альтернатива" className="text-xs">Альтернатива</SelectItem>
-                            <SelectItem value="Семейный" className="text-xs text-violet-600">Семейный</SelectItem>
                           </SelectContent>
                         </Select>
                       ) : (
@@ -2761,15 +2763,9 @@ function PricingTab() {
                   <td className="px-3 py-2.5 font-medium">{row.kategoria_nomera}</td>
                   <td className="px-3 py-2.5 text-center">{row.kolichestvo_chelovek}</td>
                   <td className="px-3 py-2.5 text-center">
-                    {row.guest_type === 'family' ? (
-                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-violet-100 text-violet-700 border border-violet-200">
-                        Семейный
-                      </span>
-                    ) : (
-                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-zinc-100 text-zinc-600 border border-zinc-200">
-                        Любой
-                      </span>
-                    )}
+                    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-zinc-100 text-zinc-600 border border-zinc-200">
+                      Стандартный
+                    </span>
                   </td>
                   <td className="px-3 py-2.5 text-muted-foreground">{formatPricingDate(row.deystvitelno_s)}</td>
                   <td className="px-3 py-2.5 text-muted-foreground">{formatPricingDate(row.deystvitelno_do)}</td>
@@ -2817,7 +2813,7 @@ function PricingTab() {
       <div className="space-y-2">
         <div className="rounded-lg border border-blue-200 bg-blue-50 dark:border-blue-900 dark:bg-blue-950/30 p-3 text-sm text-blue-800 dark:text-blue-200">
           <span className="font-medium">Правило для детей:</span>{' '}
-          Один ребёнок до 6 лет не считается. При двух детях до 6 лет — рекомендовать семейный номер.
+          Возраст бесплатного проживания и необходимость отдельного места настраиваются во вкладке «Автоответы».
         </div>
         <p className="text-xs text-muted-foreground px-1">
           <span className="font-medium">Макс. чел.</span> — максимальное количество гостей, не считая детей до 6 лет.
@@ -2838,7 +2834,7 @@ function PricingTab() {
               <Input
                 value={form.kategoria_nomera}
                 onChange={(e) => setForm((f) => ({ ...f, kategoria_nomera: e.target.value }))}
-                placeholder="Стандарт, Комфорт, Семейный..."
+                placeholder="Стандарт, Комфорт..."
               />
             </div>
 
@@ -2871,12 +2867,11 @@ function PricingTab() {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="any">Любой — стандартные и комфорт номера (рекомендуется всем гостям)</SelectItem>
-                  <SelectItem value="family">Семейный — только для гостей с детьми</SelectItem>
+                  <SelectItem value="any">Стандартные и комфорт номера</SelectItem>
                 </SelectContent>
               </Select>
               <p className="text-xs text-muted-foreground">
-                Семейные номера ИИ предлагает только когда гость подтверждает наличие детей.
+                Семейные номера исключены из автоматической продажи.
               </p>
             </div>
 
@@ -3076,6 +3071,191 @@ function PricingTab() {
   )
 }
 
+// ── Runtime automation messages and booking rules ─────────────────────────────
+
+const AUTOMATION_EVENT_HELP: Record<AutomationMessageTemplate['event_key'], string> = {
+  telegram_start: 'Приветствие, если после /start не пришло следующее сообщение.',
+  story_mention_ack: 'Один ответ на отметку отеля в сторис. Продажи и follow-up не запускаются.',
+  story_courtesy_close: 'Ответ на вежливое продолжение после отметки, например «это вам спасибо».',
+  pricing_unavailable: 'Текст после успешной передачи менеджеру запроса на неподтверждённый тариф.',
+  pricing_check_required: 'Безопасный ответ, когда цену не удалось подтвердить.',
+  manager_handoff: 'Подтверждение реальной передачи вопроса менеджеру.',
+  media_unavailable: 'Ответ, когда запрошенное фото не удалось доставить.',
+}
+
+function AutomationTemplateEditor({
+  template,
+  canEdit,
+  onSaved,
+}: {
+  template: AutomationMessageTemplate
+  canEdit: boolean
+  onSaved: () => void
+}) {
+  const [text, setText] = useState(template.text)
+  const [isActive, setIsActive] = useState(template.is_active)
+  useEffect(() => {
+    setText(template.text)
+    setIsActive(template.is_active)
+  }, [template])
+
+  const mutation = useMutation({
+    mutationFn: () => updateAutomationMessageTemplate(template.id, { text, is_active: isActive }),
+    onSuccess: () => {
+      onSaved()
+      toast.success('Автоответ сохранён')
+    },
+    onError: () => toast.error('Не удалось сохранить автоответ'),
+  })
+
+  return (
+    <div className="rounded-lg border p-4 space-y-3">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <div className="font-medium">{template.event_label}</div>
+          <div className="text-xs text-muted-foreground mt-1">
+            {template.language_label} · {template.channel}
+          </div>
+        </div>
+        <Switch checked={isActive} onCheckedChange={setIsActive} disabled={!canEdit} />
+      </div>
+      <p className="text-xs leading-5 text-muted-foreground">
+        {AUTOMATION_EVENT_HELP[template.event_key]}
+      </p>
+      <Textarea value={text} onChange={(event) => setText(event.target.value)} rows={4} disabled={!canEdit} />
+      <Button
+        size="sm"
+        onClick={() => mutation.mutate()}
+        disabled={!canEdit || mutation.isPending || (!text.trim() && isActive)}
+      >
+        {mutation.isPending ? 'Сохранение...' : 'Сохранить'}
+      </Button>
+    </div>
+  )
+}
+
+function AutomationMessagesTab() {
+  const queryClient = useQueryClient()
+  const { user } = useAuth()
+  const canEdit = canEditHotelPricing(user)
+  const { data: templates = [], isLoading } = useQuery({
+    queryKey: ['automation-message-templates'],
+    queryFn: fetchAutomationMessageTemplates,
+  })
+  const { data: rules } = useQuery({
+    queryKey: ['booking-rules'],
+    queryFn: fetchBookingRules,
+  })
+  const [rulesForm, setRulesForm] = useState<BookingRules | null>(null)
+  useEffect(() => {
+    if (rules) setRulesForm(rules)
+  }, [rules])
+
+  const rulesMutation = useMutation({
+    mutationFn: () => {
+      if (!rulesForm) throw new Error('Rules are not loaded')
+      return updateBookingRules({
+        child_free_max_age: rulesForm.child_free_max_age,
+        child_free_requires_no_bed: rulesForm.child_free_requires_no_bed,
+        followup_delay_minutes: rulesForm.followup_delay_minutes,
+      })
+    },
+    onSuccess: (updated) => {
+      setRulesForm(updated)
+      queryClient.setQueryData(['booking-rules'], updated)
+      toast.success('Правила бронирования сохранены')
+    },
+    onError: () => toast.error('Не удалось сохранить правила бронирования'),
+  })
+
+  return (
+    <div className="space-y-6">
+      {!canEdit ? (
+        <div className="rounded-lg border bg-muted/30 p-3 text-sm text-muted-foreground">
+          Просмотр доступен, редактирование автоответов и правил — только владельцу или администратору организации.
+        </div>
+      ) : null}
+
+      <div>
+        <h3 className="text-base font-semibold">Автоответы системных событий</h3>
+        <p className="text-sm text-muted-foreground mt-1">
+          Эти тексты действительно используются ботом. Отключённый шаблон не отправляется.
+        </p>
+      </div>
+      {isLoading ? (
+        <div className="h-40 rounded-lg border bg-muted animate-pulse" />
+      ) : (
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+          {templates.map((template) => (
+            <AutomationTemplateEditor
+              key={template.id}
+              template={template}
+              canEdit={canEdit}
+              onSaved={() => queryClient.invalidateQueries({ queryKey: ['automation-message-templates'] })}
+            />
+          ))}
+        </div>
+      )}
+
+      {rulesForm ? (
+        <div className="rounded-lg border p-4 space-y-4">
+          <div>
+            <h3 className="font-semibold">Детерминированные правила бронирования</h3>
+            <p className="text-xs text-muted-foreground mt-1">
+              Цена, возраст и follow-up берутся отсюда, а не угадываются моделью.
+            </p>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="space-y-1.5">
+              <Label>Бесплатный возраст ребёнка, до</Label>
+              <Input
+                type="number"
+                min="0"
+                max="17"
+                step="0.1"
+                value={rulesForm.child_free_max_age}
+                disabled={!canEdit}
+                onChange={(event) => setRulesForm({ ...rulesForm, child_free_max_age: event.target.value })}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Follow-up после ответа, минут</Label>
+              <Input
+                type="number"
+                min="1"
+                max="1440"
+                value={rulesForm.followup_delay_minutes}
+                disabled={!canEdit}
+                onChange={(event) => setRulesForm({
+                  ...rulesForm,
+                  followup_delay_minutes: Number(event.target.value) || 10,
+                })}
+              />
+            </div>
+          </div>
+          <label className="flex items-start gap-3 text-sm">
+            <Checkbox
+              checked={rulesForm.child_free_requires_no_bed}
+              disabled={!canEdit}
+              onCheckedChange={(checked) => setRulesForm({
+                ...rulesForm,
+                child_free_requires_no_bed: Boolean(checked),
+              })}
+            />
+            <span>Бесплатное проживание ребёнка действует без отдельного спального места.</span>
+          </label>
+          <div className="rounded-md bg-muted/40 p-3 text-sm">
+            Семейные номера исключены из автоматической продажи и обрабатываются только менеджером.
+          </div>
+          <Button onClick={() => rulesMutation.mutate()} disabled={!canEdit || rulesMutation.isPending}>
+            {rulesMutation.isPending ? 'Сохранение...' : 'Сохранить правила'}
+          </Button>
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
 // ── Social Content Review ─────────────────────────────────────────────────────
 
 const SOCIAL_TYPE_LABELS: Record<SocialContentType, string> = {
@@ -3112,10 +3292,18 @@ interface SocialContentFormState {
   playbook_keys_text: string
   reply_guidance: string
   manager_notes: string
+  automation_enabled: boolean
+  automation_trigger: 'none' | 'comment_any' | 'comment_exact'
+  automation_trigger_values_text: string
+  automation_reply_ru: string
+  automation_reply_ky: string
+  automation_reply_en: string
 }
 
 function SocialContentTab({ mediaItems }: { mediaItems: HotelMediaItem[] }) {
   const queryClient = useQueryClient()
+  const { user } = useAuth()
+  const canEdit = canEditHotelPricing(user)
   const [needsReviewOnly, setNeedsReviewOnly] = useState(true)
   const [search, setSearch] = useState('')
   const [editing, setEditing] = useState<SocialContentItem | null>(null)
@@ -3158,6 +3346,17 @@ function SocialContentTab({ mediaItems }: { mediaItems: HotelMediaItem[] }) {
         playbook_keys: playbookKeys,
         reply_guidance: form.reply_guidance,
         manager_notes: form.manager_notes,
+        automation_enabled: form.automation_enabled,
+        automation_trigger: form.automation_enabled ? form.automation_trigger : 'none',
+        automation_trigger_values: form.automation_trigger_values_text
+          .split('\n')
+          .map((value) => value.trim())
+          .filter(Boolean),
+        automation_reply_ru: form.automation_reply_ru,
+        automation_reply_ky: form.automation_reply_ky,
+        automation_reply_en: form.automation_reply_en,
+        automation_promotes_to_lead: false,
+        automation_followup_allowed: false,
       })
     },
     onSuccess: () => {
@@ -3194,6 +3393,7 @@ function SocialContentTab({ mediaItems }: { mediaItems: HotelMediaItem[] }) {
   })
 
   function openEdit(item: SocialContentItem) {
+    if (!canEdit) return
     setEditing(item)
     setForm({
       title: item.title,
@@ -3207,6 +3407,12 @@ function SocialContentTab({ mediaItems }: { mediaItems: HotelMediaItem[] }) {
       playbook_keys_text: item.playbook_keys.join(', '),
       reply_guidance: item.reply_guidance,
       manager_notes: item.manager_notes,
+      automation_enabled: item.automation_enabled,
+      automation_trigger: item.automation_trigger,
+      automation_trigger_values_text: item.automation_trigger_values.join('\n'),
+      automation_reply_ru: item.automation_reply_ru,
+      automation_reply_ky: item.automation_reply_ky,
+      automation_reply_en: item.automation_reply_en,
     })
   }
 
@@ -3230,10 +3436,12 @@ function SocialContentTab({ mediaItems }: { mediaItems: HotelMediaItem[] }) {
             Только требующие проверки
           </label>
         </div>
-        <Button onClick={() => syncMutation.mutate()} disabled={syncMutation.isPending}>
-          {syncMutation.isPending ? <Loader2Icon className="h-4 w-4 mr-2 animate-spin" /> : <RefreshCwIcon className="h-4 w-4 mr-2" />}
-          Синхронизировать Instagram
-        </Button>
+        {canEdit ? (
+          <Button onClick={() => syncMutation.mutate()} disabled={syncMutation.isPending}>
+            {syncMutation.isPending ? <Loader2Icon className="h-4 w-4 mr-2 animate-spin" /> : <RefreshCwIcon className="h-4 w-4 mr-2" />}
+            Синхронизировать Instagram
+          </Button>
+        ) : null}
       </div>
       <p className="text-xs leading-5 text-muted-foreground">
         Meta API синхронизирует публикации, рилсы и только активные сторис за 24 часа.
@@ -3278,6 +3486,7 @@ function SocialContentTab({ mediaItems }: { mediaItems: HotelMediaItem[] }) {
                     <Badge variant="outline">{categoryLabel(item.effective_category || item.category)}</Badge>
                     {item.effective_room_category ? <Badge variant="outline">{item.effective_room_category}</Badge> : null}
                     {item.fingerprint_count > 0 ? <Badge variant="secondary">{item.fingerprint_count} hash</Badge> : null}
+                    {item.automation_enabled ? <Badge>Direct-автоответ</Badge> : null}
                   </div>
                   <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
                     <CalendarClockIcon className="h-3.5 w-3.5" />
@@ -3285,7 +3494,7 @@ function SocialContentTab({ mediaItems }: { mediaItems: HotelMediaItem[] }) {
                     <span>·</span>
                     {SOCIAL_STATUS_LABELS[item.status]}
                   </div>
-                  <div className="flex gap-2 flex-wrap">
+                  {canEdit ? <div className="flex gap-2 flex-wrap">
                     <Button size="sm" variant="outline" onClick={() => openEdit(item)}>
                       <PencilIcon className="h-3.5 w-3.5 mr-1.5" />
                       Настроить
@@ -3309,7 +3518,7 @@ function SocialContentTab({ mediaItems }: { mediaItems: HotelMediaItem[] }) {
                       {deleteMutation.isPending ? <Loader2Icon className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : <Trash2Icon className="h-3.5 w-3.5 mr-1.5" />}
                       Удалить
                     </Button>
-                  </div>
+                  </div> : null}
                 </div>
               </div>
             )
@@ -3384,7 +3593,6 @@ function SocialContentTab({ mediaItems }: { mediaItems: HotelMediaItem[] }) {
                       <SelectItem value="standard_queen">Стандарт Квин</SelectItem>
                       <SelectItem value="standard_twin">Стандарт Твин</SelectItem>
                       <SelectItem value="comfort">Комфорт</SelectItem>
-                      <SelectItem value="family">Семейный</SelectItem>
                       <SelectItem value="other">Другой</SelectItem>
                     </SelectContent>
                   </Select>
@@ -3417,6 +3625,79 @@ function SocialContentTab({ mediaItems }: { mediaItems: HotelMediaItem[] }) {
                   onChange={(e) => setForm((f) => f && ({ ...f, manager_notes: e.target.value }))}
                   rows={2}
                 />
+              </div>
+
+              <div className="rounded-lg border p-4 space-y-4">
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <Label>Автоматизация комментариев</Label>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Отправляет один личный ответ через Meta API. Сам комментарий не создаёт лид и не запускает follow-up.
+                    </p>
+                  </div>
+                  <Switch
+                    checked={form.automation_enabled}
+                    onCheckedChange={(checked) => setForm((f) => f && ({ ...f, automation_enabled: checked }))}
+                  />
+                </div>
+
+                {form.automation_enabled ? (
+                  <>
+                    <div className="space-y-1.5">
+                      <Label>Событие</Label>
+                      <Select
+                        value={form.automation_trigger}
+                        onValueChange={(value) => setForm((f) => f && ({
+                          ...f,
+                          automation_trigger: value as SocialContentFormState['automation_trigger'],
+                        }))}
+                      >
+                        <SelectTrigger><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="comment_any">Любой комментарий</SelectItem>
+                          <SelectItem value="comment_exact">Точное совпадение с фразой</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    {form.automation_trigger === 'comment_exact' ? (
+                      <div className="space-y-1.5">
+                        <Label>Фразы-триггеры, по одной на строку</Label>
+                        <Textarea
+                          value={form.automation_trigger_values_text}
+                          onChange={(e) => setForm((f) => f && ({ ...f, automation_trigger_values_text: e.target.value }))}
+                          rows={3}
+                          placeholder={'хочу\nподробнее\nцена'}
+                        />
+                      </div>
+                    ) : null}
+                    <div className="space-y-1.5">
+                      <Label>Сообщение в Direct — русский</Label>
+                      <Textarea
+                        value={form.automation_reply_ru}
+                        onChange={(e) => setForm((f) => f && ({ ...f, automation_reply_ru: e.target.value }))}
+                        rows={3}
+                      />
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div className="space-y-1.5">
+                        <Label>Кыргызча</Label>
+                        <Textarea
+                          value={form.automation_reply_ky}
+                          onChange={(e) => setForm((f) => f && ({ ...f, automation_reply_ky: e.target.value }))}
+                          rows={3}
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label>English</Label>
+                        <Textarea
+                          value={form.automation_reply_en}
+                          onChange={(e) => setForm((f) => f && ({ ...f, automation_reply_en: e.target.value }))}
+                          rows={3}
+                        />
+                      </div>
+                    </div>
+                  </>
+                ) : null}
               </div>
 
               <div className="space-y-1.5">
@@ -3456,7 +3737,7 @@ function HotelDetailsPage() {
 function HotelDetailsPageContent() {
   const { t } = useLanguage()
   const queryClient = useQueryClient()
-  const [activeTab, setActiveTab] = useState<'photo' | 'video' | 'playbooks' | 'reply-templates' | 'pricing' | 'social-content'>('playbooks')
+  const [activeTab, setActiveTab] = useState<'photo' | 'video' | 'playbooks' | 'reply-templates' | 'automations' | 'pricing' | 'social-content'>('playbooks')
   const [search, setSearch] = useState('')
   const [category, setКатегория] = useState('all')
   const [dialogOpen, setDialogOpen] = useState(false)
@@ -3519,7 +3800,7 @@ function HotelDetailsPageContent() {
 
   const openUpload = () => {
     setEditingItem(null)
-    const mediaType = activeTab === 'playbooks' || activeTab === 'reply-templates' || activeTab === 'pricing' || activeTab === 'social-content' ? 'photo' : activeTab as 'photo' | 'video'
+    const mediaType = activeTab === 'playbooks' || activeTab === 'reply-templates' || activeTab === 'automations' || activeTab === 'pricing' || activeTab === 'social-content' ? 'photo' : activeTab as 'photo' | 'video'
     setForm({
       ...EMPTY_FORM,
       media_type: mediaType,
@@ -3654,6 +3935,10 @@ function HotelDetailsPageContent() {
                   <FileTextIcon className="h-4 w-4" />
                   Шаблоны
                 </TabsTrigger>
+                <TabsTrigger value="automations" className="gap-1.5">
+                  <BotIcon className="h-4 w-4" />
+                  Автоответы
+                </TabsTrigger>
                 <TabsTrigger value="pricing" className="gap-1.5">
                   <DollarSignIcon className="h-4 w-4" />
                   {t('hotelDetails.tabs.pricing')}
@@ -3725,6 +4010,10 @@ function HotelDetailsPageContent() {
 
             <TabsContent value="reply-templates">
               <ReplyTemplatesTab />
+            </TabsContent>
+
+            <TabsContent value="automations">
+              <AutomationMessagesTab />
             </TabsContent>
 
             <TabsContent value="pricing">
@@ -3913,7 +4202,6 @@ function HotelDetailsPageContent() {
                     <SelectItem value="standard_queen">Стандарт Квин</SelectItem>
                     <SelectItem value="standard_twin">Стандарт Твин</SelectItem>
                     <SelectItem value="comfort">Комфорт</SelectItem>
-                    <SelectItem value="family">Семейный</SelectItem>
                     <SelectItem value="other">Другой</SelectItem>
                   </SelectContent>
                 </Select>

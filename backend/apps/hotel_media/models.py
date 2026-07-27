@@ -175,6 +175,15 @@ class SocialContentItem(models.Model):
         (SOURCE_MANUAL, 'Manual'),
     ]
 
+    AUTOMATION_NONE = 'none'
+    AUTOMATION_COMMENT_ANY = 'comment_any'
+    AUTOMATION_COMMENT_EXACT = 'comment_exact'
+    AUTOMATION_CHOICES = [
+        (AUTOMATION_NONE, 'Disabled'),
+        (AUTOMATION_COMMENT_ANY, 'Any comment'),
+        (AUTOMATION_COMMENT_EXACT, 'Comment matches configured phrases'),
+    ]
+
     organization = models.ForeignKey(**ORG_FK)
     platform = models.CharField(max_length=30, choices=PLATFORM_CHOICES, default=PLATFORM_INSTAGRAM)
     external_id = models.CharField(
@@ -228,6 +237,30 @@ class SocialContentItem(models.Model):
         help_text='Short manager-approved guidance/template for replies to this content',
     )
     manager_notes = models.TextField(blank=True)
+    automation_enabled = models.BooleanField(default=False)
+    automation_trigger = models.CharField(
+        max_length=30,
+        choices=AUTOMATION_CHOICES,
+        default=AUTOMATION_NONE,
+    )
+    automation_trigger_values = models.JSONField(
+        default=list,
+        blank=True,
+        help_text='Exact phrases for comment_exact; matching is normalized and case-insensitive.',
+    )
+    automation_reply_ru = models.TextField(blank=True)
+    automation_reply_ky = models.TextField(blank=True)
+    automation_reply_en = models.TextField(blank=True)
+    automation_starts_at = models.DateTimeField(null=True, blank=True)
+    automation_ends_at = models.DateTimeField(null=True, blank=True)
+    automation_promotes_to_lead = models.BooleanField(
+        default=False,
+        help_text='If false, campaign delivery itself does not create a sales lead.',
+    )
+    automation_followup_allowed = models.BooleanField(
+        default=False,
+        help_text='Follow-ups remain disabled until the guest shows sales intent.',
+    )
 
     media_url = models.TextField(blank=True)
     thumbnail_url = models.TextField(blank=True)
@@ -277,6 +310,47 @@ class SocialContentItem(models.Model):
         if self.linked_media_item_id:
             return self.linked_media_item.room_category
         return ''
+
+
+class SocialAutomationDelivery(models.Model):
+    """Idempotent audit row for an Instagram comment-to-DM automation."""
+
+    STATUS_PENDING = 'pending'
+    STATUS_SENT = 'sent'
+    STATUS_FAILED = 'failed'
+    STATUS_CHOICES = [
+        (STATUS_PENDING, 'Pending'),
+        (STATUS_SENT, 'Sent'),
+        (STATUS_FAILED, 'Failed'),
+    ]
+
+    organization = models.ForeignKey(**ORG_FK)
+    social_content_item = models.ForeignKey(
+        SocialContentItem,
+        on_delete=models.CASCADE,
+        related_name='automation_deliveries',
+    )
+    external_event_id = models.CharField(max_length=255)
+    recipient_id = models.CharField(max_length=128, blank=True)
+    trigger_text = models.TextField(blank=True)
+    reply_text = models.TextField(blank=True)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_PENDING)
+    response_message_id = models.CharField(max_length=255, blank=True)
+    error = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['organization', 'external_event_id'],
+                name='uniq_social_automation_event_per_org',
+            ),
+        ]
+
+    def __str__(self):
+        return f'{self.external_event_id}: {self.status}'
 
 
 class MediaFingerprint(models.Model):

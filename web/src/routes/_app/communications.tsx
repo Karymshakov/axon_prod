@@ -736,7 +736,7 @@ function CommunicationsPage() {
   // Fetch all leads
   const { data: leads = [] } = useQuery({
     queryKey: ['leads'],
-    queryFn: () => fetchLeads(),
+    queryFn: () => fetchLeads({ include_non_sales: true }),
     refetchInterval: 5000,
   })
 

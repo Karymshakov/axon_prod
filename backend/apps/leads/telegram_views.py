@@ -41,6 +41,10 @@ from .services.media_context import build_unresolved_media_summary, resolve_acti
 logger = logging.getLogger(__name__)
 
 
+def _is_telegram_start_command(value: str) -> bool:
+    return bool(re.fullmatch(r'\s*/start(?:@[A-Za-z0-9_]+)?\s*', value or '', flags=re.IGNORECASE))
+
+
 _FAKE_EMAIL_DOMAINS = {
     'example.com', 'example.org', 'example.net', 'example.io',
     'test.com', 'test.org', 'test.net',
@@ -218,9 +222,6 @@ def _delayed_ai_response(lead_id: int, activity_id: int, chat_id: str, text: str
         config = AIConfig.get_config(org=lead.organization)
         current_activity = LeadActivity.objects.get(id=activity_id)
 
-        if not is_channel_ai_globally_paused('telegram', config=config, lead=lead):
-            agent_service.process_incoming_message(lead, text, channel='telegram', lightweight=True)
-
         add_diagnostic_step(
             activity_id,
             'ai_status_checked',
@@ -266,15 +267,16 @@ def _delayed_ai_response(lead_id: int, activity_id: int, chat_id: str, text: str
 
         _send_typing()
 
-        if config.response_delay > 0:
+        response_delay = max(config.response_delay, 5) if _is_telegram_start_command(text) else config.response_delay
+        if response_delay > 0:
             add_diagnostic_step(
                 activity_id,
                 'batching_delay',
                 'Batching rule delay',
-                detail=f'Waiting {config.response_delay} seconds for follow-up messages before replying',
+                detail=f'Waiting {response_delay} seconds for follow-up messages before replying',
                 status='info',
             )
-            remaining = config.response_delay
+            remaining = response_delay
             while remaining > 0:
                 time.sleep(min(4, remaining))
                 remaining -= 4
@@ -315,7 +317,10 @@ def _delayed_ai_response(lead_id: int, activity_id: int, chat_id: str, text: str
         pending_messages = list(LeadActivity.objects.filter(**pending_filter).order_by('created_at'))
         pending_text_messages = [
             m for m in pending_messages
-            if not is_media_only_activity_metadata(m.metadata)
+            if (
+                not is_media_only_activity_metadata(m.metadata)
+                and not _is_telegram_start_command(activity_text_for_ai(m.metadata))
+            )
         ]
         if len(pending_text_messages) > 1:
             combined_text = '\n'.join(
@@ -324,9 +329,77 @@ def _delayed_ai_response(lead_id: int, activity_id: int, chat_id: str, text: str
             ).strip() or text
             logger.info(f"Lead {lead.id}: pooled {len(pending_text_messages)} messages into one response")
         else:
-            combined_text = text
+            combined_text = (
+                activity_text_for_ai(pending_text_messages[0].metadata)
+                if pending_text_messages
+                else text
+            )
 
         pending_ids = {m.id for m in pending_messages}
+
+        # /start is a control event, not a guest request. Wait briefly so a greeting
+        # can supersede it; if it remains the latest event, use an editable greeting.
+        if _is_telegram_start_command(text) and not pending_text_messages:
+            from apps.hotel_info.services.automation_templates import (
+                get_automation_message,
+                normalize_language,
+            )
+
+            language = normalize_language(
+                ((current_activity.metadata or {}).get('from_user') or {}).get('language_code')
+            )
+            greeting = get_automation_message(
+                'telegram_start',
+                organization=lead.organization,
+                channel='telegram',
+                language=language,
+            )
+            if not greeting:
+                finalize_diagnostics(
+                    activity_id,
+                    result=OUTCOME_SKIPPED,
+                    summary='Skipped — Telegram /start automation is disabled',
+                    status='warning',
+                )
+                return
+
+            async def _send_start():
+                return await telegram_service.send_message(chat_id, greeting)
+
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                result = loop.run_until_complete(_send_start())
+            finally:
+                loop.close()
+            if result:
+                LeadActivity.objects.create(
+                    lead=lead,
+                    organization=lead.organization,
+                    activity_type=LeadActivity.TYPE_TELEGRAM_SENT,
+                    description=f'Telegram automation (telegram_start): {greeting[:100]}',
+                    metadata={
+                        'message_id': result.get('message_id'),
+                        'text': greeting,
+                        'automation_event': 'telegram_start',
+                        'is_ai_generated': False,
+                    },
+                )
+                finalize_diagnostics(
+                    activity_id,
+                    result='replied',
+                    summary='Editable Telegram /start greeting sent',
+                    status='success',
+                )
+            return
+
+        if not is_channel_ai_globally_paused('telegram', config=config, lead=lead):
+            agent_service.process_incoming_message(
+                lead,
+                combined_text,
+                channel='telegram',
+                lightweight=True,
+            )
 
         from .ai_service import build_activity_history
         activity_history = build_activity_history(lead, exclude_ids=pending_ids)
@@ -406,6 +479,10 @@ def _delayed_ai_response(lead_id: int, activity_id: int, chat_id: str, text: str
             'check_in_date': str(lead.check_in_date) if lead.check_in_date else None,
             'check_out_date': str(lead.check_out_date) if lead.check_out_date else None,
             'guest_count': lead.guest_count,
+            'adult_count': lead.adult_count,
+            'children_ages': lead.children_ages,
+            'infant_count': lead.infant_count,
+            'one_room_required': lead.one_room_required,
             'room_type_preference': lead.room_type_preference,
             'meal_plan': lead.meal_plan,
             'discovery_source': lead.discovery_source,
@@ -465,6 +542,44 @@ def _delayed_ai_response(lead_id: int, activity_id: int, chat_id: str, text: str
                 status='warning',
             )
             return
+
+        # A newer guest message can arrive while the model is generating.
+        latest_received_now = LeadActivity.objects.filter(
+            lead=lead,
+            activity_type=LeadActivity.TYPE_TELEGRAM_RECEIVED,
+        ).order_by('-created_at', '-id').first()
+        if latest_received_now and latest_received_now.id not in pending_ids:
+            logger.info(
+                'Lead %s: stale-generation guard suppressed Telegram response for activity %s',
+                lead.id,
+                activity_id,
+            )
+            finalize_diagnostics(
+                activity_id,
+                result=OUTCOME_DELAYED,
+                summary='Delayed — a newer inbound message arrived during generation',
+                status='warning',
+            )
+            return
+
+        if pending_messages:
+            last_pending_time = pending_messages[-1].created_at
+            if LeadActivity.objects.filter(
+                lead=lead,
+                activity_type=LeadActivity.TYPE_TELEGRAM_SENT,
+                created_at__gt=last_pending_time,
+            ).exists():
+                logger.info(
+                    'Lead %s: concurrent-send guard suppressed duplicate Telegram response',
+                    lead.id,
+                )
+                finalize_diagnostics(
+                    activity_id,
+                    result=OUTCOME_DELAYED,
+                    summary='Delayed — another worker already replied to this batch',
+                    status='warning',
+                )
+                return
 
         album_photos = []
         album_file_urls = []
@@ -737,6 +852,15 @@ def _delayed_ai_response(lead_id: int, activity_id: int, chat_id: str, text: str
                 if updated_fields:
                     lead.save(update_fields=list(dict.fromkeys(updated_fields)))
                     logger.info(f"Auto-extracted and updated fields for lead {lead.id}: {updated_fields}")
+                from apps.leads.services.guest_structure import apply_extracted_guest_structure
+
+                structured_fields = apply_extracted_guest_structure(lead, extracted_data)
+                if structured_fields:
+                    logger.info(
+                        'Updated structured guest composition for lead %s: %s',
+                        lead.id,
+                        structured_fields,
+                    )
 
         # Mark handoff as completed so subsequent messages from the guest are ignored.
         if Lead.objects.filter(id=lead_id, ai_paused=True, ai_paused_by='AI Handoff').exists():
@@ -1032,7 +1156,12 @@ def telegram_webhook(request):
         )
 
         # Stamp last_contacted so the CRM reflects when the guest last wrote
-        Lead.objects.filter(id=lead.id).update(last_contacted=date.today())
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+
+        Lead.objects.filter(id=lead.id).update(
+            last_contacted=datetime.now(ZoneInfo('Asia/Bishkek')).date()
+        )
 
         logger.info(f"Received Telegram message from lead {lead.id}: {text[:50]}")
 

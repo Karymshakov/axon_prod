@@ -167,6 +167,11 @@ class LeadViewSet(OrganizationQuerysetMixin, viewsets.ModelViewSet):
             )
             .order_by(F('last_message_at').desc(nulls_last=True))
         )
+        include_non_sales = str(
+            self.request.query_params.get('include_non_sales', '')
+        ).lower() in {'1', 'true', 'yes'}
+        if not include_non_sales:
+            base_qs = base_qs.filter(is_sales_lead=True)
         if getattr(user, 'is_superadmin', False):
             return base_qs
         org = self._get_organization()
@@ -182,7 +187,7 @@ class LeadViewSet(OrganizationQuerysetMixin, viewsets.ModelViewSet):
             stages_qs = stages_qs.filter(organization=org)
         result = {stage.key: 0 for stage in stages_qs}
 
-        lead_qs = Lead.objects.values('status').annotate(count=Count('id'))
+        lead_qs = Lead.objects.filter(is_sales_lead=True).values('status').annotate(count=Count('id'))
         if org:
             lead_qs = lead_qs.filter(organization=org)
         for stat in lead_qs:
@@ -196,7 +201,7 @@ class LeadViewSet(OrganizationQuerysetMixin, viewsets.ModelViewSet):
         """Get lead counts grouped by source."""
         user = request.user
         org = None if getattr(user, 'is_superadmin', False) else self._get_organization()
-        queryset = Lead.objects.exclude(source='').values('source').annotate(count=Count('id')).order_by('-count')
+        queryset = Lead.objects.filter(is_sales_lead=True).exclude(source='').values('source').annotate(count=Count('id')).order_by('-count')
         if org:
             queryset = queryset.filter(organization=org)
         return Response([{'source': s['source'], 'count': s['count']} for s in queryset])

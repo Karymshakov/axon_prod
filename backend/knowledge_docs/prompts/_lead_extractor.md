@@ -20,7 +20,11 @@ Extract the following information about the CUSTOMER from the conversation:
 - preferred_contact_time (the best time or day the customer mentions for a call or meeting, e.g. "Tomorrow at 4pm", "Weekday mornings")
 - check_in_date (the guest's intended check-in date in YYYY-MM-DD format; parse natural language relative to TODAY ({today}): "завтра"/"tomorrow"/"на завтра" = {tomorrow}; "послезавтра"/"day after tomorrow" = {day_after_tomorrow}; "сегодня"/"today" = {today}; "15 июля" = that date in the current year)
 - check_out_date (the guest's intended check-out date in YYYY-MM-DD format; same parsing rules as check_in_date; DURATION INFERENCE: if the guest states a duration like "только один день", "одну ночь", "один день", "two nights", "3 дня", "три ночи", etc., compute check_out_date = check_in_date + N days where N is the number of nights/days mentioned — e.g. "только один день"/"одну ночь" → check_out = check_in + 1 day, "два дня"/"две ночи" → check_out = check_in + 2 days; apply this ONLY when check_in_date is determinable from the conversation)
-- guest_count (number of guests as an integer, e.g. from "нас будет 3", "2 adults", "семья из 4", "4 человека")
+- guest_count (total people including adults and children)
+- adult_count (number of adults, only when clear from context)
+- children_ages (JSON array with each child's age in years; decimals for infants)
+- infant_count (number of children under one year)
+- one_room_required (true only when the guest explicitly requires one room)
 - room_type_preference (preferred room type mentioned, e.g. "Deluxe Balcony", "семейный номер", "стандарт", "люкс")
 - meal_plan (meal plan preference — return ONLY one of these exact values: "none", "breakfast", "lunch", "dinner", "half_board_bl", "half_board_bd", "full_board"; map guest's words like "завтрак" → "breakfast", "завтрак и обед" → "half_board_bl", "завтрак и ужин" → "half_board_bd", "всё включено" → "full_board")
 {exclusion_instruction}
@@ -37,7 +41,7 @@ IMPORTANT RULES:
    - Only include REAL data that the customer actually provided
 6. If the customer gives only day numbers/range without a month (for example "с 1 по 7") and no month is clear from nearby customer messages, OMIT check_in_date/check_out_date. Never assume January.
 
-Return JSON with keys: company_name, contact_person, phone, email, problem_description, preferred_contact_time, check_in_date, check_out_date, guest_count, room_type_preference, meal_plan.
+Return JSON with keys: company_name, contact_person, phone, email, problem_description, preferred_contact_time, check_in_date, check_out_date, guest_count, adult_count, children_ages, infant_count, one_room_required, room_type_preference, meal_plan.
 OMIT any field where no REAL customer-provided information is found. Empty or placeholder values are NOT acceptable.
 
 Example format:
@@ -47,6 +51,10 @@ Example format:
   "check_in_date": "2026-07-15",
   "check_out_date": "2026-07-20",
   "guest_count": 3,
+  "adult_count": 2,
+  "children_ages": [0.17],
+  "infant_count": 1,
+  "one_room_required": true,
   "room_type_preference": "стандарт с балконом",
   "meal_plan": "half_board_bd",
   "problem_description": "Хотим отдохнуть на Иссык-Куле всей семьёй",
