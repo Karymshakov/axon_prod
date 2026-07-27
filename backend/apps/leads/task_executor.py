@@ -246,7 +246,11 @@ Respond with ONLY the message text, nothing else."""
                         )
 
                 elif channel_name == 'instagram':
-                    result = instagram_service.send_message(identifier, message)
+                    result = instagram_service.send_message(
+                        identifier,
+                        message,
+                        org=lead.organization,
+                    )
                     success = result is not None
 
                     if success:

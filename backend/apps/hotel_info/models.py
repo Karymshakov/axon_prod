@@ -264,3 +264,87 @@ class ReplyTemplate(models.Model):
     def __str__(self):
         return self.title
 
+
+class AutomationMessageTemplate(models.Model):
+    """Manager-editable copy used by deterministic channel events."""
+
+    EVENT_TELEGRAM_START = 'telegram_start'
+    EVENT_STORY_MENTION_ACK = 'story_mention_ack'
+    EVENT_STORY_COURTESY_CLOSE = 'story_courtesy_close'
+    EVENT_PRICING_UNAVAILABLE = 'pricing_unavailable'
+    EVENT_PRICING_CHECK_REQUIRED = 'pricing_check_required'
+    EVENT_MANAGER_HANDOFF = 'manager_handoff'
+    EVENT_MEDIA_UNAVAILABLE = 'media_unavailable'
+    EVENT_CHOICES = [
+        (EVENT_TELEGRAM_START, 'Telegram /start greeting'),
+        (EVENT_STORY_MENTION_ACK, 'Instagram story mention acknowledgement'),
+        (EVENT_STORY_COURTESY_CLOSE, 'Instagram courtesy reply after acknowledgement'),
+        (EVENT_PRICING_UNAVAILABLE, 'Current price is unavailable'),
+        (EVENT_PRICING_CHECK_REQUIRED, 'Price could not be verified'),
+        (EVENT_MANAGER_HANDOFF, 'Manager handoff confirmation'),
+        (EVENT_MEDIA_UNAVAILABLE, 'Requested media is unavailable'),
+    ]
+    LANGUAGE_CHOICES = [
+        ('ru', 'Русский'),
+        ('ky', 'Кыргызча'),
+        ('en', 'English'),
+    ]
+    CHANNEL_CHOICES = [
+        ('all', 'All'),
+        ('telegram', 'Telegram'),
+        ('instagram', 'Instagram'),
+        ('whatsapp', 'WhatsApp'),
+    ]
+
+    organization = models.ForeignKey(**ORG_FK)
+    event_key = models.CharField(max_length=50, choices=EVENT_CHOICES)
+    language = models.CharField(max_length=5, choices=LANGUAGE_CHOICES, default='ru')
+    channel = models.CharField(max_length=20, choices=CHANNEL_CHOICES, default='all')
+    text = models.TextField()
+    is_active = models.BooleanField(default=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['event_key', 'language', 'channel']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['organization', 'event_key', 'language', 'channel'],
+                name='uniq_automation_message_template',
+            ),
+        ]
+
+    def __str__(self):
+        return f'{self.get_event_key_display()} ({self.language}/{self.channel})'
+
+
+class BookingRules(models.Model):
+    """Organization-owned business rules that must not be inferred by the model."""
+
+    organization = models.OneToOneField(
+        'organizations.Organization',
+        on_delete=models.CASCADE,
+        related_name='booking_rules',
+        null=True,
+        blank=True,
+    )
+    child_free_max_age = models.DecimalField(
+        max_digits=4,
+        decimal_places=1,
+        default=6,
+        help_text='Maximum child age for free stay without a separate bed.',
+    )
+    child_free_requires_no_bed = models.BooleanField(default=True)
+    family_rooms_self_service_enabled = models.BooleanField(
+        default=False,
+        help_text='When disabled, family rooms are never offered automatically.',
+    )
+    followup_delay_minutes = models.PositiveIntegerField(default=10)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = 'Booking Rules'
+        verbose_name_plural = 'Booking Rules'
+
+    def __str__(self):
+        return f'Booking rules for organization {self.organization_id}'
+

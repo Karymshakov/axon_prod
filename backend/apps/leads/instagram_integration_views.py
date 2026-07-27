@@ -62,6 +62,8 @@ logger = logging.getLogger(__name__)
 INSTAGRAM_AUTH_URL = 'https://www.instagram.com/oauth/authorize'
 INSTAGRAM_TOKEN_URL = 'https://api.instagram.com/oauth/access_token'
 INSTAGRAM_GRAPH_URL = 'https://graph.instagram.com'
+INSTAGRAM_GRAPH_API_VERSION = 'v25.0'
+INSTAGRAM_WEBHOOK_FIELDS = 'messages,comments'
 
 OAUTH_SCOPES = [
     'instagram_business_basic',
@@ -394,10 +396,11 @@ def _auto_subscribe_webhook(conn_id: int) -> None:
     close_old_connections()
     try:
         conn = InstagramConnection.objects.get(id=conn_id)
+        account_id = conn.instagram_user_id or 'me'
         resp = requests.post(
-            f'{INSTAGRAM_GRAPH_URL}/v21.0/me/subscribed_apps',
+            f'{INSTAGRAM_GRAPH_URL}/{INSTAGRAM_GRAPH_API_VERSION}/{account_id}/subscribed_apps',
             params={
-                'subscribed_fields': 'messages',
+                'subscribed_fields': INSTAGRAM_WEBHOOK_FIELDS,
                 'access_token': conn.access_token,
             },
             timeout=10,
@@ -489,8 +492,18 @@ def instagram_status(request):
             **app_config_status,
         })
 
-    # Auto-subscribe webhook in the background if not yet done.
-    if not conn.webhook_subscribed and conn.access_token and not conn.is_token_expired:
+    # Keep webhook fields current as features are added. The cache prevents a Meta
+    # POST on every status poll while still upgrading already-connected accounts.
+    subscription_refresh_due = cache.add(
+        f'instagram_webhook_fields_refresh:{conn.id}:{INSTAGRAM_WEBHOOK_FIELDS}',
+        True,
+        timeout=60 * 60 * 24,
+    )
+    if (
+        conn.access_token
+        and not conn.is_token_expired
+        and (not conn.webhook_subscribed or subscription_refresh_due)
+    ):
         threading.Thread(
             target=_auto_subscribe_webhook,
             args=(conn.id,),
@@ -842,9 +855,12 @@ def instagram_callback(request):
             # Subscribe this Instagram account to receive webhook messages.
             try:
                 sub_resp = requests.post(
-                    f'{INSTAGRAM_GRAPH_URL}/v21.0/me/subscribed_apps',
+                    (
+                        f'{INSTAGRAM_GRAPH_URL}/{INSTAGRAM_GRAPH_API_VERSION}/'
+                        f'{profile["instagram_user_id"]}/subscribed_apps'
+                    ),
                     params={
-                        'subscribed_fields': 'messages',
+                        'subscribed_fields': INSTAGRAM_WEBHOOK_FIELDS,
                         'access_token': token_data['access_token'],
                     },
                     timeout=10,
@@ -901,7 +917,10 @@ def instagram_disconnect(request):
         if conn.access_token and not conn.is_token_expired:
             try:
                 resp = requests.delete(
-                    f'{INSTAGRAM_GRAPH_URL}/v21.0/me/subscribed_apps',
+                    (
+                        f'{INSTAGRAM_GRAPH_URL}/{INSTAGRAM_GRAPH_API_VERSION}/'
+                        f'{conn.instagram_user_id or "me"}/subscribed_apps'
+                    ),
                     params={'access_token': conn.access_token},
                     timeout=10,
                 )

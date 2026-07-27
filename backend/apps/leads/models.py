@@ -97,9 +97,41 @@ class Lead(models.Model):
     timezone = models.CharField(max_length=50, blank=True, help_text='Timezone for scheduling')
 
     # Lead Management
+    CONVERSATION_SALES = 'sales'
+    CONVERSATION_COURTESY = 'courtesy'
+    CONVERSATION_FAQ = 'faq'
+    CONVERSATION_SERVICE = 'service'
+    CONVERSATION_CHOICES = [
+        (CONVERSATION_SALES, 'Sales'),
+        (CONVERSATION_COURTESY, 'Courtesy / social interaction'),
+        (CONVERSATION_FAQ, 'FAQ only'),
+        (CONVERSATION_SERVICE, 'Service / support'),
+    ]
+
     segment = models.CharField(max_length=50, default='individual', help_text='Lead segment (from Segment model)')
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_NEW)
     source = models.CharField(max_length=100, blank=True, help_text='Where the lead came from')
+    is_sales_lead = models.BooleanField(
+        default=True,
+        db_index=True,
+        help_text='False for courtesy/story/FAQ conversations that must not enter the sales funnel.',
+    )
+    conversation_kind = models.CharField(
+        max_length=20,
+        choices=CONVERSATION_CHOICES,
+        default=CONVERSATION_SALES,
+        db_index=True,
+    )
+    origin_event_type = models.CharField(
+        max_length=50,
+        blank=True,
+        db_index=True,
+        help_text='Normalized event that opened the conversation, e.g. story_mention.',
+    )
+    followup_allowed = models.BooleanField(
+        default=True,
+        help_text='Whether automated proactive follow-ups are allowed for this conversation.',
+    )
     contact_channel = models.CharField(max_length=30, blank=True, help_text='Primary channel where the guest contacted us')
     discovery_source = models.CharField(max_length=50, blank=True, help_text='How the guest learned about us')
     discovery_source_detail = models.CharField(max_length=255, blank=True, help_text='Free-form detail for the discovery source')
@@ -119,6 +151,10 @@ class Lead(models.Model):
     check_in_date = models.DateField(null=True, blank=True, help_text='Guest check-in date')
     check_out_date = models.DateField(null=True, blank=True, help_text='Guest check-out date')
     guest_count = models.PositiveSmallIntegerField(null=True, blank=True, help_text='Number of guests')
+    adult_count = models.PositiveSmallIntegerField(null=True, blank=True, help_text='Number of adult guests')
+    children_ages = models.JSONField(default=list, blank=True, help_text='Child ages in years; fractions are allowed for infants')
+    infant_count = models.PositiveSmallIntegerField(default=0, help_text='Number of guests under one year old')
+    one_room_required = models.BooleanField(null=True, blank=True, help_text='Guest explicitly requires one room')
     room_type_preference = models.CharField(max_length=200, blank=True, help_text='Preferred room type, e.g. Deluxe Balcony')
     MEAL_PLAN_CHOICES = [
         ('none', 'No meal plan'),
@@ -339,6 +375,41 @@ class LeadActivity(models.Model):
 
     def __str__(self):
         return f"{self.lead.contact_person or str(self.lead.pk)} - {self.get_activity_type_display()}"
+
+
+class OutboundActionClaim(models.Model):
+    """Atomic idempotency claim for tool side effects such as sending a photo album."""
+
+    STATUS_PENDING = 'pending'
+    STATUS_SENT = 'sent'
+    STATUS_FAILED = 'failed'
+    STATUS_CHOICES = [
+        (STATUS_PENDING, 'Pending'),
+        (STATUS_SENT, 'Sent'),
+        (STATUS_FAILED, 'Failed'),
+    ]
+
+    organization = models.ForeignKey(**ORG_FK)
+    lead = models.ForeignKey(Lead, on_delete=models.CASCADE, related_name='outbound_action_claims')
+    channel = models.CharField(max_length=30)
+    action_type = models.CharField(max_length=50)
+    idempotency_key = models.CharField(max_length=255, unique=True)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_PENDING)
+    metadata = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(
+                fields=['lead', 'channel', 'action_type', 'created_at'],
+                name='leads_outbo_lead_id_030257_idx',
+            ),
+        ]
+
+    def __str__(self):
+        return f'{self.action_type}:{self.idempotency_key}'
 
 
 class Task(models.Model):
@@ -889,3 +960,4 @@ auditlog.register(WhatsAppConfig, exclude_fields=['access_token'])
 auditlog.register(RingCentralConfig, exclude_fields=['client_secret', 'jwt_token'])
 auditlog.register(AIConfig)
 auditlog.register(LeadGoal)
+auditlog.register(OutboundActionClaim)

@@ -42,7 +42,11 @@ def query_room_pricing(guest_count=None, checkin_date=None, checkout_date=None, 
     from apps.hotel_info.models import RoomPricing
 
     checkin = _parse_date(checkin_date)
-    rows = RoomPricing.objects.all()
+    rows = (
+        RoomPricing.objects
+        .exclude(guest_type='family')
+        .exclude(kategoria_nomera__icontains='семейн')
+    )
     if org is not None:
         rows = rows.filter(organization=org)
     if guest_count is not None:

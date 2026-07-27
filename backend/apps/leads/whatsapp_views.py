@@ -258,6 +258,10 @@ def _delayed_whatsapp_ai_response(lead_id: int, activity_id: int, sender_phone: 
             'check_in_date': str(lead.check_in_date) if lead.check_in_date else None,
             'check_out_date': str(lead.check_out_date) if lead.check_out_date else None,
             'guest_count': lead.guest_count,
+            'adult_count': lead.adult_count,
+            'children_ages': lead.children_ages,
+            'infant_count': lead.infant_count,
+            'one_room_required': lead.one_room_required,
             'room_type_preference': lead.room_type_preference,
             'meal_plan': lead.meal_plan,
             'discovery_source': lead.discovery_source,
@@ -452,6 +456,15 @@ def _delayed_whatsapp_ai_response(lead_id: int, activity_id: int, sender_phone: 
                 if updated_fields:
                     lead.save(update_fields=list(dict.fromkeys(updated_fields)))
                     logger.info(f"Auto-extracted and updated fields for lead {lead.id}: {updated_fields}")
+                from apps.leads.services.guest_structure import apply_extracted_guest_structure
+
+                structured_fields = apply_extracted_guest_structure(lead, extracted_data)
+                if structured_fields:
+                    logger.info(
+                        'Updated structured guest composition for lead %s: %s',
+                        lead.id,
+                        structured_fields,
+                    )
 
         # Mark handoff as completed so subsequent messages from the guest are ignored.
         if Lead.objects.filter(id=lead_id, ai_paused=True, ai_paused_by='AI Handoff').exists():
@@ -717,7 +730,12 @@ def whatsapp_webhook(request):
                     )
 
                     # Stamp last_contacted so the CRM reflects when the guest last wrote
-                    Lead.objects.filter(id=lead.id).update(last_contacted=date.today())
+                    from datetime import datetime
+                    from zoneinfo import ZoneInfo
+
+                    Lead.objects.filter(id=lead.id).update(
+                        last_contacted=datetime.now(ZoneInfo('Asia/Bishkek')).date()
+                    )
 
                     logger.info(f"Received WhatsApp message from lead {lead.id}: {message_text[:50]}")
 

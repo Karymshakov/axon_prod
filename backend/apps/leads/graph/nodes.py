@@ -63,7 +63,6 @@ def inbound_guardrails_node(state: AgentState) -> dict[str, Any]:
 def route_intent_node(state: AgentState) -> dict[str, Any]:
     from apps.leads.ai_service import ai_service
     from apps.leads.agent_dispatcher import (
-        _looks_like_service_question,
         classify_intent,
         save_agent_context,
     )
@@ -85,9 +84,6 @@ def route_intent_node(state: AgentState) -> dict[str, Any]:
     )
     intent = result['intent']
     confidence = result['confidence']
-    if intent in ('booking', 'greeting') and _looks_like_service_question(message):
-        intent = 'faq'
-        confidence = max(confidence, 0.95)
 
     context['previous_agent'] = context.get('current_agent', 'booking')
     context['last_intent'] = intent

@@ -33,7 +33,7 @@ class FollowUpService:
 
         if lead.telegram_chat_id and telegram_service.is_configured():
             return self._send_telegram(lead, message, stage.name)
-        elif lead.instagram_user_id and instagram_service.is_configured():
+        elif lead.instagram_user_id and instagram_service.is_configured(lead.organization):
             return self._send_instagram(lead, message, stage.name)
         else:
             logger.debug(f"Lead {lead.id} has no messaging channel configured")
@@ -102,7 +102,11 @@ class FollowUpService:
     def _send_instagram(self, lead: Lead, message: str, stage_name: str = '') -> bool:
         """Send a follow-up message via Instagram."""
         try:
-            result = instagram_service.send_message(lead.instagram_user_id, message)
+            result = instagram_service.send_message(
+                lead.instagram_user_id,
+                message,
+                org=lead.organization,
+            )
 
             if result:
                 LeadActivity.objects.create(

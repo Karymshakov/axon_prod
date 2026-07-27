@@ -1524,7 +1524,7 @@ const AGENT_NODE_TYPES = {
   sharedContext: SharedContextNode,
 }
 
-const AVAILABLE_TOOLS = ['get_room_options', 'get_family_room', 'get_room_images', 'transfer_to_manager']
+const AVAILABLE_TOOLS = ['get_room_options', 'get_room_images', 'transfer_to_manager']
 
 const AGENT_ICONS: Record<string, string> = { router: '⚡', cs: '💬', consultant: '🧠', booking: '🗓' }
 

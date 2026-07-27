@@ -254,6 +254,37 @@ class BlankAutoReplyRetryTests(TestCase):
         ).latest('id')
         self.assertEqual(received_activity.organization, self.org)
 
+    def test_instagram_webhook_connection_is_resolved_by_account_not_first_row(self):
+        from .instagram_views import _instagram_connection_for_entry
+
+        other_owner = get_user_model().objects.create_user(
+            email='other-instagram-owner@example.com',
+            password='password123',
+            role='admin',
+        )
+        other_org = Organization.objects.create(
+            name='Other Instagram Org',
+            slug='other-instagram-org',
+            owner=other_owner,
+        )
+        first = InstagramConnection.objects.create(
+            organization=self.org,
+            access_token='first-token',
+            instagram_user_id='first-user',
+            instagram_business_account_id='first-business',
+        )
+        second = InstagramConnection.objects.create(
+            organization=other_org,
+            access_token='second-token',
+            instagram_user_id='second-user',
+            instagram_business_account_id='second-business',
+        )
+
+        resolved = _instagram_connection_for_entry('second-business')
+
+        self.assertEqual(resolved, second)
+        self.assertNotEqual(resolved, first)
+
 
 class InstagramSocialContentWebhookTests(TestCase):
     def setUp(self):
@@ -1087,7 +1118,7 @@ class InstagramOAuthFlowTests(TestCase):
         self.assertTrue(connection.webhook_subscribed)
         self.assertEqual(
             post_mock.call_args.kwargs['params']['subscribed_fields'],
-            'messages',
+            'messages,comments',
         )
 
     def test_callback_requires_workspace_state_to_save_connection(self):
@@ -2341,7 +2372,6 @@ class AIConnectionAndIntentClassifierTests(TestCase):
             policy.allowed_tools,
             {
                 'get_room_options',
-                'get_family_room',
                 'get_meal_plan_pricing',
                 'get_room_images',
             },
@@ -3439,7 +3469,7 @@ class AIConnectionAndIntentClassifierTests(TestCase):
             )
 
         self.assertIn('get_room_options', registered_tools)
-        self.assertIn('get_family_room', registered_tools)
+        self.assertNotIn('get_family_room', registered_tools)
         self.assertNotIn('SEPARATE ROOM REQUEST', system_text)
         self.assertIn('full conversation', system_text)
 
@@ -3489,7 +3519,7 @@ class AIConnectionAndIntentClassifierTests(TestCase):
         self.assertEqual(mock_transfer.call_args[0][0]['reason'], 'sports_camp')
         self.assertEqual(mock_transfer.call_args[0][0]['guest_count'], 20)
         self.assertIn('менеджер', response.lower())
-        self.assertIn('свяжется', response.lower())
+        self.assertIn('ответит', response.lower())
 
     @patch('apps.leads.agent_dispatcher.run_cs_agent')
     @patch('apps.leads.agent_dispatcher.classify_intent', return_value={'intent': 'faq', 'confidence': 0.9})
@@ -3842,7 +3872,7 @@ class AIConnectionAndIntentClassifierTests(TestCase):
         )
 
         self.assertIn('менеджер', response.lower())
-        self.assertIn('свяжется', response.lower())
+        self.assertIn('ответит', response.lower())
         mock_execute.assert_called_once()
 
     @patch('apps.leads.ai_service.ai_service._execute_transfer_to_manager')
@@ -3946,7 +3976,7 @@ class AIConnectionAndIntentClassifierTests(TestCase):
             # The model receives the complete conversation and decides which pricing
             # tool to use instead of a keyword/guest-count filter in application code.
             self.assertIn('get_room_options', registered_tools)
-            self.assertIn('get_family_room', registered_tools)
+            self.assertNotIn('get_family_room', registered_tools)
 
     def test_dynamic_pricing_tools_filtering_guest_count_three_plus_known_children_keywords(self):
         from apps.leads.ai_service import ai_service
@@ -3978,9 +4008,10 @@ class AIConnectionAndIntentClassifierTests(TestCase):
             
             called_kwargs = mock_create.call_args[1]
             registered_tools = [t['function']['name'] for t in called_kwargs.get('tools', [])]
-            # Since children keywords are present, pricing lookup tools should NOT be filtered out
+            # The general room-options tool handles structured family composition;
+            # family-room self-service is intentionally disabled.
             self.assertIn('get_room_options', registered_tools)
-            self.assertIn('get_family_room', registered_tools)
+            self.assertNotIn('get_family_room', registered_tools)
 
     def test_dynamic_pricing_tools_filtering_guest_count_three_plus_known_adults_keywords(self):
         from apps.leads.ai_service import ai_service
@@ -4006,9 +4037,8 @@ class AIConnectionAndIntentClassifierTests(TestCase):
             
             called_kwargs = mock_create.call_args[1]
             registered_tools = [t['function']['name'] for t in called_kwargs.get('tools', [])]
-            # Since adult keywords are present, pricing lookup tools should NOT be filtered out
             self.assertIn('get_room_options', registered_tools)
-            self.assertIn('get_family_room', registered_tools)
+            self.assertNotIn('get_family_room', registered_tools)
 
     def test_tool_calling_with_stop_finish_reason(self):
         from apps.leads.ai_service import ai_service
@@ -4048,7 +4078,7 @@ class AIConnectionAndIntentClassifierTests(TestCase):
             # The tool call should have been processed, and the second API call made
             self.assertIn("Передала", res)
             self.assertIn("менеджер", res.lower())
-            self.assertIn("свяжется", res.lower())
+            self.assertIn("ответит", res.lower())
             mock_exec.assert_called_once_with({'reason': 'sports_camp'}, lead=lead)
 
 

@@ -3,10 +3,19 @@ from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.parsers import MultiPartParser, FormParser
 from rest_framework.response import Response
+from rest_framework.permissions import SAFE_METHODS, BasePermission
 from .models import HotelMediaItem, HotelMediaPhoto, MediaFingerprint, SocialContentItem
 from .serializers import HotelMediaItemSerializer, HotelMediaPhotoSerializer, MediaFingerprintSerializer, SocialContentItemSerializer
 from .utils import compress_image_for_telegram
 from apps.organizations.mixins import OrganizationQuerysetMixin
+from apps.organizations.permissions import IsOrganizationMember, IsOrganizationAdmin
+
+
+class IsAdminOrReadOnlyMember(BasePermission):
+    def has_permission(self, request, view):
+        if request.method in SAFE_METHODS:
+            return IsOrganizationMember().has_permission(request, view)
+        return IsOrganizationAdmin().has_permission(request, view)
 
 
 class HotelMediaItemViewSet(OrganizationQuerysetMixin, viewsets.ModelViewSet):
@@ -119,6 +128,7 @@ class SocialContentItemViewSet(OrganizationQuerysetMixin, viewsets.ModelViewSet)
     queryset = SocialContentItem.objects.all()
     serializer_class = SocialContentItemSerializer
     filterset_fields = ['platform', 'content_type', 'status', 'review_status', 'category', 'room_category']
+    permission_classes = [IsAdminOrReadOnlyMember]
 
     def perform_create(self, serializer):
         serializer.save(organization=self._get_organization(), source=SocialContentItem.SOURCE_MANUAL)

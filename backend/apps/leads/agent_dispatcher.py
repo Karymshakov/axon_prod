@@ -67,12 +67,10 @@ def _format_playbook_content(content: str) -> str:
 
 _SCHEDULING_INSTRUCTION = (
     "[SCHEDULING FOLLOW-UPS]\n"
-    "You have the capability to schedule follow-ups or outreach at a specific date/time. "
-    "If the guest asks to talk or get information at a specific time (e.g. 'сегодня в 19:00', 'завтра утром'), "
-    "or if you need to check something and promise to write back at a specific time, you MUST explicitly "
-    "promise to contact them at that time (e.g. 'Хорошо, я напишу вам сегодня в 19:00' or 'Я уточню этот вопрос и свяжусь с вами завтра в 10:00').\n"
-    "The system will automatically parse your promise or the guest's requested time and schedule a message to be sent exactly then. "
-    "Do NOT say that you cannot write to them at a specific time or that you don't have the ability to do so."
+    "Schedule a message only when the guest explicitly asks to continue at a specific date/time, "
+    "or when a verified workflow result explicitly requires it. Confirm the agreed time briefly. "
+    "Never invent a promise to research, check availability, contact a manager, or write back later. "
+    "A manager handoff may be stated only after a successful transfer tool result."
 )
 
 _SAFETY_SYSTEM_INSTRUCTION = (
@@ -210,46 +208,22 @@ def _guardrail_response(message: str, lead=None) -> str | None:
     return None
 
 _INTENT_SYSTEM_PROMPT_TEMPLATE = """\
-You are an intent classifier for a hotel booking assistant.
-Classify by the meaning of the latest message in conversation context, not by literal keyword matching.
-Classify the incoming message into exactly one of these intents:
+You classify the latest guest turn for a hotel assistant using its meaning, the
+complete recent exchange, and the current booking step. Do not decide from the
+presence of individual words.
 
-booking:
-- Any request for a room, price, dates, or guest count
-- Room selection or meal plan selection
-- Providing contact details
-- "есть номер", "сколько стоит", "хочу забронировать", "на двоих", "на троих"
-- Confirmations: "да", "окей", "подходит", "беру", "yes", "ok", "confirmed"
-- NEVER classify room availability questions as faq
+Return exactly one intent:
+- booking: a current or future stay requires a booking action, or the guest is
+  continuing an active booking by answering the assistant's last question.
+- greeting: a social opening with no hotel question and no stay intent.
+- faq: a factual hotel, service, or policy question that does not itself require
+  a booking action.
+- undecided: the guest asks for help choosing between options already presented.
+- off_topic: unrelated to the hotel or stay.
 
-greeting:
-- First message with no specific request
-- "привет", "здравствуйте", "hello", "hi"
-- Route to Booking Agent
-
-faq:
-- Questions about hotel facilities or policies NOT related to a specific booking
-- Pool, parking, pets, spa, directions, working hours
-- Check-in/check-out TIME (not date), cancellation policy
-- NEVER use faq for: room availability, prices, guest count, or booking dates
-
-undecided:
-- Guest cannot choose between presented options
-- "и тот и тот", "не знаю", "оба подходят", "both are fine"
-- "что лучше", "помогите выбрать", "help me choose"
-- IMPORTANT: "да" / "окей" / "подходит" = booking (confirmation), NOT undecided
-- Must check booking_step from Shared Context before classifying
-
-off_topic:
-- Anything unrelated to the hotel
-- Route to CS Agent for polite redirect
-
-CRITICAL EDGE CASES:
-- "и тот и тот можно" during room_selection → undecided
-- "и тот и тот можно" during meal_selection → undecided
-- "да" / "окей" / "yes" → always booking (confirmation)
-- "есть номер на двоих?" → always booking (not faq)
-- "сколько стоит?" → always booking (not faq)
+Interpret a short answer as a response to the preceding assistant question. Use
+the latest correction when details conflict. For mixed messages choose booking
+when a stay action is needed; choose faq when the guest only wants information.
 
 Current booking_step: {booking_step}
 
@@ -373,38 +347,6 @@ def _sync_context_from_flow_state(lead, context: dict) -> bool:
         changed = True
 
     return changed
-
-
-_SERVICE_QUESTION_KEYWORDS = {
-    'пляж', 'берег', 'метр', 'адрес', 'карта', '2gis', '2гис', 'maps',
-    'добраться', 'доехать', 'локац', 'трансфер', 'парков',
-    'ps5', 'playstation', 'плейстейш', 'компьютер', 'развлеч',
-    'бассейн', 'спорт', 'фитнес', 'падел', 'каньон', 'источник',
-    'животн', 'питом', 'курение', 'заезд', 'выезд',
-}
-
-_BOOKING_PRICE_KEYWORDS = {
-    'номер', 'room', 'комфорт', 'стандарт', 'семейн', 'цена', 'стоимость',
-    'сколько стоит', 'забронировать', 'бронь', 'даты', 'заезд', 'выезд',
-}
-
-
-def _looks_like_service_question(message: str) -> bool:
-    text = (message or '').lower()
-    if not text:
-        return False
-    service_hit = any(keyword in text for keyword in _SERVICE_QUESTION_KEYWORDS)
-    if not service_hit:
-        return False
-    # Room pricing/availability stays with Booking unless the message also asks
-    # a clearly non-room fact such as beach distance or PlayStation price.
-    strong_service_hit = any(
-        keyword in text
-        for keyword in ('пляж', 'метр', 'ps5', 'playstation', 'плейстейш', 'развлеч', 'бассейн', 'парков', 'адрес')
-    )
-    if strong_service_hit:
-        return True
-    return not any(keyword in text for keyword in _BOOKING_PRICE_KEYWORDS)
 
 
 def _playbook_fallback_answer(message: str, lead) -> str | None:
@@ -701,7 +643,7 @@ def run_consultant_agent(
         model = ai_service._model
     """
     Help undecided guests choose a room.
-    Uses get_room_options / get_family_room tools.
+    Uses the standard room-options tool. Family rooms are request-only.
     Writes consultant_recommendation and return_to_step to shared context after responding.
     Returns response text.
     """
@@ -796,7 +738,7 @@ def run_consultant_agent(
     system_prompt = '\n\n'.join(p for p in system_parts if p)
 
     # Build tools list — only room lookup tools
-    allowed_tools = {'get_room_options', 'get_family_room'}
+    allowed_tools = {'get_room_options'}
     if agent_cfg and agent_cfg.tools:
         allowed_tools = allowed_tools & set(agent_cfg.tools)
 
@@ -897,24 +839,16 @@ _CONSULTANT_TOOL_PARAMS = {
     'get_room_options': {
         'type': 'object',
         'properties': {
-            'guest_count': {'type': 'integer', 'description': 'Number of guests.'},
-            'checkin_date': {'type': 'string', 'description': 'Check-in date YYYY-MM-DD.'},
-            'checkout_date': {'type': 'string', 'description': 'Check-out date YYYY-MM-DD.'},
-        },
-        'required': ['guest_count', 'checkin_date', 'checkout_date'],
-    },
-    'get_family_room': {
-        'type': 'object',
-        'properties': {
-            'guest_count': {'type': 'integer', 'description': 'Number of adult guests.'},
+            'guest_count': {'type': 'integer', 'description': 'Total people including children.'},
+            'adult_count': {'type': 'integer', 'description': 'Number of adults.'},
             'children_ages': {
                 'type': 'array',
                 'items': {'type': 'number'},
-                'description': 'Child ages in years; use a decimal for infants.',
+                'description': 'Ages of children in years; use decimals for infants.',
             },
-            'single_room_required': {
+            'one_room_required': {
                 'type': 'boolean',
-                'description': 'True when everyone must stay together in one room.',
+                'description': 'True only when the guest explicitly requires one room.',
             },
             'checkin_date': {'type': 'string', 'description': 'Check-in date YYYY-MM-DD.'},
             'checkout_date': {'type': 'string', 'description': 'Check-out date YYYY-MM-DD.'},
@@ -1036,13 +970,6 @@ class AgentDispatcher:
         intent_result = classify_intent(client, last_messages, context=context, model=ai_service._model, org=org)
         intent = intent_result['intent']
         confidence = intent_result['confidence']
-        if intent in ('booking', 'greeting') and _looks_like_service_question(combined_text):
-            logger.info(
-                f'[AgentDispatcher] lead={lead.pk} overriding intent {intent} -> faq '
-                f'for service/playbook question'
-            )
-            intent = 'faq'
-            confidence = max(confidence, 0.95)
         logger.info(
             f'[AgentDispatcher] lead={lead.pk} intent={intent} confidence={confidence:.2f} '
             f'booking_step={context.get("booking_step")!r}'

@@ -847,9 +847,25 @@ Return ONLY the message text, nothing else."""
             return
 
         try:
-            lead.refresh_from_db(fields=['ai_paused', 'ai_paused_by', 'next_follow_up_at', 'next_follow_up_hint'])
+            lead.refresh_from_db(fields=[
+                'ai_paused', 'ai_paused_by', 'next_follow_up_at', 'next_follow_up_hint',
+                'is_sales_lead', 'conversation_kind', 'followup_allowed',
+            ])
         except Exception:
             pass
+
+        if (
+            not getattr(lead, 'is_sales_lead', True)
+            or not getattr(lead, 'followup_allowed', True)
+            or getattr(lead, 'conversation_kind', Lead.CONVERSATION_SALES) != Lead.CONVERSATION_SALES
+        ):
+            Lead.objects.filter(id=lead.id).update(next_follow_up_at=None, next_follow_up_hint='')
+            logger.info(
+                'Lead %s: follow-up skipped for non-sales conversation (%s)',
+                lead.id,
+                getattr(lead, 'conversation_kind', ''),
+            )
+            return
 
         if lead.ai_paused:
             Lead.objects.filter(id=lead.id).update(next_follow_up_at=None, next_follow_up_hint='')
@@ -887,12 +903,23 @@ Return ONLY the message text, nothing else."""
             ).start()
             logger.info(f"Lead {lead.id}: dispatched LLM promise follow-up scheduling")
         else:
-            follow_up_at = timezone.now() + timedelta(minutes=10)
+            delay_minutes = 10
+            try:
+                from apps.hotel_info.models import BookingRules
+
+                rules = BookingRules.objects.filter(organization=lead.organization).first()
+                if rules:
+                    delay_minutes = max(1, int(rules.followup_delay_minutes))
+            except Exception:
+                pass
+            follow_up_at = timezone.now() + timedelta(minutes=delay_minutes)
             Lead.objects.filter(id=lead.id).update(
                 next_follow_up_at=follow_up_at,
-                next_follow_up_hint="Lead idle for 10 minutes after bot reply"
+                next_follow_up_hint=f"Lead idle for {delay_minutes} minutes after bot reply"
             )
-            logger.info(f"Lead {lead.id}: scheduled 10-minute idle follow-up directly at {follow_up_at}")
+            logger.info(
+                f"Lead {lead.id}: scheduled {delay_minutes}-minute idle follow-up directly at {follow_up_at}"
+            )
 
     def execute_pending_auto_tasks(self, lead: Lead = None) -> dict:
         """
@@ -1041,6 +1068,9 @@ Return ONLY the message text, nothing else."""
         leads = Lead.objects.filter(
             do_not_contact=False,
             ai_paused=False,
+            is_sales_lead=True,
+            followup_allowed=True,
+            conversation_kind=Lead.CONVERSATION_SALES,
         ).filter(
             Q(telegram_chat_id__gt='') | Q(instagram_user_id__gt='') | Q(whatsapp_phone__gt='')
         ).exclude(
@@ -1101,9 +1131,16 @@ Return ONLY the message text, nothing else."""
         """
         now = timezone.now()
 
+        if (
+            not getattr(lead, 'is_sales_lead', True)
+            or not getattr(lead, 'followup_allowed', True)
+            or getattr(lead, 'conversation_kind', Lead.CONVERSATION_SALES) != Lead.CONVERSATION_SALES
+        ):
+            return False, 'Non-sales conversation'
+
         # Check if lead has a communication channel configured (always required)
         has_telegram = lead.telegram_chat_id and telegram_service.is_configured_sync() and not is_channel_ai_globally_paused('telegram', config=config, lead=lead)
-        has_instagram = lead.instagram_user_id and instagram_service.is_configured() and not is_channel_ai_globally_paused('instagram', config=config, lead=lead)
+        has_instagram = lead.instagram_user_id and instagram_service.is_configured(lead.organization) and not is_channel_ai_globally_paused('instagram', config=config, lead=lead)
         has_whatsapp = lead.whatsapp_phone and whatsapp_service.is_configured(org=lead.organization) and not is_channel_ai_globally_paused('whatsapp', config=config, lead=lead)
 
         if not has_telegram and not has_instagram and not has_whatsapp:
@@ -1480,7 +1517,7 @@ Return ONLY the message text, nothing else."""
             return False
 
         has_telegram = lead.telegram_chat_id and telegram_service.is_configured_sync() and not is_channel_ai_globally_paused('telegram', config=config, lead=lead)
-        has_instagram = lead.instagram_user_id and instagram_service.is_configured() and not is_channel_ai_globally_paused('instagram', config=config, lead=lead)
+        has_instagram = lead.instagram_user_id and instagram_service.is_configured(lead.organization) and not is_channel_ai_globally_paused('instagram', config=config, lead=lead)
         has_whatsapp = lead.whatsapp_phone and whatsapp_service.is_configured(org=lead.organization) and not is_channel_ai_globally_paused('whatsapp', config=config, lead=lead)
 
         if not has_telegram and not has_instagram and not has_whatsapp:
@@ -1813,7 +1850,11 @@ Return ONLY the JSON array, no other text."""
     def _send_instagram(self, lead: Lead, message: str) -> bool:
         """Send a message via Instagram."""
         try:
-            result = instagram_service.send_message(lead.instagram_user_id, message)
+            result = instagram_service.send_message(
+                lead.instagram_user_id,
+                message,
+                org=lead.organization,
+            )
 
             if result:
                 LeadActivity.objects.create(

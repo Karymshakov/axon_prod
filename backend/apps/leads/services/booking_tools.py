@@ -112,7 +112,20 @@ _TOOL_PARAMS = {
         "properties": {
             "guest_count": {
                 "type": "integer",
-                "description": "Number of guests (after adjusting for children under 6 who stay free).",
+                "description": "Total people in the party, including children.",
+            },
+            "adult_count": {
+                "type": "integer",
+                "description": "Number of adults when children are present.",
+            },
+            "children_ages": {
+                "type": "array",
+                "items": {"type": "number", "minimum": 0, "maximum": 17},
+                "description": "Ages of all children in years; use a decimal for an infant.",
+            },
+            "one_room_required": {
+                "type": "boolean",
+                "description": "True only when the guest explicitly requires everyone to stay in one room.",
             },
             "checkin_date": {
                 "type": "string",
@@ -132,12 +145,12 @@ _TOOL_PARAMS = {
                 "type": "array",
                 "items": {
                     "type": "string",
-                    "enum": ["standard_queen", "standard_twin", "comfort", "family", "cafeteria", "pool", "spa", "exterior", "lobby", "conference"],
+                    "enum": ["standard_queen", "standard_twin", "comfort", "cafeteria", "pool", "spa", "exterior", "lobby", "conference"],
                 },
                 "description": (
                     "Room or hotel area categories to fetch photos for. "
                     "Choose from the configured media categories and conversation context. "
-                    "Room categories: standard_queen, standard_twin, comfort, family. "
+                    "Room categories: standard_queen, standard_twin, comfort. "
                     "Hotel area categories: cafeteria, pool, spa, exterior, lobby, conference. "
                     "Use multiple categories when guest asks to see several areas."
                 ),
@@ -256,14 +269,15 @@ _FALLBACK_DESCRIPTIONS = {
         "never ask the guest to wait."
     ),
     'get_room_options': (
-        "Use for standard groups — couples, friends, colleagues, solo travelers. "
-        "Never call this when the guest mentions children, kids, baby, toddler, son, daughter, or family."
+        "Use for every automated room search, including families. "
+        "Pass total guest_count plus adult_count and children_ages when children are present. "
+        "Young children who stay free without a separate bed must not cause an unnecessary "
+        "extra room or family-room recommendation."
     ),
     'get_family_room': (
-        "Use ONLY when guest mentions children, kids, baby, toddler, son, daughter, family, "
-        "or any indication they are travelling with minors. "
-        "Returns family room options only. "
-        "guest_count should be adults only — do not count children under 6."
+        "Family-room self-service is disabled. Do not call this tool during normal selection. "
+        "If the guest explicitly requests a family room, route the request to a manager; "
+        "never present it as an automatically bookable option."
     ),
     'get_meal_plan_pricing': (
         "Look up meal plan prices for a specific room type. "
@@ -293,70 +307,13 @@ def wants_separate_room_options(message: str) -> bool:
     )
 
 def detect_family_context(lead) -> bool:
-    """
-    Return True when recent guest messages indicate a family/kids booking.
-    This is an internal routing hint for pricing tools, not guest-facing copy.
-    """
+    """Return family context from fields extracted semantically by the model."""
     if lead is None:
         return False
-
-    _FAMILY_KEYWORDS = frozenset([
-        # Russian
-        'дети', 'ребёнок', 'детей', 'ребенок', 'малыш', 'малышей', 'семья',
-        'с детьми', 'детское', 'дочь', 'сын', 'девочка', 'мальчик',
-        # Kyrgyz
-        'балдар', 'бала', 'балам', 'балдарым', 'үй-бүлө', 'кыз', 'уул',
-        # English
-        'children', 'child', 'kids', 'kid', 'family', 'baby', 'toddler',
-        'daughter', 'son', 'girl', 'boy',
-    ])
-
-    # Only check messages SENT BY THE GUEST, never bot's own sent messages.
-    # (A bot sending "Family Room" photos would otherwise permanently trigger this flag.)
-    _RECEIVED_TYPES = [
-        'telegram_received', 'whatsapp_received',
-        'instagram_received', 'ringcentral_sms_received',
-    ]
-
-    _NO_CHILDREN_PHRASES = frozenset([
-        'детей нет', 'без детей', 'нет детей', 'детей не будет',
-        'children no', 'no children', 'no kids', 'without children',
-        'без ребёнка', 'без ребенка', 'балдар жок', 'балдар болбойт',
-    ])
-
-    try:
-        from apps.leads.models import LeadActivity
-        recent = (
-            LeadActivity.objects
-            .filter(lead=lead, activity_type__in=_RECEIVED_TYPES)
-            .order_by('-created_at')[:10]
-        )
-        found_kw = None
-        for activity in recent:
-            text = (activity.metadata or {}).get('text', '') or activity.description or ''
-            text_lower = text.lower()
-            # Guest explicitly saying no children takes priority — return False immediately.
-            if any(phrase in text_lower for phrase in _NO_CHILDREN_PHRASES):
-                logger.info(
-                    f"[get_room_options] Guest explicitly stated no children for lead {lead.id} — skipping family filter"
-                )
-                return False
-            if found_kw is None:
-                for kw in _FAMILY_KEYWORDS:
-                    if kw in text_lower:
-                        found_kw = kw
-                        break
-
-        if found_kw is not None:
-            logger.info(
-                f"[get_room_options] Family booking context detected "
-                f"for lead {lead.id} — preferring family-compatible pricing"
-            )
-            return True
-    except Exception as e:
-        logger.error(f"_detect_family_context error: {e}")
-
-    return False
+    return bool(
+        (getattr(lead, 'children_ages', None) or [])
+        or int(getattr(lead, 'infant_count', 0) or 0) > 0
+    )
 
 
 _ROOM_IMAGE_CATEGORIES = {'standard_queen', 'standard_twin', 'comfort', 'family'}
@@ -398,6 +355,9 @@ def execute_get_room_images(args: dict, lead=None) -> dict:
 
     results = []
     missing_categories = []
+    duplicate_categories = []
+    channel = 'unknown'
+    sent = False
 
     _org = getattr(lead, 'organization', None) if lead else None
 
@@ -451,8 +411,60 @@ def execute_get_room_images(args: dict, lead=None) -> dict:
             })
             media_items_sent[item.id] = item
 
-        channel = 'unknown'
-        sent = False
+        action_claim = None
+        if lead is not None:
+            from apps.leads.models import LeadActivity, OutboundActionClaim
+
+            source = (lead.source or '').lower()
+            channel = source or 'unknown'
+            received_type = {
+                'telegram': LeadActivity.TYPE_TELEGRAM_RECEIVED,
+                'instagram': LeadActivity.TYPE_INSTAGRAM_RECEIVED,
+                'whatsapp': LeadActivity.TYPE_WHATSAPP_RECEIVED,
+            }.get(source)
+            latest_inbound_id = (
+                LeadActivity.objects.filter(lead=lead, activity_type=received_type)
+                .order_by('-created_at', '-id')
+                .values_list('id', flat=True)
+                .first()
+                if received_type else None
+            )
+            claim_key = f'room_images:{lead.id}:{source}:{cat}:{latest_inbound_id or "no-inbound"}'
+            action_claim, claim_created = OutboundActionClaim.objects.get_or_create(
+                idempotency_key=claim_key,
+                defaults={
+                    'lead': lead,
+                    'organization': lead.organization,
+                    'channel': source,
+                    'action_type': 'room_images',
+                    'metadata': {'category': cat, 'inbound_activity_id': latest_inbound_id},
+                },
+            )
+            if not claim_created and action_claim.status == action_claim.STATUS_FAILED:
+                claim_created = bool(
+                    OutboundActionClaim.objects.filter(
+                        pk=action_claim.pk,
+                        status=action_claim.STATUS_FAILED,
+                    ).update(status=action_claim.STATUS_PENDING)
+                )
+            if not claim_created:
+                duplicate_categories.append(cat)
+                results.append({
+                    'category': cat,
+                    'title': ROOM_CATEGORY_LABELS.get(cat, cat),
+                    'description': photos_to_send[0][0].description if photos_to_send else '',
+                    'photos_sent': 0,
+                    'already_sent_for_message': True,
+                    'photos': [],
+                })
+                logger.info(
+                    'get_room_images: duplicate tool side effect suppressed for lead=%s category=%s inbound=%s',
+                    lead.id,
+                    cat,
+                    latest_inbound_id,
+                )
+                continue
+
         sent_mids = []
         if lead is not None:
             source = (lead.source or '').lower()
@@ -510,7 +522,11 @@ def execute_get_room_images(args: dict, lead=None) -> dict:
                     for _, photo in photos_to_send:
                         if photo.file:
                             abs_url = f"{_domain}{photo.file.url}"
-                            result = _ig_svc.send_image_url(lead.instagram_user_id, abs_url)
+                            result = _ig_svc.send_image_url(
+                                lead.instagram_user_id,
+                                abs_url,
+                                org=_org,
+                            )
                             if result:
                                 _any_sent = True
                                 mid = result.get('message_id')
@@ -558,6 +574,17 @@ def execute_get_room_images(args: dict, lead=None) -> dict:
                     LeadActivity.objects.create(**activity_kwargs)
                 except Exception as e:
                     logger.error(f"get_room_images: activity log failed: {e}")
+                if action_claim is not None:
+                    action_claim.status = action_claim.STATUS_SENT
+                    action_claim.metadata = {
+                        **(action_claim.metadata or {}),
+                        'photos_sent': len(photos_to_send),
+                        'message_ids': sent_mids,
+                    }
+                    action_claim.save(update_fields=['status', 'metadata', 'updated_at'])
+            elif action_claim is not None:
+                action_claim.status = action_claim.STATUS_FAILED
+                action_claim.save(update_fields=['status', 'updated_at'])
 
         first_item = photos_to_send[0][0] if photos_to_send else None
         results.append({
@@ -573,7 +600,16 @@ def execute_get_room_images(args: dict, lead=None) -> dict:
         'sent': sent if results else False,
         'results': results,
         'missing_categories': missing_categories,
+        'duplicate_categories': duplicate_categories,
     }
+    if duplicate_categories and not any(item.get('photos_sent') for item in results):
+        sent = True
+        response['sent'] = True
+        response['already_sent_for_message'] = True
+        response['_note'] = (
+            'These photos were already sent for the latest guest message. '
+            'Do not send them again and do not repeat the photo-introduction text.'
+        )
     if results and not sent:
         response['_note'] = (
             'Photos could NOT be delivered to this guest — photo sending is unavailable on this channel. '
@@ -1387,9 +1423,30 @@ def execute_pricing_tool(tool_name: str, args: dict, lead=None):
             return result
 
         if tool_name == 'get_room_options':
-            guest_count = args.get('guest_count', 1)
+            requested_guest_count = args.get('guest_count', 1)
+            from apps.leads.services.guest_structure import effective_pricing_guest_count
+
+            if lead is not None:
+                structure_updates = {}
+                if args.get('adult_count') is not None:
+                    structure_updates['adult_count'] = args.get('adult_count')
+                if isinstance(args.get('children_ages'), list):
+                    structure_updates['children_ages'] = args.get('children_ages')
+                if isinstance(args.get('one_room_required'), bool):
+                    structure_updates['one_room_required'] = args.get('one_room_required')
+                structure_updates['guest_count'] = requested_guest_count
+                if structure_updates:
+                    from apps.leads.services.guest_structure import apply_extracted_guest_structure
+
+                    apply_extracted_guest_structure(lead, structure_updates)
+            guest_count = effective_pricing_guest_count(lead, requested_guest_count) or 1
             checkin_date = args.get('checkin_date')
             checkout_date = args.get('checkout_date')
+            one_room_required = bool(
+                args.get('one_room_required')
+                or args.get('single_room_required')
+                or getattr(lead, 'one_room_required', False)
+            )
 
             if checkin_date and _is_past_date(checkin_date):
                 today_str = datetime.now(ZoneInfo('Asia/Bishkek')).date().isoformat()
@@ -1459,6 +1516,8 @@ def execute_pricing_tool(tool_name: str, args: dict, lead=None):
             family_alternatives = []
             for combo in group['combinations']:
                 if not combo['available']:
+                    continue
+                if one_room_required and combo.get('room_count', 0) > 1:
                     continue
                 prices = combo.get('prices') or {}
                 standard_pn = prices.get('standard')
@@ -1555,6 +1614,10 @@ def execute_pricing_tool(tool_name: str, args: dict, lead=None):
 
             response = {
                 'guest_count': guest_count,
+                'total_party_size': getattr(lead, 'guest_count', None) or requested_guest_count,
+                'adult_count': getattr(lead, 'adult_count', None),
+                'children_ages': getattr(lead, 'children_ages', None) or [],
+                'one_room_required': one_room_required,
                 'combinations': combinations,
                 '_note': (
                     'All prices pre-calculated — AI must NOT perform any arithmetic. '
@@ -1569,7 +1632,10 @@ def execute_pricing_tool(tool_name: str, args: dict, lead=None):
                     'CRITICAL: Use ONLY the prices in this tool response. '
                     'NEVER use prices from example conversations, conversation history, or memory — those are outdated and incorrect. '
                     'For multi-room combinations (is_multi_room=true), mention that rooms will be adjacent if possible. '
-                    'Show ONLY the combinations listed here — do NOT mention семейный or family rooms (those require a separate request).'
+                    'Show ONLY the combinations listed here — do NOT mention семейный or family rooms (those require a separate request). '
+                    'If total_party_size is greater than guest_count because young children stay free without a separate bed, '
+                    'say this clearly and recommend only options suitable for the paying adult occupancy. '
+                    'A baby must not cause an unnecessary family or extra-room recommendation.'
                 ),
             }
 
@@ -1587,6 +1653,15 @@ def execute_pricing_tool(tool_name: str, args: dict, lead=None):
             return response
 
         elif tool_name == 'get_family_room':
+            return {
+                'error': 'family_room_request_only',
+                'message': (
+                    'Семейный номер отключён для автоматической продажи. '
+                    'Не предлагайте его и не называйте цену. Если гость прямо просит '
+                    'семейный вариант, передайте запрос менеджеру; в обычном подборе '
+                    'показывайте только доступные стандартные/комфорт варианты.'
+                ),
+            }
             guest_count = args.get('guest_count', 1)
             checkin_date = args.get('checkin_date')
             checkout_date = args.get('checkout_date')
@@ -1811,19 +1886,24 @@ def ensure_transfer_guest_message(response_text: str | None, args: dict, lead=No
     if has_manager_followup:
         return text
 
+    from apps.hotel_info.services.automation_templates import (
+        detect_message_language,
+        get_automation_message,
+    )
+
     reason = (args or {}).get('reason', 'escalation')
-    if reason in ('sports_camp', 'large_group', 'corporate_request'):
-        suffix = (
-            "Передала запрос менеджеру - он свяжется с Вами в ближайшее время "
-            "и обсудит индивидуальные условия 🙏"
-        )
-    elif reason == 'booking_complete':
-        suffix = "Передала данные менеджеру — он свяжется с Вами в ближайшее время для подтверждения 🙏"
-    else:
-        suffix = "Передала вопрос менеджеру — он свяжется с Вами в ближайшее время 🙏"
+    suffix = get_automation_message(
+        'manager_handoff',
+        organization=getattr(lead, 'organization', None),
+        channel=(getattr(lead, 'source', '') or 'all').lower(),
+        language=detect_message_language(text, getattr(lead, 'language', '')),
+        variables={'reason': reason},
+    )
 
     if not text:
         return suffix
+    if not suffix:
+        return text
     return f"{text}\n\n{suffix}"
 
 def inject_pricing_calculation(lead_data: dict) -> str | None:

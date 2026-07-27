@@ -3,13 +3,18 @@ from io import BytesIO
 from unittest.mock import Mock, patch
 
 from django.contrib.auth import get_user_model
-from django.test import TestCase
+from django.test import TestCase, TransactionTestCase
 from PIL import Image, ImageDraw
 
 from apps.organizations.models import Organization
 
 from .fingerprints import compute_image_fingerprints
-from .models import HotelMediaItem, MediaFingerprint, SocialContentItem
+from .models import (
+    HotelMediaItem,
+    MediaFingerprint,
+    SocialAutomationDelivery,
+    SocialContentItem,
+)
 
 
 class ScreenshotFingerprintTests(TestCase):
@@ -285,3 +290,131 @@ class SocialContentFingerprintTests(TestCase):
         self.assertTrue(item.is_active)
         self.assertEqual(item.status, SocialContentItem.STATUS_ACTIVE)
         self.assertEqual(item.content_type, SocialContentItem.TYPE_HIGHLIGHT)
+
+    @patch('apps.hotel_media.services.upsert_social_content_from_instagram_payload')
+    @patch('apps.hotel_media.services._instagram_records')
+    def test_story_sync_retries_with_core_fields(self, records_mock, upsert_mock):
+        from apps.hotel_media.services import sync_instagram_social_content
+        from apps.leads.models import InstagramConnection
+
+        InstagramConnection.objects.create(
+            organization=self.org,
+            instagram_user_id='ig-business-1',
+            instagram_username='hotel',
+            access_token='token',
+        )
+
+        def records_side_effect(url, *, token, params):
+            if url.endswith('/media'):
+                return iter([])
+            if 'thumbnail_url' in params['fields']:
+                raise RuntimeError('Unsupported field')
+            return iter([{
+                'id': 'story-1',
+                'media_type': 'IMAGE',
+                'media_url': 'https://cdn.example.test/story.jpg',
+                'timestamp': '2026-07-27T10:00:00+0000',
+            }])
+
+        records_mock.side_effect = records_side_effect
+
+        result = sync_instagram_social_content(organization=self.org)
+
+        self.assertEqual(result['stories_synced'], 1)
+        self.assertEqual(result['errors'], [])
+        self.assertEqual(upsert_mock.call_args.kwargs['external_id'], 'story-1')
+
+
+class InstagramCommentAutomationTests(TransactionTestCase):
+    def setUp(self):
+        task_patcher = patch(
+            'apps.hotel_media.tasks.rebuild_social_content_fingerprints_task.apply_async'
+        )
+        task_patcher.start()
+        self.addCleanup(task_patcher.stop)
+        owner = get_user_model().objects.create_user(
+            email='campaign-automation@example.com',
+            password='password123',
+            name='Campaign Owner',
+            role='admin',
+        )
+        self.org = Organization.objects.create(
+            name='Campaign Hotel',
+            slug='campaign-hotel',
+            owner=owner,
+        )
+        self.item = SocialContentItem.objects.create(
+            organization=self.org,
+            platform=SocialContentItem.PLATFORM_INSTAGRAM,
+            external_id='media-123',
+            content_type=SocialContentItem.TYPE_POST,
+            status=SocialContentItem.STATUS_ACTIVE,
+            automation_enabled=True,
+            automation_trigger=SocialContentItem.AUTOMATION_COMMENT_EXACT,
+            automation_trigger_values=['Хочу'],
+            automation_reply_ru='Отправили подробности в директ.',
+        )
+
+    @patch('apps.leads.instagram_views.instagram_service.send_private_reply_to_comment')
+    def test_exact_comment_sends_one_private_reply_without_creating_lead(self, send_mock):
+        from apps.leads.instagram_views import _process_instagram_comment_change
+        from apps.leads.models import Lead
+
+        send_mock.return_value = {
+            'message_id': 'reply-mid-1',
+            'recipient_id': 'ig-user-1',
+        }
+        payload = {
+            'field': 'comments',
+            'value': {
+                'id': 'comment-1',
+                'text': '  ХОЧУ  ',
+                'from': {'id': 'ig-user-1'},
+                'media': {'id': 'media-123'},
+            },
+        }
+
+        _process_instagram_comment_change(payload, self.org.id)
+        _process_instagram_comment_change(payload, self.org.id)
+
+        self.assertEqual(send_mock.call_count, 1)
+        self.assertEqual(SocialAutomationDelivery.objects.count(), 1)
+        self.assertEqual(SocialAutomationDelivery.objects.get().status, 'sent')
+        self.assertEqual(Lead.objects.filter(organization=self.org).count(), 0)
+
+    def test_instagram_entry_changes_accepts_nested_and_direct_meta_shapes(self):
+        from apps.leads.instagram_views import _instagram_entry_changes
+
+        nested = {'changes': [{'field': 'comments', 'value': {'id': 'nested'}}]}
+        direct = {'field': 'comments', 'value': {'id': 'direct'}}
+
+        self.assertEqual(_instagram_entry_changes(nested), nested['changes'])
+        self.assertEqual(
+            _instagram_entry_changes(direct),
+            [{'field': 'comments', 'value': {'id': 'direct'}}],
+        )
+
+    @patch('apps.leads.instagram_views.instagram_service.send_private_reply_to_comment')
+    def test_failed_private_reply_can_retry_on_repeated_webhook(self, send_mock):
+        from apps.leads.instagram_views import _process_instagram_comment_change
+
+        payload = {
+            'field': 'comments',
+            'value': {
+                'id': 'comment-retry',
+                'text': 'Хочу',
+                'from': {'id': 'ig-user-2'},
+                'media': {'id': 'media-123'},
+            },
+        }
+        send_mock.side_effect = [
+            None,
+            {'message_id': 'reply-mid-2', 'recipient_id': 'ig-user-2'},
+        ]
+
+        _process_instagram_comment_change(payload, self.org.id)
+        _process_instagram_comment_change(payload, self.org.id)
+
+        self.assertEqual(send_mock.call_count, 2)
+        delivery = SocialAutomationDelivery.objects.get(external_event_id='comment-retry')
+        self.assertEqual(delivery.status, SocialAutomationDelivery.STATUS_SENT)

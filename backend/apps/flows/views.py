@@ -1,6 +1,6 @@
 from rest_framework import viewsets, status
 from rest_framework.decorators import action, api_view, permission_classes
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import SAFE_METHODS, BasePermission
 from rest_framework.response import Response
 
 from .models import ConversationFlow, FlowCard, FlowConnection, AIFlowMode, AITool, AIModelConfig, ManagerTransferConfig, AgentConfig
@@ -16,6 +16,16 @@ from .serializers import (
     AgentConfigSerializer,
 )
 from apps.organizations.mixins import OrganizationQuerysetMixin
+from apps.organizations.permissions import IsOrganizationAdmin, IsOrganizationMember
+
+
+class IsFlowAdminOrReadOnlyMember(BasePermission):
+    """Managers may inspect AI settings, but only owners/admins may mutate them."""
+
+    def has_permission(self, request, view):
+        if request.method in SAFE_METHODS:
+            return IsOrganizationMember().has_permission(request, view)
+        return IsOrganizationAdmin().has_permission(request, view)
 
 
 def _get_org(request):
@@ -30,7 +40,7 @@ def _get_org(request):
 
 
 class ConversationFlowViewSet(OrganizationQuerysetMixin, viewsets.ModelViewSet):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsFlowAdminOrReadOnlyMember]
     queryset = ConversationFlow.objects.all()
 
     def get_serializer_class(self):
@@ -52,7 +62,7 @@ class ConversationFlowViewSet(OrganizationQuerysetMixin, viewsets.ModelViewSet):
 
 
 class FlowCardViewSet(OrganizationQuerysetMixin, viewsets.ModelViewSet):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsFlowAdminOrReadOnlyMember]
     queryset = FlowCard.objects.all()
     serializer_class = FlowCardSerializer
 
@@ -171,7 +181,7 @@ class FlowCardViewSet(OrganizationQuerysetMixin, viewsets.ModelViewSet):
 
 
 class FlowConnectionViewSet(OrganizationQuerysetMixin, viewsets.ModelViewSet):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsFlowAdminOrReadOnlyMember]
     queryset = FlowConnection.objects.all()
     serializer_class = FlowConnectionSerializer
 
@@ -197,7 +207,7 @@ class FlowConnectionViewSet(OrganizationQuerysetMixin, viewsets.ModelViewSet):
 
 
 @api_view(['GET', 'PUT'])
-@permission_classes([IsAuthenticated])
+@permission_classes([IsFlowAdminOrReadOnlyMember])
 def ai_flow_mode(request):
     org = _get_org(request)
     obj = AIFlowMode.get_mode(org=org)
@@ -210,14 +220,14 @@ def ai_flow_mode(request):
 
 
 class AIToolViewSet(OrganizationQuerysetMixin, viewsets.ModelViewSet):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsFlowAdminOrReadOnlyMember]
     serializer_class = AIToolSerializer
     queryset = AITool.objects.all()
     http_method_names = ['get', 'post', 'patch', 'delete', 'head', 'options']
 
 
 @api_view(['GET', 'PUT'])
-@permission_classes([IsAuthenticated])
+@permission_classes([IsFlowAdminOrReadOnlyMember])
 def ai_model_config(request):
     org = _get_org(request)
     obj = AIModelConfig.get_config(org=org)
@@ -230,7 +240,7 @@ def ai_model_config(request):
 
 
 class AgentConfigViewSet(OrganizationQuerysetMixin, viewsets.ModelViewSet):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsFlowAdminOrReadOnlyMember]
     serializer_class = AgentConfigSerializer
     queryset = AgentConfig.objects.all()
     http_method_names = ['get', 'patch', 'head', 'options']
@@ -247,7 +257,7 @@ class AgentConfigViewSet(OrganizationQuerysetMixin, viewsets.ModelViewSet):
 
 
 @api_view(['GET', 'PUT'])
-@permission_classes([IsAuthenticated])
+@permission_classes([IsFlowAdminOrReadOnlyMember])
 def transfer_config(request):
     org = _get_org(request)
     obj = ManagerTransferConfig.get_config(org=org)
