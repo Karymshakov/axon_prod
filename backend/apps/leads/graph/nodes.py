@@ -354,7 +354,10 @@ def extract_stage_data_node(state: AgentState) -> dict[str, Any]:
     current = collect_stage_data(lead, state.get('lead_data') or {})
     missing = [
         f for f in required_fields
-        if not has_stage_value(current.get(normalize_stage_field(str(f))))
+        if not has_stage_value(
+            current.get(normalize_stage_field(str(f))),
+            field=normalize_stage_field(str(f)),
+        )
     ]
     if not missing:
         return {'extracted_data': {}}  # all fields already collected

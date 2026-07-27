@@ -162,11 +162,27 @@ def infer_required_fields_from_card(card) -> list[str]:
     return []
 
 
-def has_stage_value(value: Any) -> bool:
+# Fields where the literal string "none" is a legitimate, deliberately-chosen
+# enum value (e.g. meal_plan="none" means the guest declined meal plans), not a
+# placeholder for "no data collected yet". Without this, has_stage_value would
+# treat a fully-answered field as still missing and the stage would never
+# advance past it.
+_FIELD_SPECIFIC_VALID_VALUES = {
+    'meal_plan': {'none'},
+}
+
+
+def has_stage_value(value: Any, field: str | None = None) -> bool:
     if value is None:
         return False
     if isinstance(value, str):
-        return bool(value.strip()) and value.strip().lower() not in {
+        stripped = value.strip()
+        if not stripped:
+            return False
+        lowered = stripped.lower()
+        if field and lowered in _FIELD_SPECIFIC_VALID_VALUES.get(field, ()):
+            return True
+        return lowered not in {
             'none', 'null', 'unknown', 'not specified', 'не указано', 'неизвестно', '-',
         }
     if isinstance(value, (list, tuple, set, dict)):
@@ -188,14 +204,14 @@ def collect_stage_data(lead, lead_data: dict[str, Any] | None = None, message: s
         value = _serialize_stage_value(value)
         if field == 'contact_person' and not is_reliable_contact_person(lead, value):
             continue
-        if has_stage_value(value):
+        if has_stage_value(value, field=field):
             data[field] = value
 
     custom_fields = getattr(lead, 'custom_fields', None) if lead is not None else None
     if isinstance(custom_fields, dict):
         for key, value in custom_fields.items():
             norm_key = normalize_stage_field(str(key))
-            if has_stage_value(value):
+            if has_stage_value(value, field=norm_key):
                 data[norm_key] = value
 
     for key, value in (lead_data or {}).items():
@@ -203,7 +219,7 @@ def collect_stage_data(lead, lead_data: dict[str, Any] | None = None, message: s
         value = _serialize_stage_value(value)
         if norm_key == 'contact_person' and not is_reliable_contact_person(lead, value):
             continue
-        if has_stage_value(value):
+        if has_stage_value(value, field=norm_key):
             data[norm_key] = value
 
     # Regex fallback: only fills fields that are STILL missing after reading the
@@ -236,7 +252,7 @@ def resolve_stage(card, collected_data: dict[str, Any] | None, *, changed: bool 
     data = dict(collected_data or {})
     missing_fields = [
         field for field in required_fields
-        if not has_stage_value(data.get(field))
+        if not has_stage_value(data.get(field), field=field)
     ]
     return StageResolution(
         collected_data=data,
