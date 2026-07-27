@@ -1460,6 +1460,37 @@ def instagram_webhook(request):
                     'sender_id': sender_id,
                     'instagram_event_type': instagram_event_type,
                 }
+
+                # A guest swipe-replying to an earlier text message (not a story/post
+                # share) carries reply_to.mid pointing at that message's mid. Look up
+                # the original activity so the CRM can render a Telegram-style quote.
+                reply_to_raw = message.get('reply_to') if isinstance(message.get('reply_to'), dict) else {}
+                reply_mid = reply_to_raw.get('mid')
+                if reply_mid and not reply_to_raw.get('story'):
+                    original_activity = LeadActivity.objects.filter(
+                        lead=lead,
+                        activity_type__in=[
+                            LeadActivity.TYPE_INSTAGRAM_SENT,
+                            LeadActivity.TYPE_INSTAGRAM_RECEIVED,
+                        ],
+                        metadata__message_id=reply_mid,
+                    ).order_by('-created_at').first()
+                    if original_activity:
+                        original_meta = original_activity.metadata or {}
+                        is_from_business = original_activity.activity_type == LeadActivity.TYPE_INSTAGRAM_SENT
+                        original_text = (
+                            original_meta.get('text')
+                            or original_meta.get('message')
+                            or original_activity.description
+                            or '[Сообщение]'
+                        )
+                        activity_metadata['reply_to'] = {
+                            'message_id': reply_mid,
+                            'text': original_text,
+                            'sender_name': '' if is_from_business else (lead.contact_person or 'Гость'),
+                            'from_bot': is_from_business,
+                        }
+
                 if instagram_content_context:
                     activity_metadata['instagram_context'] = instagram_content_context
                     if instagram_content_context.get('story_id'):

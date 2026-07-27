@@ -1252,7 +1252,7 @@ function CommunicationsPage() {
                         </div>
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center justify-between gap-1 mb-0.5">
-                            <span className={`text-sm font-semibold truncate ${
+                            <span className={`text-sm font-semibold truncate min-w-0 ${
                               unread > 0 ? 'text-foreground' : 'text-foreground/80'
                             }`}>
                               {lead.contact_person}
@@ -1313,7 +1313,7 @@ function CommunicationsPage() {
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-1.5 flex-wrap">
-                    <h2 className="text-sm font-bold truncate leading-tight">{selectedLead.contact_person}</h2>
+                    <h2 className="text-sm font-bold truncate leading-tight min-w-0">{selectedLead.contact_person}</h2>
 
                     {/* Channel Quick Switcher */}
                     {availableChannels.length > 1 && (
