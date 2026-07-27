@@ -26,6 +26,25 @@ import re
 logger = logging.getLogger(__name__)
 
 
+def _current_date_instruction() -> str:
+    """Provide every specialized agent with the same deterministic local date."""
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    now = datetime.now(ZoneInfo('Asia/Bishkek'))
+    weekdays_ru = (
+        'понедельник', 'вторник', 'среда', 'четверг',
+        'пятница', 'суббота', 'воскресенье',
+    )
+    return (
+        "[CURRENT DATE AND TIME]\n"
+        f"Today is {now.date().isoformat()} ({weekdays_ru[now.weekday()]}), "
+        f"local time {now.strftime('%H:%M')} in Bishkek (UTC+6). "
+        "Resolve 'today', 'tomorrow', weekday names and dates without a year "
+        "relative to this value. Never invent or reuse a date from model knowledge."
+    )
+
+
 def _format_playbook_content(content: str) -> str:
     """Render playbook JSON content blocks into readable text for AI injection."""
     if not content or not content.strip():
@@ -192,6 +211,7 @@ def _guardrail_response(message: str, lead=None) -> str | None:
 
 _INTENT_SYSTEM_PROMPT_TEMPLATE = """\
 You are an intent classifier for a hotel booking assistant.
+Classify by the meaning of the latest message in conversation context, not by literal keyword matching.
 Classify the incoming message into exactly one of these intents:
 
 booking:
@@ -245,6 +265,10 @@ def _get_router_system_prompt(booking_step: str | None, org=None) -> str:
     for the router if it has been customized, otherwise use the built-in template.
     """
     step_str = booking_step or 'none'
+    semantic_prefix = (
+        'Classify intent from the meaning of the latest message in the full conversation context. '
+        'Do not route by literal keyword matching. A short reply belongs to the question it answers.\n\n'
+    )
     try:
         from apps.flows.models import AgentConfig
         qs = AgentConfig.objects.filter(name='router')
@@ -256,10 +280,10 @@ def _get_router_system_prompt(booking_step: str | None, org=None) -> str:
             prompt = cfg.system_prompt
             if '{booking_step}' in prompt:
                 prompt = prompt.format(booking_step=step_str)
-            return prompt
+            return semantic_prefix + prompt
     except Exception:
         pass
-    return _INTENT_SYSTEM_PROMPT_TEMPLATE.format(booking_step=step_str)
+    return semantic_prefix + _INTENT_SYSTEM_PROMPT_TEMPLATE.format(booking_step=step_str)
 
 
 def classify_intent(client, last_messages: list[str], context: dict | None = None, model: str | None = None, org=None) -> dict:
@@ -506,6 +530,7 @@ def run_cs_agent(
         )
     system_parts.append(_PUBLIC_REPLY_FORMAT_INSTRUCTION)
     system_parts.append(_SAFETY_SYSTEM_INSTRUCTION)
+    system_parts.append(_current_date_instruction())
     try:
         from apps.leads.services.dialogue_director import dialogue_directive_instruction
 
@@ -702,6 +727,7 @@ def run_consultant_agent(
         )
     system_parts.append(_PUBLIC_REPLY_FORMAT_INSTRUCTION)
     system_parts.append(_SAFETY_SYSTEM_INSTRUCTION)
+    system_parts.append(_current_date_instruction())
     try:
         from apps.leads.services.dialogue_director import dialogue_directive_instruction
 
@@ -773,26 +799,6 @@ def run_consultant_agent(
     allowed_tools = {'get_room_options', 'get_family_room'}
     if agent_cfg and agent_cfg.tools:
         allowed_tools = allowed_tools & set(agent_cfg.tools)
-
-    # If guest count >= 3, check if children info is known
-    _ld = lead_data or {}
-    _guest_count = _ld.get('guest_count') or (lead.guest_count if lead else None) or 1
-    if _guest_count >= 3:
-        _has_children_info = False
-        if ai_service_instance._detect_family_context(lead):
-            _has_children_info = True
-        else:
-            _ADULT_KEYWORDS = {'взрослые', 'взрослых', 'взрослым', 'adult', 'adults', 'без детей', 'нет детей', 'детей нет', 'no kids', 'no children'}
-            _hist_text = ''
-            if conversation_history:
-                _hist_text = ' '.join(turn.get('content', '') for turn in conversation_history if turn.get('content')).lower()
-            if message:
-                _hist_text += ' ' + message.lower()
-            if any(akw in _hist_text for akw in _ADULT_KEYWORDS):
-                _has_children_info = True
-        if not _has_children_info:
-            logger.info(f"[ConsultantAgent Filter] guest_count={_guest_count} and children info unknown. Removing pricing lookup tools to force asking about children.")
-            allowed_tools = allowed_tools - {'get_room_options', 'get_family_room'}
 
     try:
         from apps.leads.services.stage_policy import restrict_tool_names
@@ -895,16 +901,25 @@ _CONSULTANT_TOOL_PARAMS = {
             'checkin_date': {'type': 'string', 'description': 'Check-in date YYYY-MM-DD.'},
             'checkout_date': {'type': 'string', 'description': 'Check-out date YYYY-MM-DD.'},
         },
-        'required': ['guest_count'],
+        'required': ['guest_count', 'checkin_date', 'checkout_date'],
     },
     'get_family_room': {
         'type': 'object',
         'properties': {
             'guest_count': {'type': 'integer', 'description': 'Number of adult guests.'},
+            'children_ages': {
+                'type': 'array',
+                'items': {'type': 'number'},
+                'description': 'Child ages in years; use a decimal for infants.',
+            },
+            'single_room_required': {
+                'type': 'boolean',
+                'description': 'True when everyone must stay together in one room.',
+            },
             'checkin_date': {'type': 'string', 'description': 'Check-in date YYYY-MM-DD.'},
             'checkout_date': {'type': 'string', 'description': 'Check-out date YYYY-MM-DD.'},
         },
-        'required': ['guest_count'],
+        'required': ['guest_count', 'checkin_date', 'checkout_date'],
     },
 }
 

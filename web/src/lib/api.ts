@@ -67,15 +67,32 @@ export function getDiscoverySourceLabel(value: string | null | undefined): strin
   return DISCOVERY_SOURCE_OPTIONS.find((option) => option.value === normalized)?.label ?? value
 }
 
-export function resolveLeadContactChannel(lead: Pick<Lead, 'contact_channel' | 'telegram_chat_id' | 'telegram_user_id' | 'instagram_user_id' | 'whatsapp_phone' | 'source'>): ContactChannel {
+type LeadChannelFields = Pick<Lead, 'contact_channel' | 'telegram_chat_id' | 'telegram_user_id' | 'instagram_user_id' | 'whatsapp_phone' | 'source'>
+
+export function resolveLeadContactChannels(lead: LeadChannelFields): ContactChannel[] {
   const channel = (lead.contact_channel || '').toLowerCase()
-  if (channel === 'telegram' || channel === 'instagram' || channel === 'whatsapp' || channel === 'manual') {
-    return channel
+  const channels: ContactChannel[] = []
+  const add = (value: ContactChannel) => {
+    if (value && !channels.includes(value)) channels.push(value)
   }
-  if (lead.telegram_chat_id || lead.telegram_user_id || lead.source?.toLowerCase() === 'telegram') return 'telegram'
-  if (lead.instagram_user_id || lead.source?.toLowerCase() === 'instagram') return 'instagram'
-  if (lead.whatsapp_phone || lead.source?.toLowerCase() === 'whatsapp') return 'whatsapp'
-  return ''
+
+  if (channel === 'telegram' || channel === 'instagram' || channel === 'whatsapp') add(channel)
+  if (lead.telegram_chat_id || lead.telegram_user_id || lead.source?.toLowerCase() === 'telegram') add('telegram')
+  if (lead.instagram_user_id || lead.source?.toLowerCase() === 'instagram') add('instagram')
+  if (lead.whatsapp_phone || lead.source?.toLowerCase() === 'whatsapp') add('whatsapp')
+  if (channel === 'manual' && channels.length === 0) add('manual')
+  return channels
+}
+
+export function resolveLeadContactChannel(lead: LeadChannelFields): ContactChannel {
+  return resolveLeadContactChannels(lead)[0] || ''
+}
+
+export function getLeadContactChannelsLabel(lead: LeadChannelFields): string {
+  const channels = resolveLeadContactChannels(lead)
+  return channels.length > 0
+    ? channels.map((value) => getContactChannelLabel(value)).join(' + ')
+    : 'Не указан'
 }
 
 // Token storage keys
@@ -951,6 +968,8 @@ export interface SyncInstagramSocialContentResult {
   stories_synced: number
   stories_expired: number
   errors: string[]
+  highlights_supported: boolean
+  sync_scope: string
 }
 
 export function syncInstagramSocialContent() {

@@ -69,15 +69,18 @@ def _is_our_company(name: str, company_profile: str) -> bool:
     return name.lower().strip() in plain
 
 
-def _split_into_messages(text: str) -> list:
-    """
-    Split a multi-paragraph AI response into individual chat messages by double newlines.
-    This preserves newlines and formatting (lists, bullets) inside each paragraph.
-    """
-    if not text:
+def _split_into_messages(text: str, max_length: int = 3900) -> list:
+    """Keep a normal reply in one message and split only near the channel limit."""
+    cleaned = (text or '').strip()
+    if not cleaned:
         return []
-    parts = re.split(r'\n{2,}', text)
-    return [p.strip() for p in parts if p.strip()]
+    if len(cleaned) <= max_length:
+        return [cleaned]
+    return [
+        cleaned[start:start + max_length].strip()
+        for start in range(0, len(cleaned), max_length)
+        if cleaned[start:start + max_length].strip()
+    ]
 
 
 def _delayed_whatsapp_ai_response(lead_id: int, activity_id: int, sender_phone: str, message_id: str, text: str) -> None:

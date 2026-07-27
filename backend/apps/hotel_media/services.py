@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
+import json
 import tempfile
 from datetime import timezone as datetime_timezone, timedelta
 from urllib.parse import urlparse
@@ -16,6 +17,129 @@ from .fingerprints import FingerprintError, compute_image_fingerprints
 from .models import HotelMediaItem, HotelMediaPhoto, MediaFingerprint, SocialContentItem
 
 logger = logging.getLogger(__name__)
+
+
+def _normalize_social_labels(parsed: dict) -> dict:
+    allowed_categories = {value for value, _ in HotelMediaItem.CATEGORY_CHOICES}
+    allowed_rooms = {value for value, _ in HotelMediaItem.ROOM_CATEGORY_CHOICES}
+    category = str(parsed.get('category') or '').strip()
+    room_category = str(parsed.get('room_category') or '').strip()
+    confidence = float(parsed.get('confidence') or 0)
+    if confidence < 0.78:
+        return {}
+    if category not in allowed_categories:
+        category = ''
+    if room_category not in allowed_rooms:
+        room_category = ''
+    if room_category and category != HotelMediaItem.CATEGORY_ROOMS:
+        room_category = ''
+    tags = [
+        str(tag).strip()[:40]
+        for tag in (parsed.get('auto_tags') or [])
+        if str(tag).strip()
+    ][:5]
+    return {
+        'category': category,
+        'room_category': room_category or None,
+        'auto_tags': tags,
+    }
+
+
+def _classify_social_content_with_ai(title: str = '', caption: str = '') -> dict:
+    """Classify Instagram text by meaning with a constrained model prompt."""
+    text = f'{title}\n{caption}'.strip()
+    if not text:
+        return {}
+    try:
+        from apps.leads.ai_service import ai_service
+
+        if not ai_service.is_configured():
+            return {}
+        prompt = (
+            'Classify this hotel Instagram content by meaning, not keyword matching. '
+            'Return JSON only with keys category, room_category, auto_tags, confidence. '
+            'category must be one of rooms, cafeteria, pool, spa, conference, exterior, lobby, other. '
+            'room_category must be one of standard_queen, standard_twin, comfort, family, or empty. '
+            'Set an exact room_category only when the text itself clearly identifies it; '
+            'a generic room/interior is not enough. Use an empty category when uncertain. '
+            'auto_tags must be a short array. confidence is 0..1.'
+        )
+        kwargs = {
+            'model': ai_service._model,
+            'messages': [
+                {'role': 'system', 'content': prompt},
+                {'role': 'user', 'content': text[:2000]},
+            ],
+            'temperature': 0,
+            'max_tokens': 300,
+            'timeout': 20,
+        }
+        if getattr(ai_service, 'provider', None) != 'gemini':
+            kwargs['response_format'] = {'type': 'json_object'}
+        response = ai_service.client.chat.completions.create(**kwargs)
+        raw = (response.choices[0].message.content or '').strip()
+        if raw.startswith('```'):
+            raw = raw.split('\n', 1)[-1].rsplit('```', 1)[0].strip()
+        parsed = json.loads(raw)
+        return _normalize_social_labels(parsed)
+    except Exception as exc:
+        logger.warning('Could not classify Instagram content semantically: %s', exc)
+        return {}
+
+
+def _classify_social_content_batch(records: list[dict]) -> dict[str, dict]:
+    """Classify a sync page in one semantic model request."""
+    inputs = [
+        {
+            'id': str(record.get('id') or ''),
+            'caption': str(record.get('caption') or '')[:2000],
+        }
+        for record in records
+        if record.get('id') and str(record.get('caption') or '').strip()
+    ]
+    if not inputs:
+        return {}
+    try:
+        from apps.leads.ai_service import ai_service
+
+        if not ai_service.is_configured():
+            return {}
+        prompt = (
+            'Classify each hotel Instagram item by its full meaning, never by a keyword rule. '
+            'Return JSON only: {"items":[{"id":"input id","category":"","room_category":"",'
+            '"auto_tags":[],"confidence":0.0}]}. '
+            'category: rooms, cafeteria, pool, spa, conference, exterior, lobby, other, or empty. '
+            'room_category: standard_queen, standard_twin, comfort, family, or empty. '
+            'Use an exact room_category only when the caption itself clearly identifies it. '
+            'A generic room or interior is insufficient. Preserve every input id exactly.'
+        )
+        kwargs = {
+            'model': ai_service._model,
+            'messages': [
+                {'role': 'system', 'content': prompt},
+                {'role': 'user', 'content': json.dumps(inputs, ensure_ascii=False)},
+            ],
+            'temperature': 0,
+            'max_tokens': min(3500, 200 + len(inputs) * 130),
+            'timeout': 30,
+        }
+        if getattr(ai_service, 'provider', None) != 'gemini':
+            kwargs['response_format'] = {'type': 'json_object'}
+        response = ai_service.client.chat.completions.create(**kwargs)
+        raw = (response.choices[0].message.content or '').strip()
+        if raw.startswith('```'):
+            raw = raw.split('\n', 1)[-1].rsplit('```', 1)[0].strip()
+        parsed = json.loads(raw)
+        allowed_ids = {item['id'] for item in inputs}
+        return {
+            item_id: labels
+            for item in (parsed.get('items') or [])
+            if (item_id := str(item.get('id') or '')) in allowed_ids
+            and (labels := _normalize_social_labels(item))
+        }
+    except Exception as exc:
+        logger.warning('Could not batch-classify Instagram content semantically: %s', exc)
+        return {}
 
 
 def _file_path(file_field) -> str | None:
@@ -198,9 +322,11 @@ def upsert_social_content_from_instagram_payload(
     posted_at=None,
     expires_at=None,
     metadata: dict | None = None,
+    semantic_labels: dict | None = None,
     source: str = SocialContentItem.SOURCE_AUTO_SYNC,
 ) -> SocialContentItem:
     """Create/update social content from sync or webhook data without manager labels."""
+    inferred = semantic_labels or {}
     item = SocialContentItem.objects.filter(
         organization=organization,
         platform=SocialContentItem.PLATFORM_INSTAGRAM,
@@ -213,6 +339,18 @@ def upsert_social_content_from_instagram_payload(
 
         update_fields = ['last_synced_at']
         item.last_synced_at = timezone.now()
+
+        if content_type and content_type != SocialContentItem.TYPE_UNKNOWN and item.content_type != content_type:
+            item.content_type = content_type
+            update_fields.append('content_type')
+
+        if title and item.title != title[:255]:
+            item.title = title[:255]
+            update_fields.append('title')
+
+        if caption and item.caption != caption:
+            item.caption = caption
+            update_fields.append('caption')
 
         if media_url and item.media_url != media_url:
             item.media_url = media_url
@@ -230,7 +368,7 @@ def upsert_social_content_from_instagram_payload(
             item.expires_at = expires_at
             update_fields.append('expires_at')
 
-        if posted_at and not item.posted_at:
+        if posted_at and item.posted_at != posted_at:
             item.posted_at = posted_at
             update_fields.append('posted_at')
 
@@ -238,7 +376,25 @@ def upsert_social_content_from_instagram_payload(
             item.metadata = metadata
             update_fields.append('metadata')
 
-        if item.status == SocialContentItem.STATUS_EXPIRED and expires_at and expires_at > timezone.now():
+        if not item.category and inferred.get('category'):
+            item.category = inferred['category']
+            update_fields.append('category')
+        if not item.room_category and inferred.get('room_category'):
+            item.room_category = inferred['room_category']
+            update_fields.append('room_category')
+        if not item.auto_tags and inferred.get('auto_tags'):
+            item.auto_tags = inferred['auto_tags']
+            update_fields.append('auto_tags')
+
+        should_reactivate = (
+            item.status == SocialContentItem.STATUS_EXPIRED
+            and (
+                (expires_at and expires_at > timezone.now())
+                or content_type == SocialContentItem.TYPE_HIGHLIGHT
+                or source == SocialContentItem.SOURCE_WEBHOOK
+            )
+        )
+        if should_reactivate:
             item.status = SocialContentItem.STATUS_ACTIVE
             item.is_active = True
             update_fields.extend(['status', 'is_active'])
@@ -260,6 +416,9 @@ def upsert_social_content_from_instagram_payload(
             expires_at=expires_at,
             last_synced_at=timezone.now(),
             metadata=metadata or {},
+            category=inferred.get('category') or '',
+            room_category=inferred.get('room_category'),
+            auto_tags=inferred.get('auto_tags') or [],
             source=source,
             status=SocialContentItem.STATUS_ACTIVE,
             is_active=True,
@@ -303,6 +462,21 @@ def _instagram_get(url: str, *, token: str, params: dict | None = None) -> dict:
     return response.json()
 
 
+def _instagram_records(url: str, *, token: str, params: dict, max_pages: int = 10):
+    """Yield paginated Graph API records instead of silently stopping at 50."""
+    payload = _instagram_get(url, token=token, params=params)
+    pages = 0
+    while payload and pages < max_pages:
+        pages += 1
+        yield from payload.get('data', [])
+        next_url = ((payload.get('paging') or {}).get('next') or '').strip()
+        if not next_url:
+            break
+        response = requests.get(next_url, timeout=20)
+        response.raise_for_status()
+        payload = response.json()
+
+
 def sync_instagram_social_content(*, organization=None) -> dict:
     """Best-effort sync of posts/reels and currently active stories into SocialContentItem."""
     from apps.leads.models import InstagramConnection
@@ -317,6 +491,8 @@ def sync_instagram_social_content(*, organization=None) -> dict:
         'stories_synced': 0,
         'stories_expired': 0,
         'errors': [],
+        'highlights_supported': False,
+        'sync_scope': 'posts_reels_and_active_stories',
     }
 
     fields = ','.join([
@@ -339,8 +515,26 @@ def sync_instagram_social_content(*, organization=None) -> dict:
 
         base = f'https://graph.instagram.com/v25.0/{user_id}'
         try:
-            media_payload = _instagram_get(f'{base}/media', token=token, params={'fields': fields, 'limit': 50})
-            for record in media_payload.get('data', []):
+            media_records = list(_instagram_records(
+                f'{base}/media',
+                token=token,
+                params={'fields': fields, 'limit': 50},
+            ))
+            unlabeled_records = []
+            for record in media_records:
+                external_id = str(record.get('id') or '').strip()
+                existing = SocialContentItem.objects.filter(
+                    organization=conn.organization,
+                    platform=SocialContentItem.PLATFORM_INSTAGRAM,
+                    external_id=external_id,
+                ).only('category', 'room_category').first()
+                if external_id and (
+                    not existing or (not existing.category and not existing.room_category)
+                ):
+                    unlabeled_records.append(record)
+            semantic_by_id = _classify_social_content_batch(unlabeled_records)
+
+            for record in media_records:
                 external_id = str(record.get('id') or '').strip()
                 if not external_id:
                     continue
@@ -354,6 +548,7 @@ def sync_instagram_social_content(*, organization=None) -> dict:
                     permalink=record.get('permalink') or '',
                     posted_at=_parse_instagram_datetime(record.get('timestamp')),
                     metadata=record,
+                    semantic_labels=semantic_by_id.get(external_id, {}),
                     source=SocialContentItem.SOURCE_AUTO_SYNC,
                 )
                 result['items_synced'] += 1
@@ -362,8 +557,11 @@ def sync_instagram_social_content(*, organization=None) -> dict:
 
         active_story_ids = set()
         try:
-            stories_payload = _instagram_get(f'{base}/stories', token=token, params={'fields': fields, 'limit': 50})
-            for record in stories_payload.get('data', []):
+            for record in _instagram_records(
+                f'{base}/stories',
+                token=token,
+                params={'fields': fields, 'limit': 50},
+            ):
                 external_id = str(record.get('id') or '').strip()
                 if not external_id:
                     continue
@@ -381,6 +579,9 @@ def sync_instagram_social_content(*, organization=None) -> dict:
                     posted_at=posted_at,
                     expires_at=expires_at,
                     metadata=record,
+                    semantic_labels=_classify_social_content_with_ai(
+                        caption=record.get('caption') or '',
+                    ),
                     source=SocialContentItem.SOURCE_AUTO_SYNC,
                 )
                 result['stories_synced'] += 1

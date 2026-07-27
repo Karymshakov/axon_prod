@@ -1,7 +1,7 @@
 import { AlertTriangleIcon, CalendarDaysIcon, CheckSquareIcon, FileTextIcon, HandIcon, InstagramIcon, MessageSquareIcon, PhoneIcon } from 'lucide-react'
 import { useNavigate } from '@tanstack/react-router'
 import type { MouseEvent } from 'react'
-import { getContactChannelLabel, resolveLeadContactChannel, type Lead } from '@/lib/api'
+import { getContactChannelLabel, resolveLeadContactChannels, type Lead } from '@/lib/api'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -30,7 +30,7 @@ interface LeadCardProps {
 
 export function LeadCard({ lead, onOpen, onOpenChat }: LeadCardProps) {
   const navigate = useNavigate()
-  const channel = resolveLeadContactChannel(lead)
+  const channels = resolveLeadContactChannels(lead)
   const contactPhone = lead.phone || lead.mobile_phone || lead.whatsapp_phone
   const activeTasksCount = lead.active_tasks_count || 0
   const overdueTasksCount = lead.overdue_tasks_count || 0
@@ -112,37 +112,37 @@ export function LeadCard({ lead, onOpen, onOpenChat }: LeadCardProps) {
         </div>
 
         <div className="mt-1.5 flex flex-wrap gap-1">
-          {channel === 'instagram' && (
+          {channels.includes('instagram') && (
             <button
               type="button"
               onClick={handleOpenChat}
               className="inline-flex h-5 items-center gap-1 rounded-full border border-pink-200 bg-pink-50 px-1.5 text-[9px] font-medium text-pink-700 transition hover:shadow-sm dark:border-pink-900/50 dark:bg-pink-950/20 dark:text-pink-400"
-              title={`Открыть чат: ${getContactChannelLabel(channel)}`}
-              aria-label={`Открыть чат: ${getContactChannelLabel(channel)}`}
+              title={`Открыть чат: ${getContactChannelLabel('instagram')}`}
+              aria-label={`Открыть чат: ${getContactChannelLabel('instagram')}`}
             >
               <InstagramIcon className="h-3 w-3" />
               Insta
             </button>
           )}
-          {channel === 'telegram' && (
+          {channels.includes('telegram') && (
             <button
               type="button"
               onClick={handleOpenChat}
               className="inline-flex h-5 items-center gap-1 rounded-full border border-blue-200 bg-blue-50 px-1.5 text-[9px] font-medium text-blue-700 transition hover:shadow-sm dark:border-blue-900/50 dark:bg-blue-950/20 dark:text-blue-400"
-              title={`Открыть чат: ${getContactChannelLabel(channel)}`}
-              aria-label={`Открыть чат: ${getContactChannelLabel(channel)}`}
+              title={`Открыть чат: ${getContactChannelLabel('telegram')}`}
+              aria-label={`Открыть чат: ${getContactChannelLabel('telegram')}`}
             >
               <MessageSquareIcon className="h-3 w-3" />
               TG
             </button>
           )}
-          {channel === 'whatsapp' && (
+          {channels.includes('whatsapp') && (
             <button
               type="button"
               onClick={handleOpenChat}
               className="inline-flex h-5 items-center gap-1 rounded-full border border-green-200 bg-green-50 px-1.5 text-[9px] font-medium text-green-700 transition hover:shadow-sm dark:border-green-900/50 dark:bg-green-950/20 dark:text-green-400"
-              title={`Открыть чат: ${getContactChannelLabel(channel)}`}
-              aria-label={`Открыть чат: ${getContactChannelLabel(channel)}`}
+              title={`Открыть чат: ${getContactChannelLabel('whatsapp')}`}
+              aria-label={`Открыть чат: ${getContactChannelLabel('whatsapp')}`}
             >
               <PhoneIcon className="h-3 w-3" />
               WA

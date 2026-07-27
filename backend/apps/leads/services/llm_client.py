@@ -18,11 +18,9 @@ from apps.leads.utils.playbooks import (
 )
 from apps.leads.services.booking_tools import (
     get_flow_guided_response,
-    wants_separate_room_options,
     execute_pricing_tool,
     execute_transfer_to_manager,
     execute_get_room_images,
-    detect_family_context,
     ensure_transfer_guest_message,
     inject_pricing_calculation,
     _org_from_lead,
@@ -37,7 +35,6 @@ from apps.leads.services.prompt_assembly import (
     build_pooled_message_instruction,
     build_scheduling_instruction,
     build_selected_media_instruction,
-    build_separate_room_request_instruction,
     build_stage_tool_policy_instruction,
     consolidate_system_messages,
     trim_messages_for_model,
@@ -61,6 +58,72 @@ def _coerce_iso_date(value) -> date | None:
         return date.fromisoformat(str(value)[:10])
     except (TypeError, ValueError):
         return None
+
+
+def _verified_cached_offer_prices(lead) -> set[float]:
+    if lead is None:
+        return set()
+    offer = (getattr(lead, 'agent_context', None) or {}).get('last_room_offer')
+    if not isinstance(offer, dict) or not offer.get('combinations'):
+        return set()
+
+    lead_checkin = _coerce_iso_date(getattr(lead, 'check_in_date', None))
+    lead_checkout = _coerce_iso_date(getattr(lead, 'check_out_date', None))
+    offer_checkin = _coerce_iso_date(offer.get('checkin_date'))
+    offer_checkout = _coerce_iso_date(offer.get('checkout_date'))
+    if lead_checkin and offer_checkin != lead_checkin:
+        return set()
+    if lead_checkout and offer_checkout != lead_checkout:
+        return set()
+
+    try:
+        created_at = datetime.fromisoformat(str(offer.get('created_at') or ''))
+        if created_at.tzinfo is None:
+            created_at = created_at.replace(tzinfo=ZoneInfo('UTC'))
+        age_seconds = (
+            datetime.now(ZoneInfo('UTC')) - created_at.astimezone(ZoneInfo('UTC'))
+        ).total_seconds()
+        if age_seconds < 0 or age_seconds > 24 * 60 * 60:
+            return set()
+    except (TypeError, ValueError):
+        return set()
+
+    prices: set[float] = set()
+
+    def collect(value, key: str = ''):
+        if isinstance(value, dict):
+            for nested_key, nested_value in value.items():
+                collect(nested_value, str(nested_key).lower())
+        elif isinstance(value, list):
+            for nested_value in value:
+                collect(nested_value, key)
+        elif isinstance(value, (int, float)) and (
+            'price' in key or key in {'per_night', 'total'}
+        ):
+            prices.add(float(value))
+
+    collect(offer)
+    return prices
+
+
+def _room_price_claim_matches_cached_offer(response_text: str, lead) -> bool:
+    cached_prices = _verified_cached_offer_prices(lead)
+    if not cached_prices:
+        return False
+    claims = []
+    for raw_value in re.findall(
+        r'(?i)\b(\d[\d\s.,]{1,})\s*(?:сом|kgs?)\b',
+        response_text or '',
+    ):
+        normalized = raw_value.replace(' ', '').replace(',', '.')
+        try:
+            claims.append(float(normalized))
+        except ValueError:
+            return False
+    return bool(claims) and all(
+        any(abs(claim - cached) < 0.01 for cached in cached_prices)
+        for claim in claims
+    )
 
 
 def _same_day_booking_cutoff_instruction(checkin_value, *, org=None, now: datetime | None = None) -> str:
@@ -460,6 +523,7 @@ class AIService:
                 _transfer_trigger_args,
                 _transfer_already_called,
                 _last_transfer_args,
+                _pricing_audit,
             ) = self._run_tool_loop(
                 ctx.messages,
                 ctx.tools,
@@ -472,6 +536,62 @@ class AIService:
             )
 
             _ld = lead_data or {}
+
+            room_price_claim = bool(re.search(
+                r'(?is)(?:\b\d[\d\s.,]{2,}\s*(?:сом|kgs?)\s*/?\s*(?:за\s*)?(?:ноч|сут)'
+                r'|(?:ноч|сут)[^.\n]{0,50}\b\d[\d\s.,]{2,}\s*(?:сом|kgs?))',
+                response_text or '',
+            ))
+            pricing_unavailable = _pricing_audit.get('error') == 'pricing_unavailable'
+
+            if pricing_unavailable and not _transfer_already_called:
+                _pricing_transfer_args = {
+                    'reason': 'escalation',
+                    'notes': (
+                        'Актуальный тариф на выбранные даты не загружен; '
+                        'требуется ручное подтверждение стоимости.'
+                    ),
+                }
+                for source_key, target_key in (
+                    ('check_in_date', 'checkin_date'),
+                    ('check_out_date', 'checkout_date'),
+                    ('guest_count', 'guest_count'),
+                ):
+                    value = _ld.get(source_key)
+                    if value:
+                        _pricing_transfer_args[target_key] = value
+                _pricing_transfer_result = self._execute_transfer_to_manager(
+                    _pricing_transfer_args,
+                    lead=lead,
+                )
+                if _pricing_transfer_result.get('status') == 'success':
+                    _transfer_already_called = True
+                    _last_transfer_args = _pricing_transfer_args
+                    response_text = (
+                        'На выбранные даты актуальный тариф пока не загружен, '
+                        'поэтому я не буду называть цену наугад. '
+                        'Передала запрос менеджеру для подтверждения стоимости.'
+                    )
+                else:
+                    response_text = (
+                        'На выбранные даты у меня нет подтверждённого тарифа, '
+                        'поэтому я не буду называть цену наугад. '
+                        'Пожалуйста, уточните стоимость у менеджера.'
+                    )
+            elif (
+                room_price_claim
+                and not _pricing_audit.get('validated')
+                and not _room_price_claim_matches_cached_offer(response_text, lead)
+            ):
+                logger.warning(
+                    "[Pricing guard] Suppressed an unverified room-price claim: %r",
+                    (response_text or '')[:240],
+                )
+                response_text = (
+                    'Сейчас мне не удалось подтвердить актуальную стоимость, '
+                    'поэтому я не буду называть цену наугад. '
+                    'Уточните даты заезда, выезда и число взрослых — я проверю тариф по системе.'
+                )
 
             if _needs_manager_transfer and not _transfer_already_called:
                 _auto_args = {
@@ -947,19 +1067,12 @@ class AIService:
             if lead_data.get('room_type_preference'):
                 known_booking.append(f"Room type: {lead_data['room_type_preference']}")
             elif not _on_meal_plan_card:
-                # Only ask AI to look up room type when we are NOT on the Meal Plan card.
-                # On the Meal Plan card the guest has already selected a room in this session.
-                try:
-                    _is_family = lead is not None and detect_family_context(lead)
-                except Exception:
-                    _is_family = False
-                if _is_family:
-                    needed_booking.append(
-                        'room type — family/kids context is already present. '
-                        'If pricing is needed now, use the family-compatible room lookup and show suitable options.'
-                    )
-                else:
-                    needed_booking.append('room type preference (call the appropriate room lookup tool and present options)')
+                # The model sees the complete conversation and chooses the suitable
+                # lookup semantically; keyword gates used to lose family corrections.
+                needed_booking.append(
+                    'room type preference (choose the appropriate lookup from the full '
+                    'conversation, including ages and whether everyone must share one room)'
+                )
             else:
                 # On Meal Plan card — room was chosen this session even if not yet persisted.
                 known_booking.append('Room type: chosen in this session (see conversation history)')
@@ -970,17 +1083,6 @@ class AIService:
             )
             for part in known_contact + known_booking:
                 lc_parts.append(f"  {part}")
-
-        if lead is not None and not (lead_data or {}).get('room_type_preference'):
-            try:
-                if detect_family_context(lead):
-                    lc_parts.append(
-                        "\nFamily/kids booking context is already present in the conversation. "
-                        "Prefer family-compatible room pricing when showing room options. "
-                        "Avoid asking the guest to choose a room category before showing suitable options."
-                    )
-            except Exception:
-                pass
 
         # Check if discovery_source is already collected
         _discovery_source = ''
@@ -1105,6 +1207,24 @@ class AIService:
                 'CURRENT STAGE TOOL POLICY',
                 build_stage_tool_policy_instruction(_flow_card_tool_allowlist),
             )
+        messages.add_system(
+            'dialogue_quality_contract',
+            'DIALOGUE QUALITY CONTRACT',
+            (
+                'Interpret the full conversation semantically, not by keyword matching. '
+                'Answer the latest guest message in one compact message, ask at most one missing fact, '
+                'and never repeat a question already answered. A language-switch request gets only a short acknowledgement. '
+                'Distinguish total people from chargeable adults: a child under 6 is excluded from pricing guest_count. '
+                'Pass child ages and single_room_required to get_family_room; when single_room_required is true, '
+                'never offer multiple or adjacent rooms. For two adults with a two-month-old infant, use guest_count=2, '
+                'children_ages=[0.17], single_room_required=true. '
+                'State a price only when it comes from a successful current pricing tool result '
+                'or exactly matches the authoritative CURRENT ROOM OFFER DATA from this conversation. '
+                'When the guest asks for a photo, answer that request first and do not append meal prices '
+                'unless the guest also asked about meals. '
+                'do not promise a manager handoff unless transfer_to_manager succeeds in this turn.'
+            ),
+        )
         messages.add_raw_system('safety', _SAFETY_SYSTEM_INSTRUCTION)
 
         _ld_for_rules = lead_data or {}
@@ -1120,14 +1240,6 @@ class AIService:
                 'SAME-DAY BOOKING CUTOFF',
                 _same_day_cutoff_instruction,
             )
-        _separate_room_request = wants_separate_room_options(message)
-        if _separate_room_request:
-            messages.add_system(
-                'separate_room_request',
-                'SEPARATE ROOM REQUEST',
-                build_separate_room_request_instruction(),
-            )
-
         if language_instruction:
             messages.add_raw_system('language_instruction_repeat', language_instruction)
 
@@ -1262,40 +1374,6 @@ class AIService:
                     tool for tool in _pricing_tools
                     if tool['function']['name'] not in ('transfer_to_manager', 'get_room_images')
                 ]
-
-        if _separate_room_request:
-            logger.info("[AI tools filter] separate room request; removing family-only room tool")
-            _pricing_tools = [
-                tool for tool in _pricing_tools
-                if tool['function']['name'] != 'get_family_room'
-            ]
-
-        try:
-            if _known_guest_count and int(_known_guest_count) >= 3:
-                _history_text = ' '.join(
-                    turn.get('content', '')
-                    for turn in (conversation_history or [])
-                    if turn.get('content')
-                ).lower()
-                _combined_text = f"{_history_text} {_msg_lower}"
-                _adult_keywords = {
-                    'взрослые', 'взрослых', 'только взрослые', 'без детей',
-                    'нет детей', 'adult', 'adults', 'no kids', 'no children',
-                }
-                _has_family_info = _separate_room_request or detect_family_context(lead) or any(
-                    kw in _combined_text for kw in _adult_keywords
-                )
-                if not _has_family_info:
-                    logger.info(
-                        f"[AI tools filter] guest_count={_known_guest_count} and children/adult info unknown. "
-                        "Removing room pricing tools."
-                    )
-                    _pricing_tools = [
-                        tool for tool in _pricing_tools
-                        if tool['function']['name'] not in ('get_room_options', 'get_family_room')
-                    ]
-        except (TypeError, ValueError):
-            pass
 
         _already_showed_pricing = False
         if conversation_history:
@@ -1814,7 +1892,7 @@ Example output:
     ) -> tuple:
         """
         Run LLM tool-call loop (≤3 rounds). On API error retries with backoff then falls back to no-tools.
-        Returns: (response_text, needs_manager_transfer, transfer_trigger_args, transfer_already_called, last_transfer_args)
+        Returns response plus transfer state and a server-side pricing audit.
         """
         org = _org_from_lead(lead)
         business_name = getattr(org, 'name', '') or 'нашем отеле'
@@ -1827,6 +1905,12 @@ Example output:
         transfer_already_called = False
         trigger_args: dict = {}
         last_transfer_args: dict = {}
+        pricing_audit: dict = {
+            'called': False,
+            'validated': False,
+            'tool': None,
+            'error': None,
+        }
         response_text = None
         initial_messages = consolidate_system_messages(
             trim_messages_for_model(initial_messages, max_dialog_messages=18)
@@ -1861,11 +1945,18 @@ Example output:
                 response_text = _FALLBACK_MSG
             else:
                 logger.info(f"[AI RESPONSE DEBUG] final AI text response: {response_text}")
-            return response_text, needs_transfer, trigger_args, transfer_already_called, last_transfer_args
+            return (
+                response_text,
+                needs_transfer,
+                trigger_args,
+                transfer_already_called,
+                last_transfer_args,
+                pricing_audit,
+            )
 
         def _handle_tool_call(tc, tc_args, tool_msgs):
             """Process one tool call, appending the result to tool_msgs. Returns updated transfer state."""
-            nonlocal needs_transfer, trigger_args, transfer_already_called, last_transfer_args
+            nonlocal needs_transfer, trigger_args, transfer_already_called, last_transfer_args, pricing_audit
             if tc.function.name == 'transfer_to_manager':
                 blocked_ambiguous_transfer = _ambiguous_transfer_block_result(tc_args, lead=lead, message=message)
                 if blocked_ambiguous_transfer:
@@ -1911,6 +2002,14 @@ Example output:
                     except Exception as _save_err:
                         logger.warning(f"[Tool→Lead] Could not save tool args to lead: {_save_err}")
             result = self._execute_pricing_tool(tc.function.name, tc_args, lead=lead)
+            if tc.function.name in ('get_room_options', 'get_family_room', 'get_meal_plan_pricing'):
+                pricing_audit['called'] = True
+                pricing_audit['tool'] = tc.function.name
+                pricing_audit['error'] = result.get('error')
+                if tc.function.name == 'get_meal_plan_pricing':
+                    pricing_audit['validated'] = not result.get('error')
+                else:
+                    pricing_audit['validated'] = bool(result.get('combinations')) and not result.get('error')
             result_json = json.dumps(result, ensure_ascii=False)
             logger.info(f"[AI RESPONSE DEBUG] tool={tc.function.name} result sent to AI: {result_json}")
             if tc.function.name in ('get_room_options', 'get_family_room') and result.get('error') == 'transfer_to_manager':
@@ -2074,7 +2173,14 @@ Example output:
                     response_text = _FALLBACK_MSG
 
         response_text = self._recover_textual_tool_call(response_text, tools, lead=lead)
-        return response_text, needs_transfer, trigger_args, transfer_already_called, last_transfer_args
+        return (
+            response_text,
+            needs_transfer,
+            trigger_args,
+            transfer_already_called,
+            last_transfer_args,
+            pricing_audit,
+        )
 
     def _execute_pricing_tool(self, tool_name: str, args: dict, lead=None) -> dict:
         try:

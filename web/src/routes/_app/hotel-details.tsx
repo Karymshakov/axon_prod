@@ -3133,7 +3133,7 @@ function SocialContentTab({ mediaItems }: { mediaItems: HotelMediaItem[] }) {
     mutationFn: syncInstagramSocialContent,
     onSuccess: (result) => {
       queryClient.invalidateQueries({ queryKey: ['social-content'] })
-      toast.success(`Синк завершен: посты/рилсы ${result.items_synced}, сторис ${result.stories_synced}`)
+      toast.success(`Синхронизация завершена: посты/рилсы ${result.items_synced}, активные сторис ${result.stories_synced}`)
       if (result.errors.length > 0) toast.warning(result.errors[0])
     },
     onError: () => toast.error('Не удалось синхронизировать Instagram'),
@@ -3235,6 +3235,11 @@ function SocialContentTab({ mediaItems }: { mediaItems: HotelMediaItem[] }) {
           Синхронизировать Instagram
         </Button>
       </div>
+      <p className="text-xs leading-5 text-muted-foreground">
+        Meta API синхронизирует публикации, рилсы и только активные сторис за 24 часа.
+        Архив «Актуальное» API не отдаёт: такие материалы добавляются вручную или сохраняются системой,
+        когда приходит ответ на сторис.
+      </p>
 
       {isLoading ? (
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">

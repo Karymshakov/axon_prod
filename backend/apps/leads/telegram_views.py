@@ -77,15 +77,18 @@ def _is_our_company(name: str, company_profile: str) -> bool:
 # check for pre-existing uncompressed files (legacy fallback at send time).
 _TELEGRAM_PHOTO_MAX_BYTES = 8 * 1024 * 1024   # 8 MB safety threshold
 
-def _split_into_messages(text: str) -> list:
-    """
-    Split a multi-paragraph AI response into individual chat messages by double newlines.
-    This preserves newlines and formatting (lists, bullets) inside each paragraph.
-    """
-    if not text:
+def _split_into_messages(text: str, max_length: int = 3900) -> list:
+    """Keep a normal reply in one message and split only near Telegram's limit."""
+    cleaned = (text or '').strip()
+    if not cleaned:
         return []
-    parts = re.split(r'\n{2,}', text)
-    return [p.strip() for p in parts if p.strip()]
+    if len(cleaned) <= max_length:
+        return [cleaned]
+    return [
+        cleaned[start:start + max_length].strip()
+        for start in range(0, len(cleaned), max_length)
+        if cleaned[start:start + max_length].strip()
+    ]
 
 
 def _apply_fast_lead_extraction(lead, text: str) -> list[str]:
@@ -108,6 +111,23 @@ def _apply_fast_lead_extraction(lead, text: str) -> list[str]:
             updated_fields.append('phone')
         elif len(digits) >= 7:
             phone_value = phone_match.group(0)
+
+    if phone_value:
+        try:
+            from apps.leads.services.stage_resolver import is_reliable_contact_person
+
+            name_candidate = value.replace(phone_value, ' ')
+            name_candidate = re.sub(r'[^\w\sА-Яа-яЁё-]', ' ', name_candidate, flags=re.UNICODE)
+            name_candidate = re.sub(r'\s+', ' ', name_candidate).strip(' -_')
+            if (
+                2 <= len(name_candidate) <= 80
+                and re.search(r'[A-Za-zА-Яа-яЁё]', name_candidate)
+                and not is_reliable_contact_person(lead)
+            ):
+                lead.contact_person = name_candidate
+                updated_fields.append('contact_person')
+        except Exception:
+            pass
 
 
 

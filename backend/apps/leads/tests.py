@@ -679,8 +679,9 @@ class GlobalChannelAiPauseTests(TestCase):
         ).latest('id')
         self.assertEqual(pause_activity.metadata['user'], self.owner.name)
 
+    @patch('apps.leads.integration_views.instagram_service.is_configured', return_value=True)
     @patch('apps.leads.integration_views.instagram_service.send_message', return_value={'message_id': 'ig-mid-1'})
-    def test_manual_instagram_send_still_works_while_globally_paused(self, send_mock):
+    def test_manual_instagram_send_still_works_while_globally_paused(self, send_mock, _configured_mock):
         request = self.factory.post('/api/leads/communications/instagram/send/', {'lead_id': self.lead.id, 'message': 'Manual instagram reply'}, format='json')
         force_authenticate(request, user=self.owner)
 
@@ -689,7 +690,12 @@ class GlobalChannelAiPauseTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response.data['success'])
-        send_mock.assert_called_once_with(self.lead.instagram_user_id, 'Manual instagram reply')
+        send_mock.assert_called_once_with(
+            self.lead.instagram_user_id,
+            'Manual instagram reply',
+            org=self.org,
+            raise_exception=True,
+        )
         sent_activity = LeadActivity.objects.filter(
             lead=self.lead,
             activity_type=LeadActivity.TYPE_INSTAGRAM_SENT,
@@ -2331,7 +2337,15 @@ class AIConnectionAndIntentClassifierTests(TestCase):
 
         self.assertEqual(policy.resolution.required_fields, ['meal_plan'])
         self.assertEqual(policy.resolution.missing_fields, ['meal_plan'])
-        self.assertEqual(policy.allowed_tools, {'get_room_options', 'get_family_room', 'get_meal_plan_pricing'})
+        self.assertEqual(
+            policy.allowed_tools,
+            {
+                'get_room_options',
+                'get_family_room',
+                'get_meal_plan_pricing',
+                'get_room_images',
+            },
+        )
         self.assertFalse(policy.allows_tool('transfer_to_manager'))
 
     def test_contact_stage_empty_tool_set_blocks_transfer(self):
@@ -2355,7 +2369,7 @@ class AIConnectionAndIntentClassifierTests(TestCase):
             )
 
         self.assertEqual(result['error'], 'tool_not_allowed_on_stage')
-        self.assertEqual(result['allowed_tools'], [])
+        self.assertEqual(result['allowed_tools'], ['get_room_images'])
         mock_transfer.assert_not_called()
 
     def test_completed_contact_stage_allows_booking_complete_transfer(self):
@@ -2846,7 +2860,10 @@ class AIConnectionAndIntentClassifierTests(TestCase):
             tool['function']['name']
             for tool in mock_create.call_args[1].get('tools', [])
         ]
-        self.assertEqual(registered_tools, ['get_room_options'])
+        self.assertEqual(
+            registered_tools,
+            ['get_room_options', 'get_room_images'],
+        )
 
     def test_flow_card_disallowed_tool_execution_is_blocked_before_side_effect(self):
         from apps.flows.models import LeadFlowState
@@ -2866,7 +2883,10 @@ class AIConnectionAndIntentClassifierTests(TestCase):
             )
 
         self.assertEqual(result['error'], 'tool_not_allowed_on_stage')
-        self.assertEqual(result['allowed_tools'], ['get_room_options'])
+        self.assertEqual(
+            result['allowed_tools'],
+            ['get_room_images', 'get_room_options'],
+        )
         mock_transfer.assert_not_called()
 
     def test_flow_card_blocks_auto_transfer_side_effect_when_tool_not_allowed(self):
@@ -3382,7 +3402,7 @@ class AIConnectionAndIntentClassifierTests(TestCase):
         self.assertIn('Family Room', response)
         self.assertNotIn('нет возможности', response)
 
-    def test_separate_room_request_removes_family_only_tool(self):
+    def test_separate_room_request_keeps_semantic_room_tools_available(self):
         from apps.flows.models import AITool
         from apps.leads.ai_service import ai_service
         from apps.leads.models import Lead
@@ -3419,8 +3439,9 @@ class AIConnectionAndIntentClassifierTests(TestCase):
             )
 
         self.assertIn('get_room_options', registered_tools)
-        self.assertNotIn('get_family_room', registered_tools)
-        self.assertIn('SEPARATE ROOM REQUEST', system_text)
+        self.assertIn('get_family_room', registered_tools)
+        self.assertNotIn('SEPARATE ROOM REQUEST', system_text)
+        self.assertIn('full conversation', system_text)
 
     def test_selected_media_large_group_still_allows_manager_transfer_tool(self):
         from apps.flows.models import AITool
@@ -3893,7 +3914,7 @@ class AIConnectionAndIntentClassifierTests(TestCase):
 
         self.assertEqual(res, {})
 
-    def test_dynamic_pricing_tools_filtering_guest_count_three_plus_unknown_children(self):
+    def test_dynamic_pricing_tools_are_available_for_semantic_guest_composition(self):
         from apps.leads.ai_service import ai_service
         from apps.leads.models import Lead, AIConfig
         from apps.flows.models import AITool
@@ -3922,9 +3943,10 @@ class AIConnectionAndIntentClassifierTests(TestCase):
             # Check call args
             called_kwargs = mock_create.call_args[1]
             registered_tools = [t['function']['name'] for t in called_kwargs.get('tools', [])]
-            # Since children info is unknown and guest_count >= 3, pricing lookup tools should be filtered out
-            self.assertNotIn('get_room_options', registered_tools)
-            self.assertNotIn('get_family_room', registered_tools)
+            # The model receives the complete conversation and decides which pricing
+            # tool to use instead of a keyword/guest-count filter in application code.
+            self.assertIn('get_room_options', registered_tools)
+            self.assertIn('get_family_room', registered_tools)
 
     def test_dynamic_pricing_tools_filtering_guest_count_three_plus_known_children_keywords(self):
         from apps.leads.ai_service import ai_service
@@ -4125,8 +4147,8 @@ class CommsMediaTests(TestCase):
             os.remove(file_path)
 
     @patch('apps.leads.integration_views.whatsapp_service.is_configured', return_value=True)
-    @patch('apps.leads.integration_views.whatsapp_service.send_photo', return_value={'message_id': 'wa-photo-99'})
-    def test_send_whatsapp_photo_from_comms(self, send_photo_mock, _configured_mock):
+    @patch('apps.leads.integration_views.whatsapp_service.send_media', return_value={'message_id': 'wa-photo-99'})
+    def test_send_whatsapp_photo_from_comms(self, send_media_mock, _configured_mock):
         from apps.leads.integration_views import send_whatsapp_message_from_comms
         from django.conf import settings
         
@@ -4149,10 +4171,11 @@ class CommsMediaTests(TestCase):
         response = send_whatsapp_message_from_comms(request)
         self.assertEqual(response.status_code, 200)
         
-        # Assert send_photo was called
-        send_photo_mock.assert_called_once_with(
+        # Assert the generic media sender was called as an image.
+        send_media_mock.assert_called_once_with(
             self.lead.whatsapp_phone,
             file_path,
+            media_type='image',
             caption='WhatsApp image send caption',
             org=self.org,
             raise_exception=True
@@ -4172,9 +4195,9 @@ class CommsMediaTests(TestCase):
             os.remove(file_path)
 
     @patch('apps.leads.integration_views.instagram_service.is_configured', return_value=True)
-    @patch('apps.leads.integration_views.instagram_service.send_image_url', return_value={'message_id': 'ig-photo-99'})
+    @patch('apps.leads.integration_views.instagram_service.send_attachment_url', return_value={'message_id': 'ig-photo-99'})
     @patch('apps.leads.integration_views.instagram_service.send_message', return_value={'message_id': 'ig-text-100'})
-    def test_send_instagram_photo_from_comms(self, send_message_mock, send_image_url_mock, _configured_mock):
+    def test_send_instagram_photo_from_comms(self, send_message_mock, send_attachment_url_mock, _configured_mock):
         from apps.leads.integration_views import send_instagram_message_from_comms
         from django.conf import settings
         
@@ -4193,11 +4216,12 @@ class CommsMediaTests(TestCase):
         response = send_instagram_message_from_comms(request)
         self.assertEqual(response.status_code, 200)
         
-        # Assert send_image_url was called with absolute URL
+        # Assert send_attachment_url was called with absolute URL
         expected_absolute_url = request.build_absolute_uri(file_url)
-        send_image_url_mock.assert_called_once_with(
+        send_attachment_url_mock.assert_called_once_with(
             self.lead.instagram_user_id,
             expected_absolute_url,
+            attachment_type='image',
             org=self.org
         )
         

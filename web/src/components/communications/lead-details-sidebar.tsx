@@ -16,9 +16,9 @@ import { Textarea } from '@/components/ui/textarea'
 import { Badge } from '@/components/ui/badge'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import {
-  getContactChannelLabel,
+  getLeadContactChannelsLabel,
   getLeadStatusLabel,
-  resolveLeadContactChannel,
+  resolveLeadContactChannels,
   updateLead,
   type Lead,
 } from '@/lib/api'
@@ -61,6 +61,8 @@ export function LeadDetailsSidebar({
   const [discoverySource, setDiscoverySource] = useState<Lead['discovery_source']>('')
   const [discoverySourceDetail, setDiscoverySourceDetail] = useState('')
   const discoverySourceLabel = discoverySourceOptions.find((option) => option.value === discoverySource)?.label
+  const contactChannels = resolveLeadContactChannels(lead)
+  const isMergedProfile = contactChannels.length > 1
 
   // Initialize state when lead changes
   useEffect(() => {
@@ -134,10 +136,12 @@ export function LeadDetailsSidebar({
               <div>
                 <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Канал обращения</label>
                 <div className="mt-1 rounded-md border bg-muted/40 px-3 py-2 text-xs font-medium text-foreground">
-                  {getContactChannelLabel(resolveLeadContactChannel(lead))}
+                  {getLeadContactChannelsLabel(lead)}
                 </div>
                 <p className="mt-1 text-[11px] leading-snug text-muted-foreground">
-                  Канал определяется автоматически по чату гостя.
+                  {isMergedProfile
+                    ? 'Объединённый профиль: сообщения из всех каналов находятся в одной карточке.'
+                    : 'Канал определяется автоматически по чату гостя.'}
                 </p>
               </div>
 
@@ -289,7 +293,7 @@ export function LeadDetailsSidebar({
                 className="w-full gap-1.5 h-9 text-xs text-amber-600 dark:text-amber-400 border-amber-200 dark:border-amber-900/60 hover:bg-amber-50 hover:text-amber-700 dark:hover:bg-amber-950/20"
               >
                 <GitMerge className="h-3.5 w-3.5" />
-                Объединить с другим гостем
+                {isMergedProfile ? 'Добавить ещё один профиль' : 'Объединить с другим гостем'}
               </Button>
             </div>
         </form>

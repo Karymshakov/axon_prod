@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Lead, fetchLeadNotes, fetchPipelineStages, fetchSegments, getContactChannelLabel, getLeadStatusLabel, resolveLeadContactChannel } from '@/lib/api'
+import { Lead, fetchLeadNotes, fetchPipelineStages, fetchSegments, getLeadContactChannelsLabel, getLeadStatusLabel, resolveLeadContactChannels } from '@/lib/api'
 import { useQuery } from '@tanstack/react-query'
 import { LeadSourceBadge } from '@/components/lead-source-badge'
 import { useLeadDiscoverySources } from '@/hooks/use-lead-discovery-sources'
@@ -97,7 +97,9 @@ export function LeadDetailsSidebar({ lead, open, onClose, onEdit, onOpenFull, on
     || (lead.segment === 'individual' ? 'Индивидуальный' : lead.segment_display)
   const descriptionText = getLeadDescription(lead)
   const nextStepsText = lead.next_steps?.trim() || ''
-  const channelLabel = getContactChannelLabel(resolveLeadContactChannel(lead))
+  const channels = resolveLeadContactChannels(lead)
+  const channelLabel = getLeadContactChannelsLabel(lead)
+  const isMergedProfile = channels.length > 1
   const discoverySourceLabel = discoverySourceOptions.find((option) => option.value === lead.discovery_source)?.label
 
   return (
@@ -132,6 +134,7 @@ export function LeadDetailsSidebar({ lead, open, onClose, onEdit, onOpenFull, on
           <div className="mt-2 flex flex-wrap items-center gap-2">
             <Badge variant={STATUS_COLORS[lead.status] || 'secondary'}>{stageName}</Badge>
             <Badge variant="outline">{channelLabel}</Badge>
+            {isMergedProfile ? <Badge variant="secondary">Объединённый профиль</Badge> : null}
             {lead.ai_paused ? (
               <Badge className="bg-amber-500 text-white hover:bg-amber-500">Ручной</Badge>
             ) : null}
@@ -314,7 +317,7 @@ export function LeadDetailsSidebar({ lead, open, onClose, onEdit, onOpenFull, on
               className="w-full gap-1.5 h-9 text-xs text-amber-600 dark:text-amber-400 border-amber-200 dark:border-amber-900/60 hover:bg-amber-50 hover:text-amber-700 dark:hover:bg-amber-950/20"
             >
               <GitMerge className="h-3.5 w-3.5" />
-              Объединить с другим гостем
+              {isMergedProfile ? 'Добавить ещё один профиль' : 'Объединить с другим гостем'}
             </Button>
           </div>
 

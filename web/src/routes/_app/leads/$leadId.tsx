@@ -6,9 +6,10 @@ import { useLanguage } from '@/contexts/language-context'
 import {
   fetchLead,
   fetchPipelineStages,
-  getContactChannelLabel,
+  getLeadContactChannelsLabel,
   getLeadStatusLabel,
   resolveLeadContactChannel,
+  resolveLeadContactChannels,
   updateLead,
   triggerInstagramAiResponse,
   toggleAiPause,
@@ -97,6 +98,7 @@ function LeadDetailPage() {
   }
 
   const stageName = getLeadStatusLabel(lead.status, stages)
+  const contactChannels = resolveLeadContactChannels(lead)
   const discoverySourceLabel = discoverySourceOptions.find((option) => option.value === lead.discovery_source)?.label
 
   return (
@@ -137,9 +139,10 @@ function LeadDetailPage() {
                     <Badge variant={getStatusColor(lead.status)}>
                       {stageName}
                     </Badge>
-                    {resolveLeadContactChannel(lead) ? (
-                      <Badge variant="outline">{getContactChannelLabel(resolveLeadContactChannel(lead))}</Badge>
+                    {contactChannels.length > 0 ? (
+                      <Badge variant="outline">{getLeadContactChannelsLabel(lead)}</Badge>
                     ) : null}
+                    {contactChannels.length > 1 ? <Badge variant="secondary">Объединённый профиль</Badge> : null}
                     {lead.discovery_source ? (
                       <LeadSourceBadge source={lead.discovery_source} label={discoverySourceLabel} />
                     ) : null}
