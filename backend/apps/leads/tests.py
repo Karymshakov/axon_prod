@@ -323,6 +323,48 @@ class InstagramSocialContentWebhookTests(TestCase):
         self.assertEqual(context['post_id'], 'media-777')
         self.assertIn('https://www.instagram.com/p/comfort-room/', context['urls'])
 
+    @patch('apps.leads.instagram_views.instagram_service.send_message')
+    @patch('apps.leads.instagram_views.requests.get')
+    def test_guest_story_mention_never_creates_social_content(self, get_mock, send_mock):
+        from apps.hotel_media.models import SocialContentItem
+
+        get_response = Mock(ok=True)
+        get_response.json.return_value = {'username': 'storyguest'}
+        get_mock.return_value = get_response
+        send_mock.return_value = {'message_id': 'story-ack-mid'}
+        payload = {
+            'entry': [{
+                'id': 'business-account-id',
+                'messaging': [{
+                    'sender': {'id': 'story-guest-id'},
+                    'message': {
+                        'mid': 'story-mention-mid',
+                        'attachments': [{
+                            'type': 'story_mention',
+                            'payload': {
+                                'id': 'guest-story-id',
+                                'url': 'https://lookaside.fbsbx.com/ig_messaging_cdn/guest-story.jpg',
+                            },
+                        }],
+                    },
+                }],
+            }],
+        }
+
+        response = instagram_webhook(
+            self.factory.post('/api/integrations/instagram/webhook/', payload, format='json')
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(SocialContentItem.objects.filter(organization=self.org).exists())
+        activity = LeadActivity.objects.get(
+            organization=self.org,
+            activity_type=LeadActivity.TYPE_INSTAGRAM_RECEIVED,
+            metadata__message_id='story-mention-mid',
+        )
+        self.assertEqual(activity.metadata['instagram_event_type'], 'story_mention')
+        send_mock.assert_called_once()
+
     @patch('apps.leads.instagram_views.ai_service.is_configured', return_value=False)
     @patch('apps.leads.instagram_views.requests.get')
     def test_instagram_ig_post_uses_reviewed_social_content_context(self, get_mock, _ai_ready_mock):

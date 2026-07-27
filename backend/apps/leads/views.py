@@ -296,13 +296,20 @@ class LeadViewSet(OrganizationQuerysetMixin, viewsets.ModelViewSet):
 
     @action(detail=True, methods=['post'], url_path='toggle-ai-pause')
     def toggle_ai_pause(self, request, pk=None):
-        """Toggle AI pause state for a lead."""
+        """Set or toggle AI pause state for a lead."""
         user_name = request.user.name or request.user.email if request.user.is_authenticated else 'Unknown'
+        requested_paused = request.data.get('paused')
+        if requested_paused is not None and not isinstance(requested_paused, bool):
+            return Response(
+                {'paused': 'Expected a boolean value.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         with transaction.atomic():
             lead = Lead.objects.select_for_update().get(pk=self.get_object().pk)
+            should_pause = not lead.ai_paused if requested_paused is None else requested_paused
 
-            if lead.ai_paused:
+            if not should_pause and lead.ai_paused:
                 lead.ai_paused = False
                 lead.ai_paused_at = None
                 lead.ai_paused_by = ''
@@ -314,7 +321,7 @@ class LeadViewSet(OrganizationQuerysetMixin, viewsets.ModelViewSet):
                     description=f'🤖 AI agent re-enabled by {user_name}',
                     metadata={'action': 'ai_resumed', 'user': user_name},
                 )
-            else:
+            elif not lead.ai_paused:
                 lead.ai_paused = True
                 lead.ai_paused_at = timezone.now()
                 lead.ai_paused_by = user_name

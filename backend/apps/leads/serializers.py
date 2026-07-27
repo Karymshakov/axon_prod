@@ -279,6 +279,7 @@ class LeadActivitySerializer(serializers.ModelSerializer):
             'activity_type_display',
             'description',
             'metadata',
+            'echo_origin',
             'is_read',
             'created_at',
         ]

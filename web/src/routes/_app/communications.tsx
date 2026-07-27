@@ -355,9 +355,12 @@ function sortActivitiesChronologically<T extends { created_at: string; id: numbe
   })
 }
 
-function getSentBy(metadata: Record<string, unknown> | null): string {
-  if (!metadata) return 'ИИ'
-  if (metadata.is_manager_manual) {
+function getSentBy(metadata: Record<string, unknown> | null): string {
+  if (!metadata) return 'ИИ'
+  if (metadata.sent_via === 'native_app' || metadata.echo_origin === 'instagram_app') {
+    return 'Менеджер · Instagram'
+  }
+  if (metadata.is_manager_manual) {
     const name = typeof metadata.sent_by_name === 'string' ? metadata.sent_by_name.trim() : ''
     const initials = typeof metadata.sent_by_initials === 'string' ? metadata.sent_by_initials.trim() : ''
     const email = typeof metadata.sent_by_email === 'string' ? metadata.sent_by_email.trim() : ''
@@ -1020,9 +1023,10 @@ function CommunicationsPage() {
   const handleToggleAiPause = async (lead: Lead) => {
     setIsTogglingAi(true)
     try {
-      const updated = await toggleAiPause(lead.id)
-      setSelectedLead(updated)
-      queryClient.invalidateQueries({ queryKey: ['leads'] })
+      const updated = await toggleAiPause(lead.id, !lead.ai_paused)
+      setSelectedLead(updated)
+      queryClient.invalidateQueries({ queryKey: ['leads'] })
+      queryClient.invalidateQueries({ queryKey: ['lead-activities', lead.id] })
       toast.success(updated.ai_paused ? 'Диалог переведен на ручной контроль' : 'ИИ-агент успешно перезапущен')
     } catch {
       toast.error('Не удалось переключить режим управления')
