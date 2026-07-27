@@ -1045,6 +1045,7 @@ export interface LeadActivity {
   activity_type_display: string
   description: string
   metadata: Record<string, unknown> | null
+  echo_origin?: 'crm' | 'instagram_app' | null
   is_read: boolean
   created_at: string
 }
@@ -1182,8 +1183,11 @@ export function handbackToAI(leadId: number) {
   return api.post<{ status: string }>(`/leads/${leadId}/handback/`, {})
 }
 
-export function toggleAiPause(leadId: number) {
-  return api.post<Lead>(`/leads/${leadId}/toggle-ai-pause/`, {})
+export function toggleAiPause(leadId: number, paused?: boolean) {
+  return api.post<Lead>(
+    `/leads/${leadId}/toggle-ai-pause/`,
+    typeof paused === 'boolean' ? { paused } : {},
+  )
 }
 
 export interface ResetLeadAiMemoryResponse {

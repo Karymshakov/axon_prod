@@ -3073,17 +3073,47 @@ function PricingTab() {
 
 // ── Runtime automation messages and booking rules ─────────────────────────────
 
-const AUTOMATION_EVENT_HELP: Record<AutomationMessageTemplate['event_key'], string> = {
-  telegram_start: 'Приветствие, если после /start не пришло следующее сообщение.',
-  story_mention_ack: 'Один ответ на отметку отеля в сторис. Продажи и follow-up не запускаются.',
-  story_courtesy_close: 'Ответ на вежливое продолжение после отметки, например «это вам спасибо».',
-  pricing_unavailable: 'Текст после успешной передачи менеджеру запроса на неподтверждённый тариф.',
-  pricing_check_required: 'Безопасный ответ, когда цену не удалось подтвердить.',
-  manager_handoff: 'Подтверждение реальной передачи вопроса менеджеру.',
-  media_unavailable: 'Ответ, когда запрошенное фото не удалось доставить.',
+const AUTOMATION_EVENT_UI: Record<
+  AutomationMessageTemplate['event_key'],
+  { title: string; help: string }
+> = {
+  telegram_start: {
+    title: 'Приветствие в Telegram',
+    help: 'Отправляется один раз после /start, если пользователь ещё ничего не написал.',
+  },
+  story_mention_ack: {
+    title: 'Спасибо за отметку в сторис',
+    help: 'Один дружелюбный ответ на отметку отеля. Лид и follow-up не создаются.',
+  },
+  story_courtesy_close: {
+    title: 'Ответ после благодарности за сторис',
+    help: 'Завершает вежливый обмен фразами вроде «это вам спасибо» без перехода к продаже.',
+  },
+  pricing_unavailable: {
+    title: 'Тариф передан на проверку',
+    help: 'Используется после фактической передачи менеджеру запроса на неподтверждённую цену.',
+  },
+  pricing_check_required: {
+    title: 'Цена требует проверки',
+    help: 'Безопасный ответ, когда система не смогла подтвердить актуальный тариф.',
+  },
+  manager_handoff: {
+    title: 'Запрос передан менеджеру',
+    help: 'Подтверждает только реально выполненную передачу, без обещаний точного времени ответа.',
+  },
+  media_unavailable: {
+    title: 'Фото или видео недоступно',
+    help: 'Отправляется, если запрошенный медиафайл не удалось доставить.',
+  },
 }
 
-function AutomationTemplateEditor({
+const AUTOMATION_LANGUAGES = [
+  { value: 'ru', label: 'Русский', short: 'RU' },
+  { value: 'ky', label: 'Кыргызча', short: 'KY' },
+  { value: 'en', label: 'English', short: 'EN' },
+] as const
+
+function AutomationTemplateLanguageEditor({
   template,
   canEdit,
   onSaved,
@@ -3107,29 +3137,108 @@ function AutomationTemplateEditor({
     },
     onError: () => toast.error('Не удалось сохранить автоответ'),
   })
+  const isDirty = text !== template.text || isActive !== template.is_active
 
   return (
-    <div className="rounded-lg border p-4 space-y-3">
-      <div className="flex items-start justify-between gap-3">
+    <div className="space-y-3 pt-3">
+      <div className="flex items-center justify-between gap-3 rounded-lg bg-muted/40 px-3 py-2.5">
         <div>
-          <div className="font-medium">{template.event_label}</div>
-          <div className="text-xs text-muted-foreground mt-1">
-            {template.language_label} · {template.channel}
+          <div className="text-sm font-medium">
+            {isActive ? 'Автоответ включён' : 'Автоответ выключен'}
+          </div>
+          <div className="text-xs text-muted-foreground">
+            {isActive ? 'Бот отправит этот текст при событии.' : 'Для этого языка ничего не отправится.'}
           </div>
         </div>
         <Switch checked={isActive} onCheckedChange={setIsActive} disabled={!canEdit} />
       </div>
-      <p className="text-xs leading-5 text-muted-foreground">
-        {AUTOMATION_EVENT_HELP[template.event_key]}
-      </p>
-      <Textarea value={text} onChange={(event) => setText(event.target.value)} rows={4} disabled={!canEdit} />
-      <Button
-        size="sm"
-        onClick={() => mutation.mutate()}
-        disabled={!canEdit || mutation.isPending || (!text.trim() && isActive)}
-      >
-        {mutation.isPending ? 'Сохранение...' : 'Сохранить'}
-      </Button>
+      <div className="space-y-1.5">
+        <div className="flex items-center justify-between">
+          <Label>Текст сообщения</Label>
+          <span className="text-xs text-muted-foreground">{text.length} символов</span>
+        </div>
+        <Textarea
+          value={text}
+          onChange={(event) => setText(event.target.value)}
+          rows={5}
+          disabled={!canEdit}
+          className="resize-y text-sm leading-6"
+          placeholder="Введите текст, который получит гость…"
+        />
+      </div>
+      <div className="flex items-center justify-between gap-3">
+        <span className="text-xs text-muted-foreground">
+          {isDirty ? 'Есть несохранённые изменения' : 'Все изменения сохранены'}
+        </span>
+        <Button
+          size="sm"
+          onClick={() => mutation.mutate()}
+          disabled={!canEdit || !isDirty || mutation.isPending || (!text.trim() && isActive)}
+        >
+          {mutation.isPending ? 'Сохранение…' : 'Сохранить изменения'}
+        </Button>
+      </div>
+    </div>
+  )
+}
+
+function AutomationEventEditor({
+  templates,
+  canEdit,
+  onSaved,
+}: {
+  templates: AutomationMessageTemplate[]
+  canEdit: boolean
+  onSaved: () => void
+}) {
+  const firstTemplate = templates[0]
+  const eventUi = AUTOMATION_EVENT_UI[firstTemplate.event_key]
+  const availableLanguages = AUTOMATION_LANGUAGES.filter((language) =>
+    templates.some((template) => template.language === language.value)
+  )
+  const defaultLanguage = availableLanguages.find((language) => language.value === 'ru')?.value
+    ?? availableLanguages[0]?.value
+    ?? 'ru'
+
+  return (
+    <div className="overflow-hidden rounded-xl border bg-card shadow-sm">
+      <div className="flex flex-col gap-3 border-b bg-muted/20 p-4 sm:flex-row sm:items-start sm:justify-between">
+        <div className="flex min-w-0 gap-3">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
+            <BotIcon className="h-5 w-5" />
+          </div>
+          <div>
+            <h4 className="font-semibold">{eventUi.title}</h4>
+            <p className="mt-1 max-w-3xl text-sm leading-5 text-muted-foreground">{eventUi.help}</p>
+          </div>
+        </div>
+        <Badge variant="outline" className="w-fit shrink-0">
+          {firstTemplate.channel === 'all' ? 'Все каналы' : firstTemplate.channel}
+        </Badge>
+      </div>
+      <Tabs defaultValue={defaultLanguage} className="p-4">
+        <TabsList className="grid h-auto w-full grid-cols-3 sm:w-[360px]">
+          {availableLanguages.map((language) => (
+            <TabsTrigger key={language.value} value={language.value} className="gap-1.5">
+              <span className="hidden sm:inline">{language.label}</span>
+              <span className="sm:hidden">{language.short}</span>
+            </TabsTrigger>
+          ))}
+        </TabsList>
+        {availableLanguages.map((language) => {
+          const template = templates.find((item) => item.language === language.value)
+          if (!template) return null
+          return (
+            <TabsContent key={template.id} value={language.value} className="mt-0">
+              <AutomationTemplateLanguageEditor
+                template={template}
+                canEdit={canEdit}
+                onSaved={onSaved}
+              />
+            </TabsContent>
+          )
+        })}
+      </Tabs>
     </div>
   )
 }
@@ -3150,6 +3259,17 @@ function AutomationMessagesTab() {
   useEffect(() => {
     if (rules) setRulesForm(rules)
   }, [rules])
+  const groupedTemplates = useMemo(() => {
+    const groups = new Map<AutomationMessageTemplate['event_key'], AutomationMessageTemplate[]>()
+    templates.forEach((template) => {
+      const group = groups.get(template.event_key) ?? []
+      group.push(template)
+      groups.set(template.event_key, group)
+    })
+    return Object.keys(AUTOMATION_EVENT_UI)
+      .map((eventKey) => groups.get(eventKey as AutomationMessageTemplate['event_key']) ?? [])
+      .filter((group) => group.length > 0)
+  }, [templates])
 
   const rulesMutation = useMutation({
     mutationFn: () => {
@@ -3185,11 +3305,11 @@ function AutomationMessagesTab() {
       {isLoading ? (
         <div className="h-40 rounded-lg border bg-muted animate-pulse" />
       ) : (
-        <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-          {templates.map((template) => (
-            <AutomationTemplateEditor
-              key={template.id}
-              template={template}
+        <div className="space-y-4">
+          {groupedTemplates.map((group) => (
+            <AutomationEventEditor
+              key={group[0].event_key}
+              templates={group}
               canEdit={canEdit}
               onSaved={() => queryClient.invalidateQueries({ queryKey: ['automation-message-templates'] })}
             />

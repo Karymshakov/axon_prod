@@ -519,7 +519,13 @@ def _process_instagram_comment_change(change: dict, organization_id: int) -> Non
         close_old_connections()
 
 
-def _handle_echo_event(mid: str, echo_text: str, guest_user_id: str, org_id: int = None) -> None:
+def _handle_echo_event(
+    mid: str,
+    echo_text: str,
+    guest_user_id: str,
+    org_id: int = None,
+    received_at=None,
+) -> None:
     """
     Process an Instagram echo event in a background thread.
 
@@ -544,6 +550,7 @@ def _handle_echo_event(mid: str, echo_text: str, guest_user_id: str, org_id: int
 
     try:
         # Wait before checking — lets the CRM activity creation win the race.
+        received_at = received_at or timezone.now()
         time.sleep(3)
 
         # A CRM echo is identified by its message_id stored in the LeadActivity
@@ -580,6 +587,10 @@ def _handle_echo_event(mid: str, echo_text: str, guest_user_id: str, org_id: int
                             'message_id': mid,
                             'text': echo_text,
                             'sent_via': 'native_app',
+                            'echo_origin': LeadActivity.ECHO_ORIGIN_INSTAGRAM_APP,
+                            'is_manager_manual': True,
+                            'sent_by_name': 'Instagram',
+                            'sent_by_initials': 'IG',
                         },
                     )
                     from datetime import datetime as _datetime
@@ -589,17 +600,37 @@ def _handle_echo_event(mid: str, echo_text: str, guest_user_id: str, org_id: int
                         last_contacted=_datetime.now(_ZoneInfo('Asia/Bishkek')).date()
                     )
 
-                if has_crm_sent and not echo_lead.ai_paused:
-                    Lead.objects.filter(id=echo_lead.id).update(ai_paused=True)
+                resumed_after_echo = LeadActivity.objects.filter(
+                    lead=echo_lead,
+                    created_at__gte=received_at,
+                    metadata__action__in=['ai_resumed', 'handback_to_ai'],
+                ).exists()
+
+                if has_crm_sent and not resumed_after_echo and not echo_lead.ai_paused:
+                    Lead.objects.filter(id=echo_lead.id).update(
+                        ai_paused=True,
+                        ai_paused_at=timezone.now(),
+                        ai_paused_by='Instagram app',
+                    )
                     LeadActivity.objects.create(
                         lead=echo_lead,
                         organization=echo_lead.organization,
                         activity_type=LeadActivity.TYPE_LEAD_UPDATED,
                         description='Manager took over via Instagram app',
                         echo_origin=LeadActivity.ECHO_ORIGIN_INSTAGRAM_APP,
-                        metadata={'message_id': mid},
+                        metadata={
+                            'message_id': mid,
+                            'action': 'ai_paused',
+                            'user': 'Instagram app',
+                        },
                     )
                     logger.info(f"Lead {echo_lead.id}: AI paused — manager sent via native Instagram app")
+                elif resumed_after_echo:
+                    logger.info(
+                        'Lead %s: native Instagram echo logged without pausing AI '
+                        'because control was returned after the echo arrived',
+                        echo_lead.id,
+                    )
                 elif not has_crm_sent:
                     logger.info(
                         f"Echo mid={mid} for lead {echo_lead.id}: "
@@ -1247,7 +1278,7 @@ def instagram_webhook(request):
                     if mid and guest_user_id:
                         threading.Thread(
                             target=_handle_echo_event,
-                            args=(mid, message_text, guest_user_id, org_id),
+                            args=(mid, message_text, guest_user_id, org_id, timezone.now()),
                             daemon=True,
                         ).start()
                     continue
@@ -1494,92 +1525,10 @@ def instagram_webhook(request):
                         lead.id,
                     )
 
-                if instagram_content_context:
-                    try:
-                        from apps.hotel_media.models import SocialContentItem
-                        from apps.hotel_media.services import (
-                            external_id_from_url,
-                            upsert_social_content_from_instagram_payload,
-                        )
-
-                        external_id = (
-                            instagram_content_context.get('story_id')
-                            or instagram_content_context.get('media_id')
-                            or instagram_content_context.get('share_id')
-                            or instagram_content_context.get('reel_id')
-                            or instagram_content_context.get('post_id')
-                        )
-                        primary_url = (
-                            instagram_content_context.get('story_url')
-                            or instagram_content_context.get('share_url')
-                            or instagram_content_context.get('media_url')
-                            or instagram_content_context.get('permalink')
-                            or next(iter(instagram_content_context.get('urls') or []), '')
-                        )
-                        existing_by_url = None
-                        existing_by_id = None
-                        if external_id and lead.organization:
-                            existing_by_id = SocialContentItem.objects.filter(
-                                organization=lead.organization,
-                                platform=SocialContentItem.PLATFORM_INSTAGRAM,
-                                external_id=external_id,
-                            ).first()
-                        if primary_url and lead.organization:
-                            existing_by_url = SocialContentItem.objects.filter(
-                                organization=lead.organization,
-                                platform=SocialContentItem.PLATFORM_INSTAGRAM,
-                            ).exclude(
-                                status=SocialContentItem.STATUS_DELETED,
-                            ).filter(
-                                models.Q(media_url=primary_url)
-                                | models.Q(thumbnail_url=primary_url)
-                                | models.Q(permalink=primary_url)
-                            ).first()
-                        if not external_id and primary_url and not existing_by_url:
-                            external_id = external_id_from_url(primary_url)
-                        if external_id:
-                            existing_item = existing_by_id or existing_by_url
-                            incoming_content_type = (
-                                instagram_content_context.get('content_type')
-                                or SocialContentItem.TYPE_UNKNOWN
-                            )
-                            if (
-                                incoming_content_type == SocialContentItem.TYPE_STORY
-                                and existing_item
-                                and (
-                                    existing_item.content_type == SocialContentItem.TYPE_HIGHLIGHT
-                                    or existing_item.status in {
-                                        SocialContentItem.STATUS_EXPIRED,
-                                        SocialContentItem.STATUS_ARCHIVED,
-                                    }
-                                    or (
-                                        existing_item.expires_at
-                                        and existing_item.expires_at <= timezone.now()
-                                    )
-                                )
-                            ):
-                                incoming_content_type = SocialContentItem.TYPE_HIGHLIGHT
-
-                            lookup_external_id = (
-                                existing_by_url.external_id
-                                if existing_by_url and not existing_by_id and existing_by_url.external_id
-                                else external_id
-                            )
-                            saved_item = upsert_social_content_from_instagram_payload(
-                                organization=lead.organization,
-                                external_id=lookup_external_id,
-                                content_type=incoming_content_type,
-                                media_url=primary_url or '',
-                                thumbnail_url=instagram_content_context.get('thumbnail_url') or '',
-                                permalink=instagram_content_context.get('permalink') or '',
-                                metadata=instagram_content_context,
-                                source=SocialContentItem.SOURCE_WEBHOOK,
-                            )
-                            if external_id != lookup_external_id and saved_item.parent_external_id != external_id:
-                                saved_item.parent_external_id = external_id
-                                saved_item.save(update_fields=['parent_external_id', 'updated_at'])
-                    except Exception as exc:
-                        logger.warning(f"Could not upsert Instagram social content context: {exc}")
+                # Incoming stories, mentions and shared posts belong to the guest
+                # conversation. They may be matched against already-synced hotel
+                # content below, but must never create records in the hotel's
+                # Social Content library.
 
                 media_context = None
                 if media_metadata or instagram_content_context:
