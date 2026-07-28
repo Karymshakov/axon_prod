@@ -1,0 +1,29 @@
+--- database.sql
++++ database2.sql
+@@ -3,5 +3,5 @@
+ --
+ 
+-\restrict QUlfH3uUy2DSamzomNyuvYENwjbX8x4e4LinhI4OAn4900HAfy6bguWwocCwqnI
++\restrict YDGzOVxWew2ySOqDV6qYF3qC8n3gsrX0m9mRjzSOH28Zu1bIqQCRUrYXwuIYQAw
+ 
+ -- Dumped from database version 16.4
+@@ -2554,4 +2554,5 @@
+ 4	eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ0b2tlbl90eXBlIjoicmVmcmVzaCIsImV4cCI6MTc3ODk1MzQ2NSwiaWF0IjoxNzc4MzQ4NjY1LCJqdGkiOiJmZTY1MTU3ZTM0NDI0M2IxYTRhMTYwOTllOTA5MTU3NCIsInVzZXJfaWQiOiIzIn0.F7HI-D8d0NI7dqsyeCQ233W2O4Nd7yvRblA4xA0UGJA	2026-05-09 17:44:25.708737+00	2026-05-16 17:44:25+00	3	fe65157e344243b1a4a16099e9091574
+ 5	eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ0b2tlbl90eXBlIjoicmVmcmVzaCIsImV4cCI6MTc3OTEyMDExMCwiaWF0IjoxNzc4NTE1MzEwLCJqdGkiOiI3NGNlZDZkMDI2MDk0MWUwYTkyMmEzNzJkNTk0MGNmNSIsInVzZXJfaWQiOiIzIn0.28PEAMspXH07gVCgME0UYQGsFaqCIfNvqLbtbESeAIs	2026-05-11 16:01:50.31679+00	2026-05-18 16:01:50+00	3	74ced6d0260941e0a922a372d5940cf5
++6	eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ0b2tlbl90eXBlIjoicmVmcmVzaCIsImV4cCI6MTc3OTY4ODQ4MCwiaWF0IjoxNzc5MDgzNjgwLCJqdGkiOiJiZjVjOWM2NDA5NmU0ODVmOWJhOWVhY2M0NTVhOGE3OSIsInVzZXJfaWQiOiIyIn0.XgWBeDn8D7VWvmZ_iriVL4KmPrCzqWGZToArq53gCXg	2026-05-18 05:54:40.212441+00	2026-05-25 05:54:40+00	2	bf5c9c64096e485f9ba9eacc455a8a79
+ \.
+ 
+@@ -2910,5 +2911,5 @@
+ --
+ 
+-SELECT pg_catalog.setval('public.token_blacklist_outstandingtoken_id_seq', 5, true);
++SELECT pg_catalog.setval('public.token_blacklist_outstandingtoken_id_seq', 6, true);
+ 
+ 
+@@ -4549,4 +4550,4 @@
+ --
+ 
+-\unrestrict QUlfH3uUy2DSamzomNyuvYENwjbX8x4e4LinhI4OAn4900HAfy6bguWwocCwqnI
+-
++\unrestrict YDGzOVxWew2ySOqDV6qYF3qC8n3gsrX0m9mRjzSOH28Zu1bIqQCRUrYXwuIYQAw
++
