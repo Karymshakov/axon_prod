@@ -63,6 +63,17 @@ def apply_extracted_guest_structure(lead, extracted_data: dict) -> list[str]:
     return list(dict.fromkeys(updated_fields))
 
 
+# A free child (<= child_free_max_age) only stays free while sharing the
+# room without a separate bed. That's realistic for a small number of young
+# kids — beyond this many, the party physically needs more sleeping space
+# regardless of age, and that extra room is a normal paid room (per hotel
+# policy: "if children occupy a separate room, they pay"). Without this cap,
+# effective_pricing_guest_count would let an unlimited number of free
+# children hide behind the adult count and always quote a single room no
+# matter how many people actually need to sleep somewhere.
+MAX_UNBILLED_FREE_CHILDREN = 2
+
+
 def effective_pricing_guest_count(lead, requested_count: int | None = None) -> int | None:
     """Return paid occupancy according to configured child policy."""
     if lead is None:
@@ -83,4 +94,6 @@ def effective_pricing_guest_count(lead, requested_count: int | None = None) -> i
         logger.warning('Could not load booking rules for lead %s: %s', lead.id, exc)
 
     paid_children = sum(1 for age in ages if float(age) > free_max_age)
-    return max(1, int(adult_count) + paid_children)
+    free_children = len(ages) - paid_children
+    overflow_free_children = max(0, free_children - MAX_UNBILLED_FREE_CHILDREN)
+    return max(1, int(adult_count) + paid_children + overflow_free_children)
