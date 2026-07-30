@@ -27,7 +27,7 @@ def _parse_date(val):
     return None
 
 
-def query_room_pricing(guest_count=None, checkin_date=None, checkout_date=None, org=None):
+def query_room_pricing(guest_count=None, checkin_date=None, checkout_date=None, org=None, include_family=False):
     """
     Return pricing rows matching the given parameters.
 
@@ -35,6 +35,10 @@ def query_room_pricing(guest_count=None, checkin_date=None, checkout_date=None, 
         guest_count: Filter by exact kolichestvo_chelovek. Omit to return all.
         checkin_date: ISO date string or date. Filters by season range and day-of-week.
         checkout_date: Not used for filtering; included for context.
+        include_family: Include family-tagged rows. Callers that only ever quote plain
+            standard/comfort rooms should leave this False; callers that need to price
+            ANY combination (including family suites), such as _build_room_lookup, must
+            pass True or family combos will silently price as unavailable.
 
     Returns:
         List of dicts with room_type, max_guests, validity, weekdays, prices_per_night_kgs.
@@ -42,11 +46,9 @@ def query_room_pricing(guest_count=None, checkin_date=None, checkout_date=None, 
     from apps.hotel_info.models import RoomPricing
 
     checkin = _parse_date(checkin_date)
-    rows = (
-        RoomPricing.objects
-        .exclude(guest_type='family')
-        .exclude(kategoria_nomera__icontains='семейн')
-    )
+    rows = RoomPricing.objects.all()
+    if not include_family:
+        rows = rows.exclude(guest_type='family').exclude(kategoria_nomera__icontains='семейн')
     if org is not None:
         rows = rows.filter(organization=org)
     if guest_count is not None:
@@ -232,7 +234,7 @@ def _build_room_lookup(target_date=None, org=None):
     else:
         target_date = _parse_date(target_date) or _bishkek_today()
 
-    all_rows = query_room_pricing(checkin_date=target_date, org=org)
+    all_rows = query_room_pricing(checkin_date=target_date, org=org, include_family=True)
     room_lookup: dict = {}
     for row in all_rows:
         key = row['room_type'].lower().strip()

@@ -269,15 +269,25 @@ _FALLBACK_DESCRIPTIONS = {
         "never ask the guest to wait."
     ),
     'get_room_options': (
-        "Use for every automated room search, including families. "
-        "Pass total guest_count plus adult_count and children_ages when children are present. "
-        "Young children who stay free without a separate bed must not cause an unnecessary "
-        "extra room or family-room recommendation."
+        "Use for every automated room search, including families, UNLESS the criteria for "
+        "get_family_room below are met. Pass total guest_count plus adult_count and "
+        "children_ages when children are present. A young child (roughly under 7) who stays "
+        "free without a separate bed does not need get_family_room — offer an extra bed "
+        "(1500 сом/сутки) or a crib (500 сом/сутки) in a regular room instead."
     ),
     'get_family_room': (
-        "Family-room self-service is disabled. Do not call this tool during normal selection. "
-        "If the guest explicitly requests a family room, route the request to a manager; "
-        "never present it as an automatically bookable option."
+        "Call this tool — do not just describe the family room from memory — when ANY of these apply:\n"
+        "1. The guest explicitly asks about a family room (\"а есть у вас семейный номер?\").\n"
+        "2. The guest explicitly says they want to stay together in one room/space as 3 or more "
+        "people, with or without children (\"хотим жить вместе втроём\").\n"
+        "3. There is a child roughly 7–17 years old travelling with the family. At that age the "
+        "child usually can't share a bed with the parents, but putting them alone in a separate "
+        "room is also not ideal — the family room (two connected rooms) keeps everyone together. "
+        "Present it as a real option with its price, alongside separate standard/comfort rooms if "
+        "those also fit — let the guest choose, don't force the family room on them.\n"
+        "Do NOT call this for a young child (roughly under 7) who can stay in the parents' room "
+        "with an extra bed/crib — use get_room_options for that case instead.\n"
+        "If the guest is fine with separate rooms, that is a perfectly good outcome too."
     ),
     'get_meal_plan_pricing': (
         "Look up meal plan prices for a specific room type. "
@@ -1653,15 +1663,6 @@ def execute_pricing_tool(tool_name: str, args: dict, lead=None):
             return response
 
         elif tool_name == 'get_family_room':
-            return {
-                'error': 'family_room_request_only',
-                'message': (
-                    'Семейный номер отключён для автоматической продажи. '
-                    'Не предлагайте его и не называйте цену. Если гость прямо просит '
-                    'семейный вариант, передайте запрос менеджеру; в обычном подборе '
-                    'показывайте только доступные стандартные/комфорт варианты.'
-                ),
-            }
             guest_count = args.get('guest_count', 1)
             checkin_date = args.get('checkin_date')
             checkout_date = args.get('checkout_date')
