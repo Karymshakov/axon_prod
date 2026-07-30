@@ -548,13 +548,6 @@ class RoomPricingViewSet(OrganizationQuerysetMixin, viewsets.ModelViewSet):
     serializer_class = RoomPricingSerializer
     permission_classes = [IsAdminOrReadOnlyMember]
 
-    def get_queryset(self):
-        return (
-            super().get_queryset()
-            .exclude(guest_type='family')
-            .exclude(kategoria_nomera__icontains='семейн')
-        )
-
     @action(detail=False, methods=['post'], url_path='upload-excel')
     def upload_excel(self, request):
         """
