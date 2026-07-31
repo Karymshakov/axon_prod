@@ -65,8 +65,6 @@ def _infer_allowed_tools_from_card(card) -> set[str] | None:
 def _lead_has_booking_ready_for_handoff(lead, resolution: StageResolution | None) -> bool:
     if lead is None or resolution is None or not resolution.is_complete:
         return False
-    if not resolution.required_fields:
-        return False
 
     try:
         from apps.leads.services.stage_resolver import is_reliable_contact_person
