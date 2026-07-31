@@ -204,8 +204,12 @@ class AgentService:
 
         if extracted.get('phone') and not lead.phone:
             lead.phone = extracted['phone']
-            lead.save(update_fields=['phone'])
+            lead.followup_allowed = False
+            lead.next_follow_up_at = None
+            lead.next_follow_up_hint = ''
+            lead.save(update_fields=['phone', 'followup_allowed', 'next_follow_up_at', 'next_follow_up_hint'])
             result['actions_taken'].append(f'Extracted phone: {extracted["phone"]}')
+            result['actions_taken'].append('Disabled AI follow-ups after phone capture — handed off to manager')
 
         # Step 6: Handle status progression
         # First try AI analysis; fall back to basic keyword/signal analysis
