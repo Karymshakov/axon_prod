@@ -1264,7 +1264,7 @@ function CommunicationsPage() {
                                 </span>
                               )}
                               <span className="shrink-0 whitespace-nowrap text-[10px] text-muted-foreground">
-                                {formatLastActive(lead.last_contacted)}
+                                {formatLastActive(lead.last_contacted || lead.created_at)}
                               </span>
                             </div>
                           </div>
