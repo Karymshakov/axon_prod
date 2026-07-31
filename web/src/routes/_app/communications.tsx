@@ -1252,7 +1252,7 @@ function CommunicationsPage() {
                         </div>
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center justify-between gap-1 mb-0.5">
-                            <span className={`text-sm font-semibold truncate min-w-0 ${
+                            <span className={`flex-1 truncate min-w-0 text-sm font-semibold ${
                               unread > 0 ? 'text-foreground' : 'text-foreground/80'
                             }`}>
                               {lead.contact_person}
@@ -1263,7 +1263,7 @@ function CommunicationsPage() {
                                   {unread > 99 ? '99+' : unread}
                                 </span>
                               )}
-                              <span className="text-[10px] text-muted-foreground">
+                              <span className="shrink-0 whitespace-nowrap text-[10px] text-muted-foreground">
                                 {formatLastActive(lead.last_contacted)}
                               </span>
                             </div>
