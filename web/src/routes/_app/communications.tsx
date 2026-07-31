@@ -1126,6 +1126,15 @@ function CommunicationsPage() {
     return date.toLocaleDateString('ru-RU', { month: 'short', day: 'numeric' })
   }
 
+  // Short label for the leads list — initials only, full name shown on hover/selection
+  const getContactInitials = (name: string | null | undefined) => {
+    if (!name) return '—'
+    const parts = name.trim().split(/\s+/).filter(Boolean)
+    if (parts.length === 0) return '—'
+    if (parts.length === 1) return `${parts[0][0].toUpperCase()}.`
+    return parts.slice(0, 2).map((p) => `${p[0].toUpperCase()}.`).join(' ')
+  }
+
   return (
     <div className="flex flex-1 flex-col min-h-0 overflow-hidden crm-enter comms-root">
 
@@ -1252,10 +1261,13 @@ function CommunicationsPage() {
                         </div>
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center justify-between gap-1 mb-0.5">
-                            <span className={`flex-1 truncate min-w-0 text-sm font-semibold ${
-                              unread > 0 ? 'text-foreground' : 'text-foreground/80'
-                            }`}>
-                              {lead.contact_person}
+                            <span
+                              title={lead.contact_person || undefined}
+                              className={`flex-1 truncate min-w-0 text-sm font-semibold ${
+                                unread > 0 ? 'text-foreground' : 'text-foreground/80'
+                              }`}
+                            >
+                              {getContactInitials(lead.contact_person)}
                             </span>
                             <div className="flex items-center gap-1 shrink-0">
                               {unread > 0 && (
