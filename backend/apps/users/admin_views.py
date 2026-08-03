@@ -65,7 +65,7 @@ def admin_users_list(request):
         return Response(AdminUserSerializer(qs, many=True).data)
 
     # POST — create new user
-    serializer = AdminUserCreateSerializer(data=request.data)
+    serializer = AdminUserCreateSerializer(data=request.data, context={'request': request})
     serializer.is_valid(raise_exception=True)
     user = serializer.save()
     return Response(AdminUserSerializer(user).data, status=status.HTTP_201_CREATED)

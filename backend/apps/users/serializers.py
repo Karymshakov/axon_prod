@@ -51,18 +51,32 @@ class UserProfileSerializer(serializers.ModelSerializer):
 class AdminUserSerializer(serializers.ModelSerializer):
     """Read serializer for admin user management."""
     role_display = serializers.CharField(source='get_role_display', read_only=True)
+    organization_name = serializers.CharField(source='current_organization.name', read_only=True, default=None)
+    organization_role = serializers.SerializerMethodField()
 
     class Meta:
         model = User
         fields = [
             'id', 'email', 'name', 'role', 'role_display',
             'is_active', 'is_admin', 'last_login', 'created_at',
+            'organization_name', 'organization_role',
         ]
         read_only_fields = fields
 
+    def get_organization_role(self, obj):
+        if not obj.current_organization_id:
+            return None
+        membership = obj.org_memberships.filter(organization_id=obj.current_organization_id).first()
+        return membership.role if membership else None
+
 
 class AdminUserCreateSerializer(serializers.ModelSerializer):
-    """Write serializer for creating a user from the admin portal."""
+    """Write serializer for creating a user from the admin portal.
+
+    New users are attached to the creating admin's current organization so they
+    see the same leads/playbooks/etc immediately instead of landing on an empty
+    "new account" (rather than requiring a separate org-invite step).
+    """
     password = serializers.CharField(write_only=True, required=True, min_length=8)
 
     class Meta:
@@ -75,10 +89,34 @@ class AdminUserCreateSerializer(serializers.ModelSerializer):
         return value.lower()
 
     def create(self, validated_data):
+        from django.db import transaction
+        from apps.organizations.models import OrganizationMember
+
+        request = self.context.get('request')
+        creator = getattr(request, 'user', None)
+        organization = getattr(creator, 'current_organization', None)
+        if organization is None:
+            raise serializers.ValidationError(
+                {'detail': 'Your account has no active organization to attach the new user to.'}
+            )
+
+        member_role = (
+            OrganizationMember.Role.ADMIN
+            if validated_data.get('role') == User.Role.ADMIN
+            else OrganizationMember.Role.MEMBER
+        )
+
         password = validated_data.pop('password')
-        user = User(**validated_data)
-        user.set_password(password)
-        user.save()
+        with transaction.atomic():
+            user = User(**validated_data)
+            user.set_password(password)
+            user.current_organization = organization
+            user.save()
+            OrganizationMember.objects.create(
+                organization=organization,
+                user=user,
+                role=member_role,
+            )
         return user
 
 

@@ -23,6 +23,7 @@ class UserManager(BaseUserManager):
 class User(AbstractBaseUser, PermissionsMixin):
     class Role(models.TextChoices):
         ADMIN = 'admin', 'Admin / Manager'
+        MANAGER = 'manager', 'Manager'
         SUPPORT = 'support', 'Support'
         TAX_ACCOUNTANT = 'tax_accountant', 'Tax Accountant'
 
