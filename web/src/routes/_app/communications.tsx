@@ -1126,11 +1126,15 @@ function CommunicationsPage() {
     return date.toLocaleDateString('ru-RU', { month: 'short', day: 'numeric' })
   }
 
-  // contact_person can be empty if the Instagram username lookup failed at
-  // webhook time (rate limits/token scope/network). Fall back through the
-  // other channel identifiers we do have instead of showing a bare '?'.
+  // contact_person can be empty — or just a bare '@' (username lookup returned
+  // nothing but the '@' prefix still got saved) — if the Instagram username
+  // lookup failed at webhook time (rate limits/token scope/network). Fall back
+  // through the other channel identifiers we do have instead of showing '@.'/'?'.
+  const isUsableContactPerson = (value: string | null | undefined): value is string =>
+    !!value && value.trim().replace(/^@+/, '').trim().length > 0
+
   const getLeadDisplayName = (lead: Lead): string => {
-    if (lead.contact_person) return lead.contact_person
+    if (isUsableContactPerson(lead.contact_person)) return lead.contact_person
     if (lead.instagram_username) return `@${lead.instagram_username}`
     if (lead.telegram_username) return `@${lead.telegram_username}`
     if (lead.whatsapp_phone) return lead.whatsapp_phone
