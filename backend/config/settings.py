@@ -258,6 +258,21 @@ CELERY_TASK_SERIALIZER = 'json'
 CELERY_RESULT_SERIALIZER = 'json'
 CELERY_TIMEZONE = TIME_ZONE
 
+# =============================================================================
+# Cache (Redis) — gunicorn runs multiple sync workers, each with its own
+# process memory, so the default LocMemCache is NOT shared between them.
+# Anything cached (e.g. Instagram/WhatsApp OAuth attempt diagnostics keyed by
+# org) could be written by one worker and invisible to the request another
+# worker handles next, making that data effectively unreliable. Use Redis
+# (already required for Celery) on a separate DB index so it doesn't share
+# keyspace with the Celery broker/result backend.
+CACHES = {
+    'default': {
+        'BACKEND': 'django.core.cache.backends.redis.RedisCache',
+        'LOCATION': CELERY_BROKER_URL.rsplit('/', 1)[0] + '/1',
+    }
+}
+
 # Celery Beat Schedule (periodic tasks)
 # The AI agent check frequency is configurable via AIConfig.check_frequency_hours
 # This schedule runs often enough for exact short reminders; the task itself

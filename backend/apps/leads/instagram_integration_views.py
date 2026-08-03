@@ -47,15 +47,24 @@ def _org_guard(request, not_connected_response: dict):
     """
     Returns (org, error_response).
     If user is non-superadmin with no org, returns (None, Response(not_connected_response)).
+
+    Superadmins use their current_organization when one is selected — Instagram
+    connections are per-org, so a superadmin editing/connecting Instagram for
+    their workspace needs that org resolved same as anyone else (otherwise
+    _build_oauth_state(None) produces an empty state and the OAuth round-trip
+    silently breaks). Only a superadmin with no org selected at all falls back
+    to the historical org=None bypass.
     """
     from rest_framework.response import Response as R
     user = getattr(request, 'user', None)
-    if user and user.is_authenticated and not getattr(user, 'is_superadmin', False):
-        org = getattr(user, 'current_organization', None)
-        if org is None:
-            return None, R(not_connected_response)
+    if not (user and user.is_authenticated):
+        return None, None
+    org = getattr(user, 'current_organization', None)
+    if org is not None:
         return org, None
-    return None, None  # superadmin: proceed with None org
+    if getattr(user, 'is_superadmin', False):
+        return None, None
+    return None, R(not_connected_response)
 
 logger = logging.getLogger(__name__)
 
@@ -780,12 +789,18 @@ def instagram_callback(request):
 
     code = request.GET.get('code')
     if not code:
+        logger.warning('Instagram OAuth callback received no authorization code')
         return HttpResponse(_popup_close_html({
             'event': 'instagram_error',
             'error': 'No authorization code received',
         }))
 
     if not state_valid or org is None:
+        logger.warning(
+            'Instagram OAuth callback could not resolve a workspace from state '
+            '(state_valid=%s, org=%s) — the connection was not saved',
+            state_valid, org,
+        )
         return HttpResponse(_popup_close_html({
             'event': 'instagram_error',
             'error': 'Instagram authorization finished, but the CRM could not match it to your current workspace. Please reconnect from the Integrations page and try again.',

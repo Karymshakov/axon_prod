@@ -50,15 +50,22 @@ def _org_guard(request, not_connected_response: dict):
     """
     Returns (org, error_response).
     If user is non-superadmin with no org, returns (None, Response(not_connected_response)).
+
+    Superadmins use their current_organization when one is selected — same
+    reasoning as apps.leads.instagram_integration_views._org_guard: OAuth
+    connections are per-org, so forcing org=None for a superadmin with a
+    selected org silently breaks the OAuth state round-trip.
     """
     from rest_framework.response import Response as R
     user = getattr(request, 'user', None)
-    if user and user.is_authenticated and not getattr(user, 'is_superadmin', False):
-        org = getattr(user, 'current_organization', None)
-        if org is None:
-            return None, R(not_connected_response)
+    if not (user and user.is_authenticated):
+        return None, None
+    org = getattr(user, 'current_organization', None)
+    if org is not None:
         return org, None
-    return None, None  # superadmin: proceed with None org
+    if getattr(user, 'is_superadmin', False):
+        return None, None
+    return None, R(not_connected_response)
 
 GRAPH_URL = 'https://graph.facebook.com/v25.0'
 DEFAULT_APP_ID = ''
