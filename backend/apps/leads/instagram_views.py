@@ -1000,7 +1000,7 @@ def _delayed_instagram_ai_response(
                         event_key = 'manager_handoff'
                 elif (
                     conversation_kind == 'courtesy'
-                    and lead.origin_event_type == 'story_mention'
+                    and lead.origin_event_type in {'story_mention', 'story_reply'}
                 ):
                     event_key = 'story_courtesy_close'
 
@@ -1407,7 +1407,12 @@ def instagram_webhook(request):
                 attachments = message.get('attachments', [])
                 instagram_content_context = _extract_instagram_content_context(event, message, attachments)
                 instagram_event_type = _instagram_event_type(message, instagram_content_context)
-                is_story_mention_event = instagram_event_type == 'story_mention'
+                # Both a story mention (guest shares our story to their DM) and a story
+                # reply (guest swipes up to reply on a story) are social courtesy
+                # interactions, not sales intent — treat them the same so the guest
+                # isn't run through the full sales funnel before AI escalates them to
+                # a human via execute_transfer_to_manager several messages later.
+                is_story_courtesy_event = instagram_event_type in {'story_mention', 'story_reply'}
                 if instagram_content_context:
                     logger.info(
                         "Extracted Instagram content context: type=%s attachment=%s ids=%s urls=%s",
@@ -1513,14 +1518,14 @@ def instagram_webhook(request):
                         source='Instagram',
                         status=Lead.STATUS_NEW,
                         organization=_ig_org,
-                        is_sales_lead=not is_story_mention_event,
+                        is_sales_lead=not is_story_courtesy_event,
                         conversation_kind=(
                             Lead.CONVERSATION_COURTESY
-                            if is_story_mention_event
+                            if is_story_courtesy_event
                             else Lead.CONVERSATION_SALES
                         ),
                         origin_event_type=instagram_event_type,
-                        followup_allowed=not is_story_mention_event,
+                        followup_allowed=not is_story_courtesy_event,
                         custom_fields={},
                     )
 
@@ -1539,11 +1544,11 @@ def instagram_webhook(request):
                     or lead.check_out_date
                     or lead.guest_count
                 )
-                if is_story_mention_event and not has_booking_context:
+                if is_story_courtesy_event and not has_booking_context:
                     Lead.objects.filter(id=lead.id).update(
                         is_sales_lead=False,
                         conversation_kind=Lead.CONVERSATION_COURTESY,
-                        origin_event_type='story_mention',
+                        origin_event_type=instagram_event_type,
                         followup_allowed=False,
                         next_follow_up_at=None,
                         next_follow_up_hint='',
@@ -1645,11 +1650,18 @@ def instagram_webhook(request):
 
                 logger.info(f"Received Instagram message from lead {lead.id}: {message_text[:50]}")
 
-                if is_story_mention_event:
+                if is_story_courtesy_event:
                     from apps.hotel_info.services.automation_templates import get_automation_message
 
+                    # A story mention needs a "thanks for mentioning us" ack; a story
+                    # reply is itself a message from the guest, so the mention-specific
+                    # wording doesn't fit — use the generic courtesy-close text instead.
+                    ack_event_key = (
+                        'story_mention_ack' if instagram_event_type == 'story_mention'
+                        else 'story_courtesy_close'
+                    )
                     acknowledgement = get_automation_message(
-                        'story_mention_ack',
+                        ack_event_key,
                         organization=lead.organization,
                         channel='instagram',
                         language=_lead_language(lead, message_text),
@@ -1659,11 +1671,11 @@ def instagram_webhook(request):
                             lead,
                             sender_id,
                             acknowledgement,
-                            event_key='story_mention_ack',
+                            event_key=ack_event_key,
                         )
                     logger.info(
-                        'Lead %s: story mention acknowledged without sales workflow',
-                        lead.id,
+                        'Lead %s: story courtesy event (%s) acknowledged without sales workflow',
+                        lead.id, instagram_event_type,
                     )
 
                 # Incoming stories, mentions and shared posts belong to the guest
@@ -1697,10 +1709,10 @@ def instagram_webhook(request):
                 # Spawn background thread when AI is configured — classification runs
                 # regardless of auto_response; the thread decides whether to reply.
                 config = AIConfig.get_config(org=lead.organization)
-                if is_story_mention_event:
+                if is_story_courtesy_event:
                     logger.info(
-                        'Lead %s: skipping AI task for story mention event',
-                        lead.id,
+                        'Lead %s: skipping AI task for story courtesy event (%s)',
+                        lead.id, instagram_event_type,
                     )
                 elif ai_service.is_configured() and (not is_media_only or media_context or unresolved_media_prompt):
                     _delayed_instagram_ai_response.delay(
