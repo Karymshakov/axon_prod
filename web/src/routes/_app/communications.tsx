@@ -1126,6 +1126,19 @@ function CommunicationsPage() {
     return date.toLocaleDateString('ru-RU', { month: 'short', day: 'numeric' })
   }
 
+  // contact_person can be empty if the Instagram username lookup failed at
+  // webhook time (rate limits/token scope/network). Fall back through the
+  // other channel identifiers we do have instead of showing a bare '?'.
+  const getLeadDisplayName = (lead: Lead): string => {
+    if (lead.contact_person) return lead.contact_person
+    if (lead.instagram_username) return `@${lead.instagram_username}`
+    if (lead.telegram_username) return `@${lead.telegram_username}`
+    if (lead.whatsapp_phone) return lead.whatsapp_phone
+    if (lead.instagram_user_id) return `IG ${lead.instagram_user_id}`
+    if (lead.telegram_chat_id) return `TG ${lead.telegram_chat_id}`
+    return 'Гость'
+  }
+
   // Short label for the leads list — initials only, full name shown on hover/selection
   const getContactInitials = (name: string | null | undefined) => {
     if (!name) return '—'
@@ -1257,17 +1270,17 @@ function CommunicationsPage() {
                           : unread > 0 ? 'bg-primary/80 text-primary-foreground'
                           : 'bg-muted text-muted-foreground'
                         }`}>
-                          {(lead.contact_person?.[0] || '?').toUpperCase()}
+                          {getLeadDisplayName(lead)[0].toUpperCase()}
                         </div>
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center justify-between gap-1 mb-0.5">
                             <span
-                              title={lead.contact_person || undefined}
+                              title={getLeadDisplayName(lead)}
                               className={`flex-1 truncate min-w-0 text-sm font-semibold ${
                                 unread > 0 ? 'text-foreground' : 'text-foreground/80'
                               }`}
                             >
-                              {getContactInitials(lead.contact_person)}
+                              {getContactInitials(getLeadDisplayName(lead))}
                             </span>
                             <div className="flex items-center gap-1 shrink-0">
                               {unread > 0 && (
@@ -1321,11 +1334,11 @@ function CommunicationsPage() {
                 </button>
                 {/* Avatar */}
                 <div className="shrink-0 h-9 w-9 rounded-full bg-primary/10 flex items-center justify-center text-primary text-sm font-bold">
-                  {(selectedLead.contact_person?.[0] || '?').toUpperCase()}
+                  {getLeadDisplayName(selectedLead)[0].toUpperCase()}
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-1.5 flex-wrap">
-                    <h2 className="text-sm font-bold truncate leading-tight min-w-0">{selectedLead.contact_person}</h2>
+                    <h2 className="text-sm font-bold truncate leading-tight min-w-0">{getLeadDisplayName(selectedLead)}</h2>
 
                     {/* Channel Quick Switcher */}
                     {availableChannels.length > 1 && (

@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, useEffect, useRef, type ReactNode } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
-import { getAccessToken, clearTokens, login as loginApi, logout as logoutApi, getMe, type User } from '@/lib/api'
+import { getAccessToken, getRefreshToken, clearTokens, login as loginApi, logout as logoutApi, getMe, type User } from '@/lib/api'
 import { useLanguage } from '@/contexts/language-context'
 
 interface AuthContextType {
@@ -52,6 +52,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
     window.addEventListener('auth:session-expired', handleSessionExpired)
     return () => window.removeEventListener('auth:session-expired', handleSessionExpired)
+  }, [queryClient])
+
+  // Keep browser tabs in sync: a real logout (tokens cleared) in one tab
+  // must log out the others too, instead of leaving them silently "logged in"
+  // against a session that no longer exists server-side.
+  useEffect(() => {
+    const handleStorage = (event: StorageEvent) => {
+      if (event.key !== 'access_token' && event.key !== 'refresh_token') return
+      if (!getAccessToken() && !getRefreshToken()) {
+        queryClient.clear()
+        setUser(null)
+        didSyncLanguage.current = false
+      }
+    }
+    window.addEventListener('storage', handleStorage)
+    return () => window.removeEventListener('storage', handleStorage)
   }, [queryClient])
 
   const login = async (email: string, password: string) => {

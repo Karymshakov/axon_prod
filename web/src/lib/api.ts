@@ -150,6 +150,15 @@ async function tryRefreshToken(): Promise<string | null> {
         body: JSON.stringify({ refresh }),
       })
       if (!res.ok) {
+        // ROTATE_REFRESH_TOKENS + BLACKLIST_AFTER_ROTATION means the refresh
+        // token we just sent is single-use. If another browser tab already
+        // rotated it (its own apiFetch call raced ours), localStorage now
+        // holds a newer refresh token than the one that just got rejected —
+        // pick up that tab's fresh tokens instead of forcing a logout.
+        const currentRefresh = getRefreshToken()
+        if (currentRefresh && currentRefresh !== refresh) {
+          return getAccessToken()
+        }
         clearTokens()
         return null
       }

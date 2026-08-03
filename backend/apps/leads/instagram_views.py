@@ -41,6 +41,41 @@ def _get_verify_token() -> str:
     return os.environ.get('INSTAGRAM_VERIFY_TOKEN', '')
 
 
+def _fetch_instagram_username(sender_id: str, access_token: str) -> str | None:
+    """Look up a user's Instagram username by ID, with one retry.
+
+    A lead without contact_person/instagram_username shows as a raw numeric
+    PSID in the Communications tab, making it invisible to staff. The lookup
+    can fail transiently (rate limits, token scope, network), so retry once
+    before giving up, and log a warning either way so failures are visible
+    instead of silently leaving the lead unnamed forever.
+    """
+    last_error: str | None = None
+    for attempt in range(2):
+        if attempt:
+            time.sleep(1)
+        try:
+            resp = requests.get(
+                f'https://graph.instagram.com/{INSTAGRAM_GRAPH_API_VERSION}/{sender_id}',
+                params={'fields': 'username', 'access_token': access_token},
+                timeout=5,
+            )
+            if resp.ok:
+                username = resp.json().get('username') or None
+                if username:
+                    return username
+                last_error = f'empty response: {resp.text[:200]}'
+            else:
+                last_error = f'HTTP {resp.status_code}: {resp.text[:200]}'
+        except Exception as exc:
+            last_error = str(exc)
+    logger.warning(
+        'Instagram username lookup failed for sender_id=%s after retry: %s',
+        sender_id, last_error,
+    )
+    return None
+
+
 _FAKE_EMAIL_DOMAINS = {
     'example.com', 'example.org', 'example.net', 'example.io',
     'test.com', 'test.org', 'test.net',
@@ -784,26 +819,17 @@ def _delayed_instagram_ai_response(
             from .models import InstagramConnection
             conn = InstagramConnection.get_config(lead.organization)
             if conn and conn.access_token:
-                try:
-                    u_resp = requests.get(
-                        f'https://graph.instagram.com/{INSTAGRAM_GRAPH_API_VERSION}/{sender_id}',
-                        params={'fields': 'username', 'access_token': conn.access_token},
-                        timeout=5,
+                fetched_username = _fetch_instagram_username(sender_id, conn.access_token)
+                if fetched_username:
+                    update_fields = ['instagram_username']
+                    lead.instagram_username = fetched_username
+                    if not lead.contact_person:
+                        lead.contact_person = f'@{fetched_username}'
+                        update_fields.append('contact_person')
+                    lead.save(update_fields=update_fields)
+                    logger.info(
+                        f"Lead {lead_id}: backfilled username @{fetched_username} in background thread"
                     )
-                    if u_resp.ok:
-                        fetched_username = u_resp.json().get('username') or None
-                        if fetched_username:
-                            update_fields = ['instagram_username']
-                            lead.instagram_username = fetched_username
-                            if not lead.contact_person:
-                                lead.contact_person = f'@{fetched_username}'
-                                update_fields.append('contact_person')
-                            lead.save(update_fields=update_fields)
-                            logger.info(
-                                f"Lead {lead_id}: backfilled username @{fetched_username} in background thread"
-                            )
-                except Exception as _ue:
-                    logger.warning(f"Lead {lead_id}: background username fetch failed: {_ue}")
 
         # Classification and response both require AI to be configured.
         if not ai_service.is_configured():
@@ -1451,18 +1477,9 @@ def instagram_webhook(request):
                 conn = active_conn
                 sender_username = None
                 if conn and conn.access_token:
-                    try:
-                        user_response = requests.get(
-                            f'https://graph.instagram.com/{INSTAGRAM_GRAPH_API_VERSION}/{sender_id}',
-                            params={'fields': 'username', 'access_token': conn.access_token},
-                            timeout=5,
-                        )
-                        if user_response.ok:
-                            sender_username = user_response.json().get('username') or None
-                            if sender_username:
-                                logger.info(f"Fetched Instagram username: @{sender_username} for sender_id: {sender_id}")
-                    except Exception as e:
-                        logger.warning(f"Could not fetch Instagram username for {sender_id}: {e}")
+                    sender_username = _fetch_instagram_username(sender_id, conn.access_token)
+                    if sender_username:
+                        logger.info(f"Fetched Instagram username: @{sender_username} for sender_id: {sender_id}")
 
                 # Skip messages from our own connected Instagram account
                 if conn and conn.instagram_username and sender_username == conn.instagram_username:
