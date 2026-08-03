@@ -1156,11 +1156,17 @@ function CommunicationsPage() {
 
   // What the leads list sidebar shows: initials for a real contact_person name,
   // but the full handle/phone/ID (truncated by CSS, not reduced to one letter)
-  // when we only have a channel identifier to fall back on.
-  const getSidebarLabel = (lead: Lead): string =>
-    isUsableContactPerson(lead.contact_person)
-      ? getContactInitials(lead.contact_person)
-      : getLeadDisplayName(lead)
+  // when we only have a channel identifier to fall back on. Instagram/Telegram
+  // leads without a real name often have contact_person set to the handle itself
+  // (e.g. "@erdem_axon") — that's not a name, so it must not go through
+  // getContactInitials either, or it collapses to "@." same as the other handles.
+  const getSidebarLabel = (lead: Lead): string => {
+    const person = lead.contact_person?.trim() ?? ''
+    if (isUsableContactPerson(person) && !person.startsWith('@')) {
+      return getContactInitials(person)
+    }
+    return getLeadDisplayName(lead)
+  }
 
   return (
     <div className="flex flex-1 flex-col min-h-0 overflow-hidden crm-enter comms-root">
