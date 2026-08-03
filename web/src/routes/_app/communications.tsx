@@ -1143,7 +1143,9 @@ function CommunicationsPage() {
     return 'Гость'
   }
 
-  // Short label for the leads list — initials only, full name shown on hover/selection
+  // Short label for the leads list — initials only, full name shown on hover/selection.
+  // Only makes sense for real multi-letter human names; a single-token handle like
+  // "@erdem_axon" would otherwise collapse to a meaningless "@.".
   const getContactInitials = (name: string | null | undefined) => {
     if (!name) return '—'
     const parts = name.trim().split(/\s+/).filter(Boolean)
@@ -1151,6 +1153,14 @@ function CommunicationsPage() {
     if (parts.length === 1) return `${parts[0][0].toUpperCase()}.`
     return parts.slice(0, 2).map((p) => `${p[0].toUpperCase()}.`).join(' ')
   }
+
+  // What the leads list sidebar shows: initials for a real contact_person name,
+  // but the full handle/phone/ID (truncated by CSS, not reduced to one letter)
+  // when we only have a channel identifier to fall back on.
+  const getSidebarLabel = (lead: Lead): string =>
+    isUsableContactPerson(lead.contact_person)
+      ? getContactInitials(lead.contact_person)
+      : getLeadDisplayName(lead)
 
   return (
     <div className="flex flex-1 flex-col min-h-0 overflow-hidden crm-enter comms-root">
@@ -1284,7 +1294,7 @@ function CommunicationsPage() {
                                 unread > 0 ? 'text-foreground' : 'text-foreground/80'
                               }`}
                             >
-                              {getContactInitials(getLeadDisplayName(lead))}
+                              {getSidebarLabel(lead)}
                             </span>
                             <div className="flex items-center gap-1 shrink-0">
                               {unread > 0 && (
