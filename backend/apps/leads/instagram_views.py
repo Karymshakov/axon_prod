@@ -403,8 +403,90 @@ def _instagram_connection_for_entry(entry_account_id: str | None) -> InstagramCo
     return None
 
 
+def _log_comment_reply_in_communications(
+    *,
+    organization_id: int,
+    sender_id: str,
+    sender_username: str,
+    comment_id: str,
+    media_id: str,
+    comment_text: str,
+    reply_text: str,
+    message_id: str,
+) -> None:
+    """Mirror a successful comment-trigger reply into Lead/LeadActivity so it shows
+    up in the Communications tab. Kept as a courtesy conversation (is_sales_lead=False,
+    followup_allowed=False) — a comment reply must not enter the sales funnel or
+    trigger proactive follow-ups, only the CRM contact-history view."""
+    if not sender_id:
+        return
+    try:
+        lead = Lead.objects.get(instagram_user_id=sender_id, organization_id=organization_id)
+        update_fields = []
+        if sender_username and not lead.instagram_username:
+            lead.instagram_username = sender_username
+            update_fields.append('instagram_username')
+        if sender_username and not lead.contact_person:
+            lead.contact_person = f'@{sender_username}'
+            update_fields.append('contact_person')
+        if update_fields:
+            lead.save(update_fields=update_fields)
+    except Lead.DoesNotExist:
+        lead = Lead.objects.create(
+            instagram_user_id=sender_id,
+            instagram_username=sender_username,
+            contact_person=f'@{sender_username}' if sender_username else '',
+            source='Instagram',
+            status=Lead.STATUS_NEW,
+            organization_id=organization_id,
+            is_sales_lead=False,
+            conversation_kind=Lead.CONVERSATION_COURTESY,
+            origin_event_type='comment_reply',
+            followup_allowed=False,
+        )
+        LeadActivity.objects.create(
+            lead=lead,
+            organization_id=organization_id,
+            activity_type='lead_created',
+            description=f'Lead auto-created from Instagram comment reply: {sender_id}',
+        )
+
+    LeadActivity.objects.create(
+        lead=lead,
+        organization_id=organization_id,
+        activity_type=LeadActivity.TYPE_INSTAGRAM_RECEIVED,
+        description=f'Comment on Instagram post: {comment_text[:100]}',
+        metadata={
+            'text': comment_text,
+            'sender_id': sender_id,
+            'instagram_event_type': 'comment',
+            'instagram_media_id': media_id,
+            'comment_id': comment_id,
+        },
+    )
+    LeadActivity.objects.create(
+        lead=lead,
+        organization_id=organization_id,
+        activity_type=LeadActivity.TYPE_INSTAGRAM_SENT,
+        description=f'Instagram automation (comment_reply): {reply_text[:100]}',
+        echo_origin=LeadActivity.ECHO_ORIGIN_CRM,
+        metadata={
+            'message_id': message_id,
+            'all_message_ids': [message_id] if message_id else [],
+            'text': reply_text,
+            'automation_event': 'comment_reply',
+            'is_ai_generated': False,
+            'echo_origin': LeadActivity.ECHO_ORIGIN_CRM,
+            'comment_id': comment_id,
+        },
+    )
+
+
 def _process_instagram_comment_change(change: dict, organization_id: int) -> None:
-    """Handle one comment webhook without creating a CRM lead."""
+    """Handle one comment webhook. On a successful private-reply send, mirrors the
+    exchange into a non-sales (courtesy) Lead/LeadActivity via
+    _log_comment_reply_in_communications so it is visible in the Communications tab
+    without entering the CRM sales funnel or triggering follow-ups."""
     from django.db import close_old_connections
 
     close_old_connections()
@@ -417,6 +499,7 @@ def _process_instagram_comment_change(change: dict, organization_id: int) -> Non
         media_id = str(media.get('id') or value.get('media_id') or '').strip()
         sender = value.get('from') if isinstance(value.get('from'), dict) else {}
         sender_id = str(sender.get('id') or '').strip()
+        sender_username = str(sender.get('username') or '').strip()
         comment_text = str(value.get('text') or '').strip()
         if not comment_id or not media_id:
             return
@@ -508,6 +591,16 @@ def _process_instagram_comment_change(change: dict, organization_id: int) -> Non
                 'Sent Instagram campaign private reply for content=%s comment=%s',
                 item.id,
                 comment_id,
+            )
+            _log_comment_reply_in_communications(
+                organization_id=organization_id,
+                sender_id=sender_id,
+                sender_username=sender_username,
+                comment_id=comment_id,
+                media_id=media_id,
+                comment_text=comment_text,
+                reply_text=reply_text,
+                message_id=delivery.response_message_id,
             )
         else:
             delivery.status = SocialAutomationDelivery.STATUS_FAILED
