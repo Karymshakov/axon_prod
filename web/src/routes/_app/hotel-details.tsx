@@ -29,8 +29,10 @@ import {
   RefreshCwIcon,
   InstagramIcon,
   CalendarClockIcon,
+  ChevronDownIcon,
 } from 'lucide-react'
 import { Checkbox } from '@/components/ui/checkbox'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Switch } from '@/components/ui/switch'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -3409,7 +3411,7 @@ interface SocialContentFormState {
   linked_media_item: string
   category: string
   room_category: string
-  playbook_keys_text: string
+  playbookIds: number[]
   reply_guidance: string
   manager_notes: string
   automation_enabled: boolean
@@ -3428,6 +3430,16 @@ function SocialContentTab({ mediaItems }: { mediaItems: HotelMediaItem[] }) {
   const [search, setSearch] = useState('')
   const [editing, setEditing] = useState<SocialContentItem | null>(null)
   const [form, setForm] = useState<SocialContentFormState | null>(null)
+  const [playbooksOpen, setPlaybooksOpen] = useState(false)
+  const { data: playbooks = [] } = useQuery<Playbook[]>({ queryKey: ['playbooks'], queryFn: fetchPlaybooks })
+  const togglePlaybook = (id: number) => {
+    setForm((f) => f && ({
+      ...f,
+      playbookIds: f.playbookIds.includes(id)
+        ? f.playbookIds.filter((p) => p !== id)
+        : [...f.playbookIds, id],
+    }))
+  }
 
   const { data: socialItems = [], isLoading } = useQuery({
     queryKey: ['social-content', needsReviewOnly, search],
@@ -3450,10 +3462,6 @@ function SocialContentTab({ mediaItems }: { mediaItems: HotelMediaItem[] }) {
   const updateMutation = useMutation({
     mutationFn: async () => {
       if (!editing || !form) throw new Error('No item selected')
-      const playbookKeys = form.playbook_keys_text
-        .split(',')
-        .map((v) => v.trim())
-        .filter(Boolean)
       return updateSocialContentItem(editing.id, {
         title: form.title,
         caption: form.caption,
@@ -3463,7 +3471,7 @@ function SocialContentTab({ mediaItems }: { mediaItems: HotelMediaItem[] }) {
         linked_media_item: form.linked_media_item === 'none' ? null : Number(form.linked_media_item),
         category: form.category === 'none' ? '' : form.category,
         room_category: form.room_category === 'none' ? null : form.room_category as RoomCategory,
-        playbook_keys: playbookKeys,
+        playbooks: form.playbookIds,
         reply_guidance: form.reply_guidance,
         manager_notes: form.manager_notes,
         automation_enabled: form.automation_enabled,
@@ -3524,7 +3532,7 @@ function SocialContentTab({ mediaItems }: { mediaItems: HotelMediaItem[] }) {
       linked_media_item: item.linked_media_item ? String(item.linked_media_item) : 'none',
       category: item.category || 'none',
       room_category: item.room_category || 'none',
-      playbook_keys_text: item.playbook_keys.join(', '),
+      playbookIds: item.playbooks ?? [],
       reply_guidance: item.reply_guidance,
       manager_notes: item.manager_notes,
       automation_enabled: item.automation_enabled,
@@ -3720,12 +3728,60 @@ function SocialContentTab({ mediaItems }: { mediaItems: HotelMediaItem[] }) {
               </div>
 
               <div className="space-y-1.5">
-                <Label>Playbook keys</Label>
-                <Input
-                  value={form.playbook_keys_text}
-                  onChange={(e) => setForm((f) => f && ({ ...f, playbook_keys_text: e.target.value }))}
-                  placeholder="nomad_run_camp, prices_and_tariffs"
-                />
+                <Label>Плейбуки</Label>
+                <Popover open={playbooksOpen} onOpenChange={setPlaybooksOpen}>
+                  <PopoverTrigger asChild>
+                    <button
+                      type="button"
+                      className="w-full flex items-center justify-between h-9 px-3 rounded-md border border-input bg-background text-sm text-left hover:bg-muted/40 transition-colors"
+                    >
+                      <span className={form.playbookIds.length === 0 ? 'text-muted-foreground' : 'text-foreground'}>
+                        {form.playbookIds.length === 0
+                          ? 'Нет плейбуков'
+                          : `Выбрано плейбуков: ${form.playbookIds.length}`}
+                      </span>
+                      <ChevronDownIcon className="h-4 w-4 text-muted-foreground shrink-0" />
+                    </button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-72 p-1" align="start">
+                    {playbooks.length === 0 ? (
+                      <p className="text-xs text-muted-foreground px-3 py-2">Нет доступных плейбуков</p>
+                    ) : (
+                      playbooks.map((pb) => (
+                        <div
+                          key={pb.id}
+                          className="flex items-center gap-2.5 px-3 py-2 rounded-md hover:bg-muted cursor-pointer"
+                          onClick={() => togglePlaybook(pb.id)}
+                        >
+                          <Checkbox
+                            checked={form.playbookIds.includes(pb.id)}
+                            onCheckedChange={() => togglePlaybook(pb.id)}
+                            onClick={(e) => e.stopPropagation()}
+                          />
+                          <span className="text-sm">{pb.name}</span>
+                        </div>
+                      ))
+                    )}
+                  </PopoverContent>
+                </Popover>
+                {form.playbookIds.length > 0 && (
+                  <div className="flex flex-wrap gap-1 mt-1.5">
+                    {form.playbookIds.map((id) => {
+                      const pb = playbooks.find((p) => p.id === id)
+                      return pb ? (
+                        <span
+                          key={id}
+                          className="inline-flex items-center gap-1 text-[10px] bg-violet-50 text-violet-700 border border-violet-200 rounded px-1.5 py-0.5"
+                        >
+                          {pb.name}
+                          <button type="button" onClick={() => togglePlaybook(id)}>
+                            <XIcon className="h-2.5 w-2.5" />
+                          </button>
+                        </span>
+                      ) : null
+                    })}
+                  </div>
+                )}
               </div>
 
               <div className="space-y-1.5">
@@ -3752,7 +3808,7 @@ function SocialContentTab({ mediaItems }: { mediaItems: HotelMediaItem[] }) {
                   <div>
                     <Label>Автоматизация комментариев</Label>
                     <p className="text-xs text-muted-foreground mt-1">
-                      Отправляет один личный ответ через Meta API. Сам комментарий не создаёт лид и не запускает follow-up.
+                      Отправляет один личный ответ через Meta API. Переписка появится в Коммуникациях, но не входит в воронку продаж и не запускает follow-up.
                     </p>
                   </div>
                   <Switch

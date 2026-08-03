@@ -226,10 +226,11 @@ class SocialContentItem(models.Model):
         null=True,
         help_text='Room type if this content is about a specific room category',
     )
-    playbook_keys = models.JSONField(
-        default=list,
+    playbooks = models.ManyToManyField(
+        'hotel_info.Playbook',
         blank=True,
-        help_text='Optional playbook keys to prefer when a guest replies to this content',
+        related_name='social_content_items',
+        help_text='Playbooks to prefer when a guest replies to this content',
     )
     auto_tags = models.JSONField(default=list, blank=True)
     reply_guidance = models.TextField(

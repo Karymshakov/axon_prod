@@ -897,7 +897,8 @@ export interface SocialContentItem {
   room_category: RoomCategory | null
   effective_category: string
   effective_room_category: string
-  playbook_keys: string[]
+  playbooks: number[]
+  playbook_names: string[]
   auto_tags: string[]
   reply_guidance: string
   manager_notes: string
@@ -933,7 +934,7 @@ export interface UpdateSocialContentData {
   review_status?: SocialContentReviewStatus
   category?: string
   room_category?: RoomCategory | null
-  playbook_keys?: string[]
+  playbooks?: number[]
   auto_tags?: string[]
   reply_guidance?: string
   manager_notes?: string

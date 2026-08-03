@@ -80,6 +80,7 @@ class SocialContentItemSerializer(serializers.ModelSerializer):
     effective_category = serializers.CharField(read_only=True)
     effective_room_category = serializers.CharField(read_only=True)
     fingerprint_count = serializers.SerializerMethodField()
+    playbook_names = serializers.SerializerMethodField()
 
     class Meta:
         model = SocialContentItem
@@ -105,7 +106,8 @@ class SocialContentItemSerializer(serializers.ModelSerializer):
             'room_category',
             'effective_category',
             'effective_room_category',
-            'playbook_keys',
+            'playbooks',
+            'playbook_names',
             'auto_tags',
             'reply_guidance',
             'manager_notes',
@@ -131,7 +133,12 @@ class SocialContentItemSerializer(serializers.ModelSerializer):
             'created_at',
             'updated_at',
         ]
-        read_only_fields = ['id', 'source', 'fingerprint_count', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'source', 'fingerprint_count', 'playbook_names', 'created_at', 'updated_at']
+
+    def get_playbook_names(self, obj):
+        if not getattr(obj, 'pk', None):
+            return []
+        return list(obj.playbooks.values_list('name', flat=True))
 
     def get_fingerprint_count(self, obj):
         if not getattr(obj, 'pk', None):

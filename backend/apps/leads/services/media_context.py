@@ -162,7 +162,7 @@ def _has_social_semantic_context(item: SocialContentItem) -> bool:
         or item.effective_room_category
         or item.linked_media_item_id
         or item.reply_guidance
-        or item.playbook_keys
+        or item.playbooks.exists()
     )
 
 
@@ -351,7 +351,7 @@ def _context_from_social_content(item: SocialContentItem, *, match_method: str, 
         'linked_media_url': linked_media_url,
         'category': category,
         'room_category': room_category or '',
-        'playbook_keys': item.playbook_keys if isinstance(item.playbook_keys, list) else [],
+        'playbook_keys': list(item.playbooks.values_list('name', flat=True)),
         'reply_guidance': item.reply_guidance,
     }
 
