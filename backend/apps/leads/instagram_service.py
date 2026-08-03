@@ -8,6 +8,21 @@ logger = logging.getLogger(__name__)
 INSTAGRAM_GRAPH_MESSAGES_BASE = 'https://graph.instagram.com/v25.0'
 
 
+class InstagramMessagingWindowError(Exception):
+    """Meta rejected the send because the 24-hour messaging window is closed —
+    the business can't message first; the guest must write again (or the
+    message needs an approved message tag Meta hasn't granted us)."""
+
+
+def _messaging_window_closed(response) -> bool:
+    """error code 10 / subcode 2534022 == outside the 24h messaging window."""
+    try:
+        err = (response.json() or {}).get('error') or {}
+    except Exception:
+        return False
+    return err.get('code') == 10 and err.get('error_subcode') == 2534022
+
+
 class InstagramService:
     """Service for interacting with Instagram Graph API (Instagram Login flow)."""
 
@@ -69,13 +84,21 @@ class InstagramService:
             }
         except requests.exceptions.RequestException as e:
             error_detail = ""
+            window_closed = False
             if hasattr(e, 'response') and e.response is not None:
                 try:
                     error_detail = f" - Response: {e.response.text}"
                 except Exception:
                     pass
+                window_closed = _messaging_window_closed(e.response)
             logger.error(f"Failed to send Instagram message to {recipient_id}: {e}{error_detail}")
             if raise_exception:
+                if window_closed:
+                    raise InstagramMessagingWindowError(
+                        'Instagram не позволяет написать первым: гость не писал последние '
+                        '24 часа (правило Meta о "окне обмена сообщениями"). Дождитесь нового '
+                        'сообщения от гостя — тогда ответ снова станет доступен.'
+                    )
                 raise Exception(f"Meta API error: {e.response.text if hasattr(e, 'response') and e.response is not None else str(e)}")
             return None
 

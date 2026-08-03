@@ -8,7 +8,7 @@ from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from rest_framework import status
 from .telegram_service import telegram_service
-from .instagram_service import instagram_service
+from .instagram_service import instagram_service, InstagramMessagingWindowError
 from .whatsapp_service import whatsapp_service
 from .ringcentral_service import ringcentral_service
 from .models import TelegramConfig, RingCentralConfig, AIConfig, InstagramAppConfig, WhatsAppAppConfig
@@ -854,6 +854,14 @@ def send_instagram_message_from_comms(request):
             'success': False,
             'error': 'Lead not found'
         }, status=status.HTTP_404_NOT_FOUND)
+    except InstagramMessagingWindowError as e:
+        # Not a server error — Meta's 24h messaging-window policy, expected and
+        # client-actionable. Log at info level to avoid alerting on it.
+        logger.info(f"Instagram send blocked by messaging window: {e}")
+        return Response({
+            'success': False,
+            'error': str(e),
+        }, status=status.HTTP_400_BAD_REQUEST)
     except Exception as e:
         logger.error(f"Error sending Instagram message: {e}", exc_info=True)
         return Response({
